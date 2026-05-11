@@ -272,7 +272,7 @@ GET    /api/ws                           WebSocket: server pushes { type: "hc_up
 
 ---
 
-## 7. Frontend Routes
+## 7. Frontend Routes & Shell
 
 | Path | Component | Notes |
 |---|---|---|
@@ -281,6 +281,26 @@ GET    /api/ws                           WebSocket: server pushes { type: "hc_up
 | `/settings` | `Settings` | Theme editor, grid columns, healthcheck interval, password change. |
 
 The app fetches `/api/bootstrap` once on load. If `needs_setup` → redirect to `/auth` showing the setup form. If unauthenticated → redirect to `/auth` showing login.
+
+### Navbar
+Rendered on all protected pages. Left: app title / logo. Right (in order):
+- **Settings** — small gear icon, links to `/settings`.
+- **Logout** — small leave/exit icon, calls `POST /api/auth/logout` then redirects to `/auth`.
+
+The navbar is hidden on `/auth` (login/setup is a centered card with no chrome).
+
+### Dashboard Card UX
+- Clicking the **primary host** opens that URL in a new tab (`target="_blank" rel="noopener noreferrer"`).
+- Clicking the **alt host** opens the alt URL in a new tab.
+- **Edit** icon (top-right of card) opens an inline modal with the service form.
+- **Delete** icon (top-right of card) opens a confirmation dialog before calling DELETE.
+- **Status dots** (small colored circles) render next to each host label: green=up, red=down, grey=disabled.
+- Categories show their `border_color` as a 2px frame and a title bar at the top with edit/delete icons (same confirmation flow).
+
+### Auth Page Layout
+Centered card (max-width 400px) on dark background. No navbar. Card contents depend on bootstrap state:
+- **Login mode:** username, password, "Login" button, "Forgot password?" link below (opens reset-instructions modal).
+- **Setup mode:** username, password, repeat password, "Setup" button. Shown only when `needs_setup=true`.
 
 ---
 
