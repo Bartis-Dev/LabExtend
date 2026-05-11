@@ -13,7 +13,11 @@ import { useDashboardGrid } from '@/components/Dashboard/useDashboardGrid';
 import { FolderIcon, PlusIcon } from '@/components/icons';
 
 const DEFAULT_COLS = 6;
-const ROW_HEIGHT = 90;
+const ROW_HEIGHT = 110;
+const MARGIN = 10;
+const CATEGORY_TITLE_PX = 36;
+const CATEGORY_INNER_PADDING = 8;
+const CATEGORY_INNER_MARGIN = 8;
 
 export default function Dashboard() {
   const [addServiceOpen, setAddServiceOpen] = useState(false);
@@ -44,7 +48,10 @@ export default function Dashboard() {
     safeCols,
   );
 
-  const cellPx = (width - (safeCols + 1) * 10) / safeCols;
+  // cellPx: width of one outer grid cell, derived from container width and
+  // the active column count. Drives both the outer cards and the inner-grid
+  // sizing math so 1 inner cell ≈ 1 outer cell visually.
+  const cellPx = (width - (safeCols - 1) * MARGIN) / safeCols;
 
   const uncategorized = (services.data ?? []).filter((s) => s.category_id == null);
   const servicesByCategory = new Map<number, typeof uncategorized>();
@@ -94,34 +101,46 @@ export default function Dashboard() {
             cols={safeCols}
             rowHeight={ROW_HEIGHT}
             width={width}
-            margin={[10, 10]}
+            margin={[MARGIN, MARGIN]}
             containerPadding={[0, 0]}
             compactType={null}
             preventCollision={false}
             isResizable
             isDraggable
-            draggableCancel="button, a, input, select, textarea"
+            draggableHandle=".rgl-outer-drag"
+            draggableCancel="button, a, input, select, textarea, .no-drag"
             onLayoutChange={(l) => flushOuter(l)}
           >
             {(categories.data ?? []).map((c) => {
-              // Inner width comes from outer cell math: c.layout.w cells wide minus inner padding.
-              const innerW = Math.max(80, cellPx * c.layout.w + 10 * (c.layout.w - 1) - 8);
+              // Outer box size for this category, in pixels.
+              const outerW = cellPx * c.layout.w + MARGIN * (c.layout.w - 1);
+              const outerH = ROW_HEIGHT * c.layout.h + MARGIN * (c.layout.h - 1);
+              // Inner grid usable area (minus title bar + inner padding).
+              const innerW = Math.max(80, outerW - CATEGORY_INNER_PADDING * 2);
               const innerCols = Math.max(1, c.layout.w);
+              const usableH = outerH - CATEGORY_TITLE_PX - CATEGORY_INNER_PADDING * 2;
+              const innerRows = Math.max(1, c.layout.h);
+              const innerRowHeight = Math.max(
+                50,
+                (usableH - CATEGORY_INNER_MARGIN * (innerRows - 1)) / innerRows,
+              );
               return (
                 <div key={`c-${c.id}`}>
                   <CategoryCard
                     category={c}
                     services={servicesByCategory.get(c.id) ?? []}
-                    cellPx={cellPx * 0.55}
                     innerWidth={innerW}
                     innerCols={innerCols}
+                    innerRowHeight={innerRowHeight}
+                    innerMargin={CATEGORY_INNER_MARGIN}
+                    innerPadding={CATEGORY_INNER_PADDING}
                     onInnerLayoutChange={flushInner}
                   />
                 </div>
               );
             })}
             {uncategorized.map((s) => (
-              <div key={`s-${s.id}`}>
+              <div key={`s-${s.id}`} className="rgl-outer-drag">
                 <ServiceCard service={s} />
               </div>
             ))}

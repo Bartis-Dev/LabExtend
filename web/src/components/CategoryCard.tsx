@@ -10,36 +10,39 @@ import type { Category, Service } from '@/api/types';
 type Props = {
   category: Category;
   services: Service[];
-  cellPx: number;
-  // Inner-grid width and column count are derived from outer width and category.layout.w
   innerWidth: number;
   innerCols: number;
+  innerRowHeight: number;
+  innerMargin: number;
+  innerPadding: number;
   onInnerLayoutChange: (catID: number, layouts: Layout[]) => void;
 };
 
 export function CategoryCard({
   category,
   services,
-  cellPx,
   innerWidth,
   innerCols,
+  innerRowHeight,
+  innerMargin,
+  innerPadding,
   onInnerLayoutChange,
 }: Props) {
   const [editOpen, setEditOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const del = useDeleteCategory();
 
-  // Derive the inner GridLayout layout array from the services in this category.
-  // Defensive clamps: width never exceeds innerCols; positions never escape the box.
+  // Defensive clamp for inner items.
   const innerLayout: Layout[] = services.map((s) => {
-    const w = Math.min(s.layout.w, innerCols);
-    const x = Math.min(s.layout.x, Math.max(0, innerCols - w));
+    const w = Math.min(Math.max(1, s.layout.w), innerCols);
+    const h = Math.max(1, s.layout.h);
+    const x = Math.min(Math.max(0, s.layout.x), Math.max(0, innerCols - w));
     return {
       i: `s-${s.id}`,
       x,
-      y: s.layout.y,
+      y: Math.max(0, s.layout.y),
       w,
-      h: Math.max(1, s.layout.h),
+      h,
       minW: 1,
       minH: 1,
     };
@@ -47,27 +50,26 @@ export function CategoryCard({
 
   return (
     <div
-      className="flex h-full flex-col overflow-hidden rounded-lg border-2 bg-bg-card/60"
+      className="flex h-full flex-col overflow-hidden rounded-lg border-2 bg-bg-card/40"
       style={{ borderColor: category.border_color }}
     >
+      {/* Title bar — only this is a drag handle for the outer grid. */}
       <div
-        className="flex items-center justify-between gap-2 border-b px-3 py-1.5"
+        className="rgl-outer-drag flex h-9 shrink-0 cursor-move items-center justify-between gap-2 border-b px-3"
         style={{ borderColor: category.border_color }}
       >
-        <div className="cat-drag-handle flex-1 cursor-move truncate text-sm font-semibold">
-          {category.name}
-        </div>
-        <div className="flex items-center gap-1">
+        <div className="flex-1 truncate text-sm font-semibold">{category.name}</div>
+        <div className="flex items-center gap-0.5">
           <button
             onClick={(e) => {
               e.stopPropagation();
               setEditOpen(true);
             }}
             onMouseDown={(e) => e.stopPropagation()}
-            className="rounded p-1 text-fg-muted hover:bg-bg-elevated hover:text-fg"
+            className="no-drag rounded p-1 text-fg-muted hover:bg-bg-elevated hover:text-fg"
             aria-label="Edit category"
           >
-            <EditIcon width={14} height={14} />
+            <EditIcon width={13} height={13} />
           </button>
           <button
             onClick={(e) => {
@@ -75,27 +77,34 @@ export function CategoryCard({
               setConfirmOpen(true);
             }}
             onMouseDown={(e) => e.stopPropagation()}
-            className="rounded p-1 text-fg-muted hover:bg-bg-elevated hover:text-danger"
+            className="no-drag rounded p-1 text-fg-muted hover:bg-bg-elevated hover:text-danger"
             aria-label="Delete category"
           >
-            <TrashIcon width={14} height={14} />
+            <TrashIcon width={13} height={13} />
           </button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden p-1">
+      {/* Inner body — NOT a drag handle. Service cards inside get their own
+          inner grid for repositioning. Padding gives breathing room between
+          frame and inner cards. */}
+      <div
+        className="no-drag flex-1 overflow-hidden"
+        style={{ padding: innerPadding }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         {services.length === 0 ? (
           <div className="grid h-full place-items-center text-xs text-fg-muted">
-            Empty — assign a service via its edit form.
+            Empty — add services here via their form or drag one in.
           </div>
         ) : (
           <GridLayout
             className="layout"
             layout={innerLayout}
             cols={innerCols}
-            rowHeight={cellPx}
+            rowHeight={innerRowHeight}
             width={innerWidth}
-            margin={[6, 6]}
+            margin={[innerMargin, innerMargin]}
             containerPadding={[0, 0]}
             compactType={null}
             preventCollision={false}
