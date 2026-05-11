@@ -5,7 +5,6 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 
@@ -20,9 +19,10 @@ func Open(dataDir string) (*sql.DB, error) {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 	dbPath := filepath.Join(dataDir, "labextend.db")
-	// modernc.org/sqlite uses URI pragmas like _pragma=journal_mode(WAL).
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)",
-		url.PathEscape(dbPath))
+	// modernc.org/sqlite accepts <path>?_pragma=... — using a plain path
+	// avoids URI-escape mishandling of leading slashes on POSIX systems.
+	dsn := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)",
+		dbPath)
 	d, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
