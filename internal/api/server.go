@@ -7,6 +7,7 @@ import (
 
 	"github.com/Bartis-Dev/LabExtend/internal/auth"
 	"github.com/Bartis-Dev/LabExtend/internal/config"
+	hc "github.com/Bartis-Dev/LabExtend/internal/healthcheck"
 	"github.com/Bartis-Dev/LabExtend/internal/settings"
 )
 
@@ -19,6 +20,8 @@ type Server struct {
 	JWTSecret  []byte
 	LoginLimit *auth.Limiter
 	SetupLimit *auth.Limiter
+	Hub        *hc.Hub
+	Worker     *hc.Worker
 }
 
 // New constructs a Server with sensible rate-limiter defaults:

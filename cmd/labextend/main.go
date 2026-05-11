@@ -14,6 +14,7 @@ import (
 	"github.com/Bartis-Dev/LabExtend/internal/api"
 	"github.com/Bartis-Dev/LabExtend/internal/config"
 	"github.com/Bartis-Dev/LabExtend/internal/db"
+	"github.com/Bartis-Dev/LabExtend/internal/healthcheck"
 	"github.com/Bartis-Dev/LabExtend/internal/settings"
 	web "github.com/Bartis-Dev/LabExtend/web"
 )
@@ -57,7 +58,24 @@ func main() {
 		}
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	srv := api.New(database, cfg, st, []byte(jwtSecret))
+
+	// Healthcheck worker + hub. The interval can be overridden at runtime
+	// via PUT /api/settings; we honour the env-supplied default here.
+	hub := healthcheck.NewHub()
+	worker := &healthcheck.Worker{DB: database, Hub: hub, Interval: cfg.HealthcheckInterval}
+	if v, _ := st.Get(settings.KeyHealthcheckInterval); v != "" {
+		if d, err := config.ParseDuration(v); err == nil {
+			worker.SetInterval(d)
+		}
+	}
+	srv.Hub = hub
+	srv.Worker = worker
+	go worker.Run(ctx)
+
 	webHandler := spaHandler(http.FS(web.FS()))
 	handler := srv.Routes(webHandler)
 
@@ -66,9 +84,6 @@ func main() {
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	go func() {
 		slog.Info("server listening",

@@ -53,7 +53,12 @@ func (s *Server) Routes(webHandler http.Handler) http.Handler {
 			r.Delete("/categories/{id}", s.deleteCategory)
 
 			r.Put("/layout", s.handleLayoutBulk)
+
+			r.Get("/healthcheck/status", s.handleHCStatus)
 		})
+
+		// WebSocket: own auth path that runs before websocket.Accept owns the writer.
+		r.Get("/ws", s.wsAuth(s.handleWS))
 	})
 
 	// SPA fallback: serve the embedded frontend for anything not under /api.

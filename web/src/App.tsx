@@ -5,6 +5,7 @@ import { useAuth } from '@/store/auth';
 import { useTheme } from '@/store/theme';
 import { ThemeStyle } from '@/components/ThemeStyle';
 import { Layout } from '@/components/Layout';
+import { HealthWatcher } from '@/components/HealthWatcher';
 import Auth from '@/pages/Auth';
 import Dashboard from '@/pages/Dashboard';
 import Settings from '@/pages/Settings';
@@ -45,6 +46,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeStyle />
+      <HealthWatcher />
       <BrowserRouter>
         <Routes>
           <Route
