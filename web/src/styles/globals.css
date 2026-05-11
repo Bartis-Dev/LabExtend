@@ -1,6 +1,24 @@
+@import 'react-grid-layout/css/styles.css';
+@import 'react-resizable/css/styles.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* react-grid-layout dark-theme tweaks */
+.react-grid-item.react-grid-placeholder {
+  background: var(--accent) !important;
+  opacity: 0.2;
+  border-radius: 8px;
+}
+.react-grid-item > .react-resizable-handle {
+  background-image: none;
+}
+.react-grid-item > .react-resizable-handle::after {
+  border-right: 2px solid var(--fg-muted);
+  border-bottom: 2px solid var(--fg-muted);
+  opacity: 0.5;
+}
 
 :root {
   --bg: #0a0a0a;
