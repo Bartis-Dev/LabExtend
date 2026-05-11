@@ -28,6 +28,11 @@ func (s *Server) Routes(webHandler http.Handler) http.Handler {
 		r.Post("/auth/login", s.handleLogin)
 		r.Post("/auth/logout", s.handleLogout)
 
+		// Icons are served publicly so <img> tags don't need cookie round-trips
+		// and CDN/reverse-proxy caches stay effective. UUID filenames mean a
+		// caller cannot enumerate the directory.
+		r.Get("/icons/{filename}", s.serveIcon)
+
 		// Protected.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
@@ -39,6 +44,8 @@ func (s *Server) Routes(webHandler http.Handler) http.Handler {
 			r.Get("/services/{id}", s.getService)
 			r.Put("/services/{id}", s.updateService)
 			r.Delete("/services/{id}", s.deleteService)
+			r.Post("/services/{id}/icon", s.uploadIcon)
+			r.Delete("/services/{id}/icon", s.deleteIcon)
 
 			r.Get("/categories", s.listCategories)
 			r.Post("/categories", s.createCategory)
