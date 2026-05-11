@@ -22,7 +22,18 @@ func (s *Server) Routes(webHandler http.Handler) http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/healthz", s.handleHealthz)
 		r.Get("/bootstrap", s.handleBootstrap)
-		// Auth + protected routes registered in later tasks.
+
+		// Public auth + setup.
+		r.Post("/setup", s.handleSetup)
+		r.Post("/auth/login", s.handleLogin)
+		r.Post("/auth/logout", s.handleLogout)
+
+		// Protected.
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireAuth)
+			r.Get("/auth/me", s.handleMe)
+			r.Put("/auth/password", s.handleChangePassword)
+		})
 	})
 
 	// SPA fallback: serve the embedded frontend for anything not under /api.
