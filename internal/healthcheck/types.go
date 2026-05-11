@@ -17,10 +17,10 @@ type ServiceStatus struct {
 	Alt     HostStatus `json:"alt"`
 }
 
-// StatusMap maps service IDs to their current ServiceStatus snapshot.
-type StatusMap map[int64]ServiceStatus
+// StatusMap maps service UUIDs to their current ServiceStatus snapshot.
+type StatusMap map[string]ServiceStatus
 
-// Equal returns true when both maps contain the same service IDs with
+// Equal returns true when both maps contain the same service UUIDs with
 // identical status pairs.
 func (m StatusMap) Equal(other StatusMap) bool {
 	if len(m) != len(other) {
@@ -36,7 +36,7 @@ func (m StatusMap) Equal(other StatusMap) bool {
 
 // Service is the minimal projection of a service row the worker needs.
 type Service struct {
-	ID               int64
+	UUID             string
 	HostPrimary      string
 	PortPrimary      *int
 	HostAlt          *string

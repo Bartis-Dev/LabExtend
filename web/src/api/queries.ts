@@ -30,7 +30,7 @@ export function useCreateService() {
 export function useUpdateService() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { id: number; input: ServiceInput }) =>
+    mutationFn: (args: { id: string; input: ServiceInput }) =>
       api.put<Service>(`/api/services/${args.id}`, args.input),
     onSuccess: () => qc.invalidateQueries({ queryKey: servicesKey }),
   });
@@ -39,7 +39,7 @@ export function useUpdateService() {
 export function useDeleteService() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => api.delete<void>(`/api/services/${id}`),
+    mutationFn: (id: string) => api.delete<void>(`/api/services/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: servicesKey }),
   });
 }
@@ -83,7 +83,7 @@ export function useDeleteCategory() {
 // --- Bulk layout ----------------------------------------------------------
 
 export type LayoutPayload = {
-  services: { id: number; x: number; y: number; w: number; h: number; category_id?: number | null }[];
+  services: { id: string; x: number; y: number; w: number; h: number; category_id?: number | null }[];
   categories: { id: number; x: number; y: number; w: number; h: number }[];
 };
 

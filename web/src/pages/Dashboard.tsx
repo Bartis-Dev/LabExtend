@@ -41,6 +41,7 @@ export default function Dashboard() {
   const { outerLayout, flushOuter, flushInner } = useDashboardGrid(
     services.data,
     categories.data,
+    safeCols,
   );
 
   const cellPx = (width - (safeCols + 1) * 10) / safeCols;

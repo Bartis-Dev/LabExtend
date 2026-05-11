@@ -84,7 +84,7 @@ func probeAll(ctx context.Context, services []Service) StatusMap {
 			defer func() { <-sem }()
 			ss := probeOne(ctx, svc)
 			mu.Lock()
-			out[svc.ID] = ss
+			out[svc.UUID] = ss
 			mu.Unlock()
 		}()
 	}
@@ -130,7 +130,7 @@ func probeHost(ctx context.Context, host string, port *int, ping, hc bool, hcURL
 
 func loadServices(db *sql.DB) ([]Service, error) {
 	rows, err := db.Query(`SELECT
-		id, host_primary, port_primary, host_alt, port_alt,
+		uuid, host_primary, port_primary, host_alt, port_alt,
 		ping_primary, ping_alt,
 		hc_primary_enabled, hc_primary_url, hc_alt_enabled, hc_alt_url
 		FROM services`)
@@ -143,7 +143,7 @@ func loadServices(db *sql.DB) ([]Service, error) {
 		var s Service
 		var pingP, pingA, hcPE, hcAE int
 		if err := rows.Scan(
-			&s.ID, &s.HostPrimary, &s.PortPrimary, &s.HostAlt, &s.PortAlt,
+			&s.UUID, &s.HostPrimary, &s.PortPrimary, &s.HostAlt, &s.PortAlt,
 			&pingP, &pingA, &hcPE, &s.HCPrimaryURL, &hcAE, &s.HCAltURL,
 		); err != nil {
 			return nil, err

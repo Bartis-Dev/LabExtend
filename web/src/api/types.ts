@@ -29,7 +29,7 @@ export type ChangePasswordReq = {
 export type LayoutRect = { x: number; y: number; w: number; h: number };
 
 export type Service = {
-  id: number;
+  id: string; // UUID (32-char hex)
   name: string;
   description: string;
   host_primary: string;
@@ -77,7 +77,9 @@ export type ThemeInput = {
 // Healthcheck
 export type HostStatus = 'up' | 'down' | 'n/a';
 export type ServiceStatus = { primary: HostStatus; alt: HostStatus };
-export type HealthMap = Record<number, ServiceStatus>;
+// Keyed by service UUID (string). Backend currently sends numeric internal IDs
+// via WS; the worker is updated separately to emit UUID keys.
+export type HealthMap = Record<string, ServiceStatus>;
 
 // Settings
 export type Settings = Record<string, string>;
