@@ -13,7 +13,7 @@ import { useDashboardGrid } from '@/components/Dashboard/useDashboardGrid';
 import { FolderIcon, PlusIcon } from '@/components/icons';
 
 const DEFAULT_COLS = 6;
-const ROW_HEIGHT = 110;
+const ROW_HEIGHT = 90;
 
 export default function Dashboard() {
   const [addServiceOpen, setAddServiceOpen] = useState(false);

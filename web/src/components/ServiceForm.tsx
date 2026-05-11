@@ -26,7 +26,7 @@ function emptyInput(): ServiceInput {
     host_alt: null,
     port_alt: null,
     category_id: null,
-    layout: { x: 0, y: 0, w: 1, h: 1 },
+    layout: { x: 0, y: 0, w: 2, h: 2 },
     ping_primary: false,
     ping_alt: false,
     hc_primary_enabled: false,
@@ -130,7 +130,7 @@ export function ServiceForm({ open, onClose, initial }: Props) {
       open={open}
       onClose={onClose}
       title={initial ? `Edit ${initial.name}` : 'Add service'}
-      size="md"
+      size="lg"
     >
       <form onSubmit={submit} className="space-y-4">
         <Row>
@@ -165,28 +165,37 @@ export function ServiceForm({ open, onClose, initial }: Props) {
               value={form.host_primary}
               onChange={(v) => set('host_primary', v)}
               required
+              placeholder="https://app.lan or app.lan or 192.168.1.50"
             />
             <NumField
               label="Port (optional)"
               value={form.port_primary ?? null}
               onChange={(v) => set('port_primary', v)}
+              placeholder="e.g. 25565 for Minecraft"
             />
           </Row>
+          <p className="text-xs text-fg-muted">
+            Scheme defaults: <code>https://</code> → 443, <code>http://</code> → 80, no scheme → 80.
+            Set the port field to override (e.g. Minecraft on 25565).
+          </p>
           <Toggle
-            label="Enable ping (TCP)"
+            label="Enable ping (TCP connect)"
             value={form.ping_primary}
             onChange={(v) => set('ping_primary', v)}
+            hint="Works for any TCP service — Minecraft, SSH, databases, HTTP."
           />
           <Toggle
-            label="Enable HTTP healthcheck"
+            label="Enable HTTP healthcheck (2xx/3xx = up)"
             value={form.hc_primary_enabled}
             onChange={(v) => set('hc_primary_enabled', v)}
+            hint="Only for HTTP(S) services. Skip this for Minecraft etc."
           />
           {form.hc_primary_enabled && (
             <Field
-              label="Healthcheck URL (defaults to primary host)"
+              label="Healthcheck URL override (default: derived from host above)"
               value={form.hc_primary_url ?? ''}
               onChange={(v) => set('hc_primary_url', v || null)}
+              placeholder="https://app.lan/health"
             />
           )}
         </Section>
@@ -197,6 +206,7 @@ export function ServiceForm({ open, onClose, initial }: Props) {
               label="Host or URL"
               value={form.host_alt ?? ''}
               onChange={(v) => set('host_alt', v || null)}
+              placeholder="e.g. internal IP for the same service"
             />
             <NumField
               label="Port (optional)"
@@ -268,11 +278,13 @@ function Field({
   value,
   onChange,
   required,
+  placeholder,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   required?: boolean;
+  placeholder?: string;
 }) {
   return (
     <label className="block">
@@ -281,6 +293,7 @@ function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required={required}
+        placeholder={placeholder}
         className="w-full rounded border border-border bg-bg-elevated px-3 py-2 outline-none focus:border-accent"
       />
     </label>
@@ -291,10 +304,12 @@ function NumField({
   label,
   value,
   onChange,
+  placeholder,
 }: {
   label: string;
   value: number | null;
   onChange: (v: number | null) => void;
+  placeholder?: string;
 }) {
   return (
     <label className="block">
@@ -308,6 +323,7 @@ function NumField({
         }}
         min={1}
         max={65535}
+        placeholder={placeholder}
         className="w-full rounded border border-border bg-bg-elevated px-3 py-2 outline-none focus:border-accent"
       />
     </label>
@@ -318,21 +334,26 @@ function Toggle({
   label,
   value,
   onChange,
+  hint,
 }: {
   label: string;
   value: boolean;
   onChange: (v: boolean) => void;
+  hint?: string;
 }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 text-sm">
-      <input
-        type="checkbox"
-        checked={value}
-        onChange={(e) => onChange(e.target.checked)}
-        className="h-4 w-4 accent-accent"
-      />
-      {label}
-    </label>
+    <div>
+      <label className="flex cursor-pointer items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={value}
+          onChange={(e) => onChange(e.target.checked)}
+          className="h-4 w-4 accent-accent"
+        />
+        {label}
+      </label>
+      {hint && <p className="ml-6 mt-0.5 text-xs text-fg-muted">{hint}</p>}
+    </div>
   );
 }
 
