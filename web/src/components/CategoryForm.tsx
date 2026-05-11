@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
+import Wheel from '@uiw/react-color-wheel';
+import { hexToHsva, hsvaToHex } from '@uiw/color-convert';
 import { Modal } from './Modal';
-import { useCreateCategory, useUpdateCategory } from '@/api/queries';
+import {
+  useCreateCategory,
+  useSettings,
+  useUpdateCategory,
+} from '@/api/queries';
 import type { Category, CategoryInput } from '@/api/types';
 import { ApiError } from '@/api/client';
 
@@ -11,10 +17,17 @@ type Props = {
   defaultLayout?: { x: number; y: number; w: number; h: number };
 };
 
+const DEFAULT_COLS = 6;
+const MAX_HEIGHT = 10;
+
 export function CategoryForm({ open, onClose, initial, defaultLayout }: Props) {
+  const settings = useSettings();
+  const cols = clampInt(Number(settings.data?.grid_cols ?? DEFAULT_COLS), 4, 12);
+
   const [name, setName] = useState('');
   const [borderColor, setBorderColor] = useState('#3b82f6');
-  const [size, setSize] = useState<'3x2' | '2x2'>('3x2');
+  const [w, setW] = useState(3);
+  const [h, setH] = useState(2);
   const [error, setError] = useState<string | null>(null);
   const create = useCreateCategory();
   const update = useUpdateCategory();
@@ -25,24 +38,35 @@ export function CategoryForm({ open, onClose, initial, defaultLayout }: Props) {
     if (initial) {
       setName(initial.name);
       setBorderColor(initial.border_color);
-      setSize(initial.layout.w === 2 ? '2x2' : '3x2');
+      setW(initial.layout.w);
+      setH(initial.layout.h);
     } else {
       setName('');
       setBorderColor('#3b82f6');
-      setSize('3x2');
+      setW(3);
+      setH(2);
     }
   }, [open, initial]);
+
+  // Clamp w/h to current grid bounds whenever cols changes.
+  const safeW = clampInt(w, 1, cols);
+  const safeH = clampInt(h, 1, MAX_HEIGHT);
+  // The "1x2 or 2x1" minimum the spec calls for: enforce w*h >= 2.
+  const validSize = safeW * safeH >= 2;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    const sizeMap = { '3x2': { w: 3, h: 2 }, '2x2': { w: 2, h: 2 } } as const;
+    if (!validSize) {
+      setError('Minimum size is 1×2 or 2×1.');
+      return;
+    }
     const payload: CategoryInput = {
       name,
       border_color: borderColor,
       layout: initial
-        ? { ...initial.layout, ...sizeMap[size] }
-        : { x: defaultLayout?.x ?? 0, y: defaultLayout?.y ?? 0, ...sizeMap[size] },
+        ? { ...initial.layout, w: safeW, h: safeH }
+        : { x: defaultLayout?.x ?? 0, y: defaultLayout?.y ?? 0, w: safeW, h: safeH },
     };
     try {
       if (initial) {
@@ -63,53 +87,86 @@ export function CategoryForm({ open, onClose, initial, defaultLayout }: Props) {
       open={open}
       onClose={onClose}
       title={initial ? `Edit ${initial.name}` : 'Add category'}
-      size="sm"
+      size="md"
     >
-      <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={submit} className="space-y-5">
         <label className="block">
-          <span className="mb-1 block text-xs text-fg-muted">Name</span>
+          <span className="mb-1 block text-xs uppercase tracking-wide text-fg-muted">
+            Name
+          </span>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
             autoFocus
+            placeholder="e.g. Media, Network, Tools"
             className="w-full rounded border border-border bg-bg-elevated px-3 py-2 outline-none focus:border-accent"
           />
         </label>
 
-        <label className="block">
-          <span className="mb-1 block text-xs text-fg-muted">Border color</span>
-          <div className="flex items-center gap-2">
-            <input
-              type="color"
-              value={borderColor}
-              onChange={(e) => setBorderColor(e.target.value)}
-              className="h-9 w-12 cursor-pointer rounded border border-border bg-bg-elevated"
-            />
-            <input
-              value={borderColor}
-              onChange={(e) => setBorderColor(e.target.value)}
-              className="flex-1 rounded border border-border bg-bg-elevated px-3 py-2 outline-none focus:border-accent"
-            />
-          </div>
-        </label>
-
-        {!initial && (
-          <label className="block">
-            <span className="mb-1 block text-xs text-fg-muted">Default size</span>
-            <select
-              value={size}
-              onChange={(e) => setSize(e.target.value as '3x2' | '2x2')}
-              className="w-full rounded border border-border bg-bg-elevated px-3 py-2 outline-none focus:border-accent"
-            >
-              <option value="3x2">3 × 2</option>
-              <option value="2x2">2 × 2</option>
-            </select>
-            <span className="mt-1 block text-xs text-fg-muted">
-              You can resize the category at any time by dragging its bottom-right corner.
+        <div className="grid grid-cols-2 gap-5">
+          <div>
+            <span className="mb-2 block text-xs uppercase tracking-wide text-fg-muted">
+              Border color
             </span>
-          </label>
-        )}
+            <div className="rounded-lg border border-border bg-bg-elevated p-3">
+              <div className="grid place-items-center">
+                <Wheel
+                  width={180}
+                  height={180}
+                  color={hexToHsva(borderColor)}
+                  onChange={(c) => setBorderColor(hsvaToHex(c.hsva))}
+                />
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                <div
+                  className="h-8 w-8 shrink-0 rounded border border-border"
+                  style={{ background: borderColor }}
+                />
+                <input
+                  value={borderColor}
+                  onChange={(e) => setBorderColor(e.target.value)}
+                  className="flex-1 rounded border border-border bg-bg-card px-2 py-1 text-sm font-mono outline-none focus:border-accent"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <span className="mb-2 block text-xs uppercase tracking-wide text-fg-muted">
+              Default size (grid units)
+            </span>
+            <div className="space-y-3 rounded-lg border border-border bg-bg-elevated p-3">
+              <NumberStepper
+                label="Width"
+                value={safeW}
+                onChange={setW}
+                min={1}
+                max={cols}
+                hint={`max ${cols} (grid width)`}
+              />
+              <NumberStepper
+                label="Height"
+                value={safeH}
+                onChange={setH}
+                min={1}
+                max={MAX_HEIGHT}
+                hint={`max ${MAX_HEIGHT}`}
+              />
+              <div className="border-t border-border pt-2 text-xs text-fg-muted">
+                Minimum total area: 1×2 or 2×1. Resize anytime by dragging the
+                bottom-right corner of the category.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="rounded border-2 px-4 py-3 text-sm"
+          style={{ borderColor }}
+        >
+          Preview — frame uses your border color.
+        </div>
 
         {error && (
           <div className="rounded border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -136,4 +193,63 @@ export function CategoryForm({ open, onClose, initial, defaultLayout }: Props) {
       </form>
     </Modal>
   );
+}
+
+function NumberStepper({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  hint,
+}: {
+  label: string;
+  value: number;
+  onChange: (n: number) => void;
+  min: number;
+  max: number;
+  hint?: string;
+}) {
+  const set = (n: number) => onChange(clampInt(n, min, max));
+  return (
+    <div>
+      <div className="mb-1 flex items-baseline justify-between">
+        <span className="text-xs text-fg-muted">{label}</span>
+        {hint && <span className="text-[10px] text-fg-muted/70">{hint}</span>}
+      </div>
+      <div className="flex items-stretch gap-1">
+        <button
+          type="button"
+          onClick={() => set(value - 1)}
+          className="w-9 rounded border border-border bg-bg-card hover:bg-bg-elevated disabled:opacity-30"
+          disabled={value <= min}
+          aria-label={`${label} minus`}
+        >
+          −
+        </button>
+        <input
+          type="number"
+          value={value}
+          min={min}
+          max={max}
+          onChange={(e) => set(Number(e.target.value))}
+          className="w-16 rounded border border-border bg-bg-card px-2 py-1 text-center font-mono outline-none focus:border-accent"
+        />
+        <button
+          type="button"
+          onClick={() => set(value + 1)}
+          className="w-9 rounded border border-border bg-bg-card hover:bg-bg-elevated disabled:opacity-30"
+          disabled={value >= max}
+          aria-label={`${label} plus`}
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function clampInt(n: number, min: number, max: number): number {
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, Math.floor(n)));
 }
