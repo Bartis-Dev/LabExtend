@@ -20,11 +20,11 @@ func TestServicesCRUD(t *testing.T) {
 
 	// Create
 	body := map[string]any{
-		"name":          "Plex",
-		"description":   "",
-		"host_primary":  "https://plex.lan",
-		"layout":        map[string]int{"x": 0, "y": 0, "w": 1, "h": 1},
-		"ping_primary":  true,
+		"name":         "Plex",
+		"description":  "",
+		"host_primary": "https://plex.lan",
+		"layout":       map[string]int{"x": 0, "y": 0, "w": 1, "h": 1},
+		"ping_primary": true,
 	}
 	resp := postJSON(t, c, url+"/api/services", body)
 	if resp.StatusCode != 200 {
@@ -35,7 +35,7 @@ func TestServicesCRUD(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if created.ID == 0 || created.Name != "Plex" || !created.PingPrimary {
+	if created.UUID == "" || created.Name != "Plex" || !created.PingPrimary {
 		t.Errorf("created mismatch: %+v", created)
 	}
 
@@ -48,8 +48,8 @@ func TestServicesCRUD(t *testing.T) {
 		t.Errorf("list len = %d", len(list))
 	}
 
-	// Get by id
-	resp, _ = c.Get(url + "/api/services/" + itoa(created.ID))
+	// Get by uuid
+	resp, _ = c.Get(url + "/api/services/" + created.UUID)
 	if resp.StatusCode != 200 {
 		t.Errorf("get status %d", resp.StatusCode)
 	}
@@ -58,7 +58,7 @@ func TestServicesCRUD(t *testing.T) {
 	// Update
 	body["name"] = "Plex Server"
 	body["ping_primary"] = false
-	req, _ := http.NewRequest("PUT", url+"/api/services/"+itoa(created.ID), jsonBody(body))
+	req, _ := http.NewRequest("PUT", url+"/api/services/"+created.UUID, jsonBody(body))
 	req.Header.Set("content-type", "application/json")
 	resp, _ = c.Do(req)
 	if resp.StatusCode != 200 {
@@ -67,7 +67,7 @@ func TestServicesCRUD(t *testing.T) {
 	resp.Body.Close()
 
 	// Verify update
-	resp, _ = c.Get(url + "/api/services/" + itoa(created.ID))
+	resp, _ = c.Get(url + "/api/services/" + created.UUID)
 	var updated Service
 	_ = json.NewDecoder(resp.Body).Decode(&updated)
 	resp.Body.Close()
@@ -76,12 +76,36 @@ func TestServicesCRUD(t *testing.T) {
 	}
 
 	// Delete
-	req, _ = http.NewRequest("DELETE", url+"/api/services/"+itoa(created.ID), nil)
+	req, _ = http.NewRequest("DELETE", url+"/api/services/"+created.UUID, nil)
 	resp, _ = c.Do(req)
 	if resp.StatusCode != 204 {
 		t.Errorf("delete status %d", resp.StatusCode)
 	}
 	resp.Body.Close()
+}
+
+func TestDuplicateNamesAllowed(t *testing.T) {
+	url, c := setupAuthed(t)
+	for i := 0; i < 2; i++ {
+		resp := postJSON(t, c, url+"/api/services", map[string]any{
+			"name": "Plex", "host_primary": "plex.lan",
+			"layout": map[string]int{"x": 0, "y": 0, "w": 1, "h": 1},
+		})
+		if resp.StatusCode != 200 {
+			t.Fatalf("iter %d: create status %d", i, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+	resp, _ := c.Get(url + "/api/services")
+	var list []Service
+	_ = json.NewDecoder(resp.Body).Decode(&list)
+	resp.Body.Close()
+	if len(list) != 2 {
+		t.Errorf("expected 2 services with same name, got %d", len(list))
+	}
+	if list[0].UUID == list[1].UUID {
+		t.Error("duplicate names share UUID")
+	}
 }
 
 func TestCategoryDeleteDetachesServices(t *testing.T) {
@@ -117,7 +141,7 @@ func TestCategoryDeleteDetachesServices(t *testing.T) {
 	resp.Body.Close()
 
 	// Service should now be detached.
-	resp, _ = c.Get(url + "/api/services/" + itoa(svc.ID))
+	resp, _ = c.Get(url + "/api/services/" + svc.UUID)
 	var got Service
 	_ = json.NewDecoder(resp.Body).Decode(&got)
 	resp.Body.Close()
@@ -138,7 +162,7 @@ func TestLayoutBulkUpdate(t *testing.T) {
 
 	req, _ := http.NewRequest("PUT", url+"/api/layout", jsonBody(map[string]any{
 		"services": []map[string]any{
-			{"id": a.ID, "x": 2, "y": 3, "w": 2, "h": 1},
+			{"id": a.UUID, "x": 2, "y": 3, "w": 2, "h": 1},
 		},
 		"categories": []map[string]any{},
 	}))
@@ -149,7 +173,7 @@ func TestLayoutBulkUpdate(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	resp, _ = c.Get(url + "/api/services/" + itoa(a.ID))
+	resp, _ = c.Get(url + "/api/services/" + a.UUID)
 	var got Service
 	_ = json.NewDecoder(resp.Body).Decode(&got)
 	resp.Body.Close()

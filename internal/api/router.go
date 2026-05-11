@@ -41,11 +41,11 @@ func (s *Server) Routes(webHandler http.Handler) http.Handler {
 
 			r.Get("/services", s.listServices)
 			r.Post("/services", s.createService)
-			r.Get("/services/{id}", s.getService)
-			r.Put("/services/{id}", s.updateService)
-			r.Delete("/services/{id}", s.deleteService)
-			r.Post("/services/{id}/icon", s.uploadIcon)
-			r.Delete("/services/{id}/icon", s.deleteIcon)
+			r.Get("/services/{uuid}", s.getService)
+			r.Put("/services/{uuid}", s.updateService)
+			r.Delete("/services/{uuid}", s.deleteService)
+			r.Post("/services/{uuid}/icon", s.uploadIcon)
+			r.Delete("/services/{uuid}/icon", s.deleteIcon)
 
 			r.Get("/categories", s.listCategories)
 			r.Post("/categories", s.createCategory)

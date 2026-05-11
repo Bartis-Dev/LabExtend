@@ -41,7 +41,7 @@ func TestIconUploadAndServe(t *testing.T) {
 	part.Write(png)
 	mw.Close()
 
-	req, _ := http.NewRequest("POST", url+"/api/services/"+itoa(svc.ID)+"/icon", body)
+	req, _ := http.NewRequest("POST", url+"/api/services/"+svc.UUID+"/icon", body)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	resp, err := c.Do(req)
 	if err != nil {
@@ -82,7 +82,7 @@ func TestIconRejectsBadMime(t *testing.T) {
 	part.Write([]byte("hello world this is not an image"))
 	mw.Close()
 
-	req, _ := http.NewRequest("POST", url+"/api/services/"+itoa(svc.ID)+"/icon", body)
+	req, _ := http.NewRequest("POST", url+"/api/services/"+svc.UUID+"/icon", body)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	resp, _ = c.Do(req)
 	if resp.StatusCode != 400 {
@@ -132,7 +132,7 @@ func TestSVGUploadSanitises(t *testing.T) {
 	part.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><circle r="3"/></svg>`))
 	mw.Close()
 
-	req, _ := http.NewRequest("POST", url+"/api/services/"+itoa(svc.ID)+"/icon", body)
+	req, _ := http.NewRequest("POST", url+"/api/services/"+svc.UUID+"/icon", body)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	resp, _ = c.Do(req)
 	if resp.StatusCode != 200 {

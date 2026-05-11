@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -23,9 +22,9 @@ const (
 // MIME, sanitises SVG content, and writes a UUID-named file under
 // $DataDir/icons/. The new icon_path is then stored on the service row.
 func (s *Server) uploadIcon(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad id")
+	svcUUID := chi.URLParam(r, "uuid")
+	if svcUUID == "" {
+		writeError(w, http.StatusBadRequest, "missing uuid")
 		return
 	}
 	if err := r.ParseMultipartForm(maxIconBytes + 1024); err != nil {
@@ -89,32 +88,38 @@ func (s *Server) uploadIcon(w http.ResponseWriter, r *http.Request) {
 	rel := "icons/" + name
 	// Remove the previous icon file if any.
 	var prev *string
-	if err := s.DB.QueryRow(`SELECT icon_path FROM services WHERE id=?`, id).Scan(&prev); err == nil && prev != nil {
+	if err := s.DB.QueryRow(`SELECT icon_path FROM services WHERE uuid=?`, svcUUID).Scan(&prev); err == nil && prev != nil {
 		removeIcon(s.Cfg.DataDir, *prev)
 	}
-	if _, err := s.DB.Exec(`UPDATE services SET icon_path=?, updated_at=strftime('%s','now') WHERE id=?`, rel, id); err != nil {
+	res, err := s.DB.Exec(`UPDATE services SET icon_path=?, updated_at=strftime('%s','now') WHERE uuid=?`, rel, svcUUID)
+	if err != nil {
 		_ = os.Remove(dst)
 		writeError(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		_ = os.Remove(dst)
+		writeError(w, http.StatusNotFound, "service not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"icon_path": rel})
 }
 
 func (s *Server) deleteIcon(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad id")
+	svcUUID := chi.URLParam(r, "uuid")
+	if svcUUID == "" {
+		writeError(w, http.StatusBadRequest, "missing uuid")
 		return
 	}
 	var prev *string
-	if err := s.DB.QueryRow(`SELECT icon_path FROM services WHERE id=?`, id).Scan(&prev); err != nil {
+	if err := s.DB.QueryRow(`SELECT icon_path FROM services WHERE uuid=?`, svcUUID).Scan(&prev); err != nil {
 		writeError(w, http.StatusNotFound, "service not found")
 		return
 	}
 	if prev != nil {
 		removeIcon(s.Cfg.DataDir, *prev)
 	}
-	if _, err := s.DB.Exec(`UPDATE services SET icon_path=NULL, updated_at=strftime('%s','now') WHERE id=?`, id); err != nil {
+	if _, err := s.DB.Exec(`UPDATE services SET icon_path=NULL, updated_at=strftime('%s','now') WHERE uuid=?`, svcUUID); err != nil {
 		writeError(w, http.StatusInternalServerError, "db error")
 		return
 	}
