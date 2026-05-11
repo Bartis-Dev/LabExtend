@@ -33,6 +33,19 @@ func (s *Server) Routes(webHandler http.Handler) http.Handler {
 			r.Use(s.requireAuth)
 			r.Get("/auth/me", s.handleMe)
 			r.Put("/auth/password", s.handleChangePassword)
+
+			r.Get("/services", s.listServices)
+			r.Post("/services", s.createService)
+			r.Get("/services/{id}", s.getService)
+			r.Put("/services/{id}", s.updateService)
+			r.Delete("/services/{id}", s.deleteService)
+
+			r.Get("/categories", s.listCategories)
+			r.Post("/categories", s.createCategory)
+			r.Put("/categories/{id}", s.updateCategory)
+			r.Delete("/categories/{id}", s.deleteCategory)
+
+			r.Put("/layout", s.handleLayoutBulk)
 		})
 	})
 
