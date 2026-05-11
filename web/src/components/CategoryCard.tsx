@@ -6,6 +6,7 @@ import { CategoryForm } from './CategoryForm';
 import { ServiceCard } from './ServiceCard';
 import { useDeleteCategory } from '@/api/queries';
 import type { Category, Service } from '@/api/types';
+import { DND_MIME, readPayload, useMoveService } from './Dashboard/crossGridDnd';
 
 type Props = {
   category: Category;
@@ -30,7 +31,49 @@ export function CategoryCard({
 }: Props) {
   const [editOpen, setEditOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [dropActive, setDropActive] = useState(false);
   const del = useDeleteCategory();
+  const move = useMoveService();
+
+  const accepts = (e: React.DragEvent) =>
+    Array.from(e.dataTransfer.types).includes(DND_MIME);
+
+  const onDragOver = (e: React.DragEvent) => {
+    if (!accepts(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    if (!dropActive) setDropActive(true);
+  };
+
+  const onDragLeave = () => setDropActive(false);
+
+  const onDrop = (e: React.DragEvent) => {
+    setDropActive(false);
+    const p = readPayload(e);
+    if (!p) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (p.fromCategoryId === category.id) return; // dropping inside same cat — RGL handles it
+    // Place at bottom-left of inner grid.
+    const existing = services.map((s) => ({
+      x: s.layout.x,
+      y: s.layout.y,
+      w: s.layout.w,
+      h: s.layout.h,
+    }));
+    const maxY = existing.reduce((m, i) => Math.max(m, i.y + i.h), 0);
+    const w = Math.min(Math.max(1, p.w), innerCols);
+    const h = Math.max(1, p.h);
+    move.mutate({
+      id: p.id,
+      categoryId: category.id,
+      x: 0,
+      y: maxY,
+      w,
+      h,
+    });
+  };
 
   // Defensive clamp for inner items.
   const innerLayout: Layout[] = services.map((s) => {
@@ -50,8 +93,13 @@ export function CategoryCard({
 
   return (
     <div
-      className="flex h-full flex-col overflow-hidden rounded-lg border-2 bg-bg-card/40"
+      className={`flex h-full flex-col overflow-hidden rounded-lg border-2 bg-bg-card/40 transition-shadow ${
+        dropActive ? 'shadow-[0_0_0_3px_var(--accent)]' : ''
+      }`}
       style={{ borderColor: category.border_color }}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
     >
       {/* Title bar — only this is a drag handle for the outer grid. */}
       <div

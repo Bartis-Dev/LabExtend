@@ -10,6 +10,11 @@ import { ServiceForm } from '@/components/ServiceForm';
 import { CategoryCard } from '@/components/CategoryCard';
 import { CategoryForm } from '@/components/CategoryForm';
 import { useDashboardGrid } from '@/components/Dashboard/useDashboardGrid';
+import {
+  DND_MIME,
+  readPayload,
+  useMoveService,
+} from '@/components/Dashboard/crossGridDnd';
 import { FolderIcon, PlusIcon } from '@/components/icons';
 
 const DEFAULT_COLS = 6;
@@ -53,6 +58,49 @@ export default function Dashboard() {
   // sizing math so 1 inner cell ≈ 1 outer cell visually.
   const cellPx = (width - (safeCols - 1) * MARGIN) / safeCols;
 
+  const move = useMoveService();
+  const [dropOutside, setDropOutside] = useState(false);
+
+  const acceptsSvc = (e: React.DragEvent) =>
+    Array.from(e.dataTransfer.types).includes(DND_MIME);
+
+  const onOuterDragOver = (e: React.DragEvent) => {
+    if (!acceptsSvc(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (!dropOutside) setDropOutside(true);
+  };
+
+  const onOuterDragLeave = (e: React.DragEvent) => {
+    // Only clear when leaving the container itself, not when entering a child.
+    if (e.currentTarget === e.target) setDropOutside(false);
+  };
+
+  const onOuterDrop = (e: React.DragEvent) => {
+    setDropOutside(false);
+    const p = readPayload(e);
+    if (!p) return;
+    e.preventDefault();
+    if (p.fromCategoryId === null) return; // already loose
+    // Place at bottom of outer grid.
+    const loose = (services.data ?? []).filter((s) => s.category_id == null);
+    const cats = categories.data ?? [];
+    const maxY = Math.max(
+      0,
+      ...loose.map((s) => s.layout.y + s.layout.h),
+      ...cats.map((c) => c.layout.y + c.layout.h),
+    );
+    const w = Math.min(Math.max(1, p.w), safeCols);
+    move.mutate({
+      id: p.id,
+      categoryId: null,
+      x: 0,
+      y: maxY,
+      w,
+      h: Math.max(1, p.h),
+    });
+  };
+
   const uncategorized = (services.data ?? []).filter((s) => s.category_id == null);
   const servicesByCategory = new Map<number, typeof uncategorized>();
   for (const s of services.data ?? []) {
@@ -93,7 +141,15 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div ref={containerRef}>
+      <div
+        ref={containerRef}
+        onDragOver={onOuterDragOver}
+        onDragLeave={onOuterDragLeave}
+        onDrop={onOuterDrop}
+        className={`rounded transition-shadow ${
+          dropOutside ? 'shadow-[inset_0_0_0_2px_var(--accent)]' : ''
+        }`}
+      >
         {((services.data?.length ?? 0) > 0 || (categories.data?.length ?? 0) > 0) && (
           <GridLayout
             className="layout"

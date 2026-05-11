@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { EditIcon, ExternalLinkIcon, TrashIcon } from './icons';
+import { useRef, useState } from 'react';
+import { EditIcon, ExternalLinkIcon, GripIcon, TrashIcon } from './icons';
 import { ConfirmDialog } from './Modal';
 import { ServiceForm } from './ServiceForm';
 import { useDeleteService, useHealth } from '@/api/queries';
 import type { HostStatus, Service } from '@/api/types';
+import { writePayload } from './Dashboard/crossGridDnd';
 
 function hostHref(host: string, port?: number | null): string {
   if (/^https?:\/\//i.test(host)) {
@@ -72,12 +73,29 @@ function Avatar({ name, icon }: { name: string; icon?: string | null }) {
 export function ServiceCard({ service }: { service: Service }) {
   const [editOpen, setEditOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const cardRef = useRef<HTMLDivElement | null>(null);
   const del = useDeleteService();
   const health = useHealth();
   const status = health.data?.[service.id];
 
+  const handleDragStart = (e: React.DragEvent) => {
+    writePayload(e, {
+      id: service.id,
+      w: service.layout.w,
+      h: service.layout.h,
+      fromCategoryId: service.category_id ?? null,
+    });
+    // Render the whole card as the drag image rather than just the grip icon.
+    if (cardRef.current) {
+      e.dataTransfer.setDragImage(cardRef.current, 20, 20);
+    }
+  };
+
   return (
-    <div className="group relative flex h-full flex-col overflow-hidden rounded-lg border border-border bg-bg-card p-2.5 shadow-sm transition-colors hover:border-border-strong">
+    <div
+      ref={cardRef}
+      className="service-card group relative flex h-full flex-col overflow-hidden rounded-lg border border-border bg-bg-card p-2.5 shadow-sm transition-colors hover:border-border-strong"
+    >
       {/* Action bar — visible on hover */}
       <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5 rounded bg-bg-elevated/90 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
         <button
@@ -102,6 +120,19 @@ export function ServiceCard({ service }: { service: Service }) {
         >
           <TrashIcon width={13} height={13} />
         </button>
+      </div>
+
+      {/* Cross-grid drag handle — visible on hover. HTML5 native DnD so it
+          coexists with react-grid-layout's mouse-driven within-grid drag. */}
+      <div
+        draggable
+        onDragStart={handleDragStart}
+        onMouseDown={(e) => e.stopPropagation()}
+        className="absolute left-1.5 top-1.5 z-10 cursor-grab rounded bg-bg-elevated/90 p-0.5 text-fg-muted opacity-0 backdrop-blur-sm transition-opacity hover:text-fg group-hover:opacity-100 active:cursor-grabbing"
+        aria-label="Drag between categories"
+        title="Drag to another category or outside"
+      >
+        <GripIcon width={13} height={13} />
       </div>
 
       {/* Header */}

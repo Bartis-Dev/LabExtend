@@ -80,3 +80,14 @@ export const UploadIcon = (p: SVGProps<SVGSVGElement>) => (
     <line x1="12" y1="3" x2="12" y2="15" />
   </svg>
 );
+
+export const GripIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base} {...p}>
+    <circle cx="9" cy="6" r="0.8" fill="currentColor" />
+    <circle cx="15" cy="6" r="0.8" fill="currentColor" />
+    <circle cx="9" cy="12" r="0.8" fill="currentColor" />
+    <circle cx="15" cy="12" r="0.8" fill="currentColor" />
+    <circle cx="9" cy="18" r="0.8" fill="currentColor" />
+    <circle cx="15" cy="18" r="0.8" fill="currentColor" />
+  </svg>
+);
