@@ -7,28 +7,63 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/Bartis-Dev/LabExtend/internal/api"
+	"github.com/Bartis-Dev/LabExtend/internal/config"
+	"github.com/Bartis-Dev/LabExtend/internal/db"
+	"github.com/Bartis-Dev/LabExtend/internal/settings"
 	web "github.com/Bartis-Dev/LabExtend/web"
 )
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	cfg := config.Load()
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: parseLogLevel(cfg.LogLevel),
+	}))
 	slog.SetDefault(logger)
 
-	listen := envDefault("LABEXTEND_LISTEN", "0.0.0.0:8080")
+	database, err := db.Open(cfg.DataDir)
+	if err != nil {
+		slog.Error("db open", "err", err)
+		os.Exit(1)
+	}
+	defer database.Close()
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("content-type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
-	mux.Handle("/", spaHandler(http.FS(web.FS())))
+	if err := db.Migrate(database); err != nil {
+		slog.Error("migrate", "err", err)
+		os.Exit(1)
+	}
 
-	srv := &http.Server{
-		Addr:              listen,
-		Handler:           mux,
+	st := settings.New(database)
+
+	if cfg.PasswordReset {
+		if _, err := database.Exec(`DELETE FROM users`); err != nil {
+			slog.Error("password reset: delete users", "err", err)
+			os.Exit(1)
+		}
+		slog.Warn("LABEXTEND_PASSWORD_RESET=true: users deleted; setup wizard will appear on next login")
+	}
+
+	jwtSecret := cfg.JWTSecret
+	if jwtSecret == "" {
+		jwtSecret, err = st.GetOrCreateJWTSecret()
+		if err != nil {
+			slog.Error("jwt secret bootstrap", "err", err)
+			os.Exit(1)
+		}
+	}
+
+	srv := api.New(database, cfg, st, []byte(jwtSecret))
+	webHandler := spaHandler(http.FS(web.FS()))
+	handler := srv.Routes(webHandler)
+
+	httpSrv := &http.Server{
+		Addr:              cfg.Listen,
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -36,8 +71,12 @@ func main() {
 	defer stop()
 
 	go func() {
-		slog.Info("server listening", "addr", listen)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		slog.Info("server listening",
+			"addr", cfg.Listen,
+			"data_dir", cfg.DataDir,
+			"session_timeout", cfg.SessionTimeout,
+		)
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("server error", "err", err)
 			os.Exit(1)
 		}
@@ -47,11 +86,9 @@ func main() {
 	slog.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = srv.Shutdown(shutdownCtx)
+	_ = httpSrv.Shutdown(shutdownCtx)
 }
 
-// spaHandler serves embedded static files and falls back to "/" (index.html)
-// for any path that does not exist in the file system, so client-side routing works.
 func spaHandler(fsys http.FileSystem) http.Handler {
 	fileServer := http.FileServer(fsys)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -69,9 +106,15 @@ func spaHandler(fsys http.FileSystem) http.Handler {
 	})
 }
 
-func envDefault(key, fallback string) string {
-	if v, ok := os.LookupEnv(key); ok && v != "" {
-		return v
+func parseLogLevel(s string) slog.Level {
+	switch strings.ToLower(s) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
-	return fallback
 }
