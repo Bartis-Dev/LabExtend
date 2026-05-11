@@ -22,8 +22,14 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -o /out/labextend \
     ./cmd/labextend
 
+# Pre-create /data with nonroot ownership so the runtime volume inherits
+# writable permissions when the named volume is first populated.
+# distroless 'nonroot' = UID/GID 65532.
+RUN mkdir -p /out/data && chown -R 65532:65532 /out/data
+
 # 3. Runtime
 FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build --chown=nonroot:nonroot /out/data /data
 COPY --from=build /out/labextend /labextend
 VOLUME ["/data"]
 EXPOSE 8080
