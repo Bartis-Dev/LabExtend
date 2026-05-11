@@ -54,7 +54,16 @@ func (s *Server) Routes(webHandler http.Handler) http.Handler {
 
 			r.Put("/layout", s.handleLayoutBulk)
 
+			r.Get("/themes", s.listThemes)
+			r.Post("/themes", s.createTheme)
+			r.Put("/themes/{id}", s.updateTheme)
+			r.Delete("/themes/{id}", s.deleteTheme)
+			r.Post("/themes/{id}/activate", s.activateTheme)
+
 			r.Get("/healthcheck/status", s.handleHCStatus)
+
+			r.Get("/settings", s.handleGetSettings)
+			r.Put("/settings", s.handlePutSettings)
 		})
 
 		// WebSocket: own auth path that runs before websocket.Accept owns the writer.
