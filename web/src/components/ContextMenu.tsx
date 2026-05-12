@@ -96,6 +96,12 @@ export function ContextMenu({ open, x, y, items, onClose }: Props) {
   return createPortal(node, document.body);
 }
 
+// Cross-component coordination: dispatching this event tells every other
+// useContextMenu instance to close. Solves the "two menus open at once"
+// bug when the user right-clicks one card and then another without
+// dismissing the first.
+const CLOSE_ALL_EVENT = 'labextend:close-context-menus';
+
 // Convenience hook for components that have a right-click menu.
 export function useContextMenu() {
   const [state, setState] = useState<{ open: boolean; x: number; y: number }>({
@@ -103,6 +109,13 @@ export function useContextMenu() {
     x: 0,
     y: 0,
   });
+
+  useEffect(() => {
+    const onClose = () => setState((s) => (s.open ? { ...s, open: false } : s));
+    window.addEventListener(CLOSE_ALL_EVENT, onClose);
+    return () => window.removeEventListener(CLOSE_ALL_EVENT, onClose);
+  }, []);
+
   return {
     open: state.open,
     x: state.x,
@@ -110,6 +123,8 @@ export function useContextMenu() {
     onContextMenu: (e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
+      // Close any other open menus, then open ours.
+      window.dispatchEvent(new Event(CLOSE_ALL_EVENT));
       setState({ open: true, x: e.clientX, y: e.clientY });
     },
     close: () => setState((s) => ({ ...s, open: false })),
