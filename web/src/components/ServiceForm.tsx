@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { Modal } from './Modal';
+import { IconPicker } from './IconPicker';
 import {
   servicesKey,
   useCategories,
   useCreateService,
+  useDeleteIcon,
+  useSetIconURL,
   useUpdateService,
 } from '@/api/queries';
-import { api, ApiError, uploadFile } from '@/api/client';
+import { ApiError, uploadFile } from '@/api/client';
 import { useQueryClient } from '@tanstack/react-query';
-import { UploadIcon } from './icons';
+import { FolderIcon, UploadIcon } from './icons';
 import type { Service, ServiceInput } from '@/api/types';
 
 type Props = {
@@ -25,6 +28,7 @@ function emptyInput(): ServiceInput {
     port_primary: null,
     host_alt: null,
     port_alt: null,
+    icon_path: null,
     category_id: null,
     layout: { x: 0, y: 0, w: 1, h: 1 },
     ping_primary: false,
@@ -44,6 +48,7 @@ function fromService(s: Service): ServiceInput {
     port_primary: s.port_primary ?? null,
     host_alt: s.host_alt ?? null,
     port_alt: s.port_alt ?? null,
+    icon_path: s.icon_path ?? null,
     category_id: s.category_id ?? null,
     layout: s.layout,
     ping_primary: s.ping_primary,
@@ -59,18 +64,21 @@ export function ServiceForm({ open, onClose, initial }: Props) {
   const [form, setForm] = useState<ServiceInput>(emptyInput);
   const [error, setError] = useState<string | null>(null);
   const [iconUploading, setIconUploading] = useState(false);
-  const [iconPath, setIconPath] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const create = useCreateService();
   const update = useUpdateService();
+  const setIconURL = useSetIconURL();
+  const deleteIcon = useDeleteIcon();
   const cats = useCategories();
   const qc = useQueryClient();
+
+  const iconPath = form.icon_path ?? null;
 
   useEffect(() => {
     if (!open) return;
     setError(null);
     setForm(initial ? fromService(initial) : emptyInput());
-    setIconPath(initial?.icon_path ?? null);
   }, [open, initial]);
 
   const handleIconFile = async (file: File) => {
@@ -85,7 +93,7 @@ export function ServiceForm({ open, onClose, initial }: Props) {
         `/api/services/${initial.id}/icon`,
         file,
       );
-      setIconPath(res.icon_path);
+      setForm((f) => ({ ...f, icon_path: res.icon_path }));
       qc.invalidateQueries({ queryKey: servicesKey });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'upload failed');
@@ -94,12 +102,27 @@ export function ServiceForm({ open, onClose, initial }: Props) {
     }
   };
 
+  const handlePickIcon = async (url: string) => {
+    if (initial) {
+      // Existing service — push the URL right away so the card updates live.
+      try {
+        await setIconURL.mutateAsync({ id: initial.id, url });
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'icon save failed');
+        return;
+      }
+    }
+    setForm((f) => ({ ...f, icon_path: url }));
+  };
+
   const handleIconRemove = async () => {
-    if (!initial) return;
+    if (!initial) {
+      setForm((f) => ({ ...f, icon_path: null }));
+      return;
+    }
     try {
-      await api.delete(`/api/services/${initial.id}/icon`);
-      setIconPath(null);
-      qc.invalidateQueries({ queryKey: servicesKey });
+      await deleteIcon.mutateAsync(initial.id);
+      setForm((f) => ({ ...f, icon_path: null }));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'remove failed');
     }
@@ -152,7 +175,8 @@ export function ServiceForm({ open, onClose, initial }: Props) {
           iconPath={iconPath}
           fileRef={fileRef}
           uploading={iconUploading}
-          onChoose={() => fileRef.current?.click()}
+          onBrowse={() => setPickerOpen(true)}
+          onChooseFile={() => fileRef.current?.click()}
           onFileChange={(f) => f && handleIconFile(f)}
           onRemove={handleIconRemove}
           editing={!!initial}
@@ -256,6 +280,12 @@ export function ServiceForm({ open, onClose, initial }: Props) {
           </button>
         </div>
       </form>
+
+      <IconPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPick={handlePickIcon}
+      />
     </Modal>
   );
 }
@@ -357,11 +387,18 @@ function Toggle({
   );
 }
 
+function previewUrl(iconPath: string | null): string | null {
+  if (!iconPath) return null;
+  if (/^https?:\/\//i.test(iconPath)) return iconPath;
+  return `/api/icons/${iconPath.replace(/^icons\//, '')}`;
+}
+
 function IconRow({
   iconPath,
   fileRef,
   uploading,
-  onChoose,
+  onBrowse,
+  onChooseFile,
   onFileChange,
   onRemove,
   editing,
@@ -369,22 +406,27 @@ function IconRow({
   iconPath: string | null;
   fileRef: React.RefObject<HTMLInputElement>;
   uploading: boolean;
-  onChoose: () => void;
+  onBrowse: () => void;
+  onChooseFile: () => void;
   onFileChange: (f: File | null) => void;
   onRemove: () => void;
   editing: boolean;
 }) {
-  const url = iconPath ? `/api/icons/${iconPath.replace(/^icons\//, '')}` : null;
+  const url = previewUrl(iconPath);
   return (
-    <div className="flex items-center gap-3 rounded border border-border bg-bg-elevated/40 p-3">
-      <div className="grid h-12 w-12 place-items-center rounded bg-bg-elevated">
-        {url ? <img src={url} alt="" className="h-12 w-12 rounded object-cover" /> : <span className="text-fg-muted">—</span>}
+    <div className="flex flex-wrap items-center gap-3 rounded border border-border bg-bg-elevated/40 p-3">
+      <div className="grid h-12 w-12 shrink-0 place-items-center rounded bg-bg-elevated">
+        {url ? (
+          <img src={url} alt="" className="h-12 w-12 rounded object-contain" />
+        ) : (
+          <span className="text-fg-muted">—</span>
+        )}
       </div>
-      <div className="flex-1">
+      <div className="min-w-0 flex-1">
         <div className="text-sm font-medium">Icon</div>
         <div className="text-xs text-fg-muted">
-          PNG, JPG, WebP, or SVG. Max 2 MiB.
-          {!editing && ' Save the service first to enable upload.'}
+          Pick from the catalogue or upload your own (PNG / JPG / WebP / SVG, max 2 MiB).
+          {!editing && ' Upload becomes available once the service is saved.'}
         </div>
       </div>
       <input
@@ -396,7 +438,14 @@ function IconRow({
       />
       <button
         type="button"
-        onClick={onChoose}
+        onClick={onBrowse}
+        className="flex items-center gap-1 rounded border border-border px-3 py-1.5 text-sm hover:bg-bg-elevated"
+      >
+        <FolderIcon width={14} height={14} /> Browse
+      </button>
+      <button
+        type="button"
+        onClick={onChooseFile}
         disabled={!editing || uploading}
         className="flex items-center gap-1 rounded border border-border px-3 py-1.5 text-sm hover:bg-bg-elevated disabled:opacity-50"
       >

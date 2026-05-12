@@ -45,6 +45,7 @@ func (s *Server) Routes(webHandler http.Handler) http.Handler {
 			r.Put("/services/{uuid}", s.updateService)
 			r.Delete("/services/{uuid}", s.deleteService)
 			r.Post("/services/{uuid}/icon", s.uploadIcon)
+			r.Put("/services/{uuid}/icon-url", s.setIconURL)
 			r.Delete("/services/{uuid}/icon", s.deleteIcon)
 
 			r.Get("/categories", s.listCategories)

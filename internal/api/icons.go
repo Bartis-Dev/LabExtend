@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -103,6 +104,45 @@ func (s *Server) uploadIcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"icon_path": rel})
+}
+
+// setIconURL stores a remote URL (icon picker selection) as the service's
+// icon_path. If the service previously had an uploaded local file, that
+// file is cleaned up from disk so we never accumulate orphan icons.
+func (s *Server) setIconURL(w http.ResponseWriter, r *http.Request) {
+	svcUUID := chi.URLParam(r, "uuid")
+	if svcUUID == "" {
+		writeError(w, http.StatusBadRequest, "missing uuid")
+		return
+	}
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	req.URL = strings.TrimSpace(req.URL)
+	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
+		writeError(w, http.StatusBadRequest, "url must start with http:// or https://")
+		return
+	}
+	var prev *string
+	if err := s.DB.QueryRow(`SELECT icon_path FROM services WHERE uuid=?`, svcUUID).Scan(&prev); err != nil {
+		writeError(w, http.StatusNotFound, "service not found")
+		return
+	}
+	if prev != nil && strings.HasPrefix(*prev, "icons/") {
+		removeIcon(s.Cfg.DataDir, *prev)
+	}
+	if _, err := s.DB.Exec(
+		`UPDATE services SET icon_path=?, updated_at=strftime('%s','now') WHERE uuid=?`,
+		req.URL, svcUUID,
+	); err != nil {
+		writeError(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"icon_path": req.URL})
 }
 
 func (s *Server) deleteIcon(w http.ResponseWriter, r *http.Request) {

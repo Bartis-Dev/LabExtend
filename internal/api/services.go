@@ -55,6 +55,7 @@ type serviceInput struct {
 	HCPrimaryURL     *string    `json:"hc_primary_url"`
 	HCAltEnabled     bool       `json:"hc_alt_enabled"`
 	HCAltURL         *string    `json:"hc_alt_url"`
+	IconPath         *string    `json:"icon_path"` // honored on POST; ignored on PUT
 }
 
 const serviceSelectCols = `
@@ -138,14 +139,14 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 	res, err := s.DB.Exec(
 		`INSERT INTO services (
 		  uuid, name, description, host_primary, port_primary, host_alt, port_alt,
-		  category_id,
+		  icon_path, category_id,
 		  layout_x, layout_y, layout_w, layout_h,
 		  ping_primary, ping_alt,
 		  hc_primary_enabled, hc_primary_url, hc_alt_enabled, hc_alt_url,
 		  created_at, updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		uuid, in.Name, in.Description, in.HostPrimary, in.PortPrimary,
-		in.HostAlt, in.PortAlt, in.CategoryID,
+		in.HostAlt, in.PortAlt, in.IconPath, in.CategoryID,
 		in.Layout.X, in.Layout.Y, in.Layout.W, in.Layout.H,
 		boolInt(in.PingPrimary), boolInt(in.PingAlt),
 		boolInt(in.HCPrimaryEnabled), in.HCPrimaryURL,

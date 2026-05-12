@@ -44,6 +44,25 @@ export function useDeleteService() {
   });
 }
 
+export function useSetIconURL() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: string; url: string }) =>
+      api.put<{ icon_path: string }>(`/api/services/${args.id}/icon-url`, {
+        url: args.url,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: servicesKey }),
+  });
+}
+
+export function useDeleteIcon() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/api/services/${id}/icon`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: servicesKey }),
+  });
+}
+
 // --- Categories -----------------------------------------------------------
 
 export const categoriesKey = ['categories'] as const;

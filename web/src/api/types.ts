@@ -47,7 +47,11 @@ export type Service = {
   hc_alt_url?: string | null;
 };
 
-export type ServiceInput = Omit<Service, 'id' | 'icon_path'>;
+// icon_path is included so it can be set on POST (e.g. when picking an
+// icon during service creation). PUT ignores this field server-side —
+// icon changes on existing services go through the dedicated endpoints
+// (POST /icon for files, PUT /icon-url for URLs, DELETE /icon to clear).
+export type ServiceInput = Omit<Service, 'id'>;
 
 export type Category = {
   id: number;
