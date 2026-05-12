@@ -64,7 +64,7 @@ function Avatar({ icon }: { icon?: string | null }) {
     <img
       src={url}
       alt=""
-      className="h-8 w-8 shrink-0 rounded-md border border-border/60 bg-bg-elevated object-cover"
+      className="h-8 w-8 shrink-0 object-contain"
       onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')}
     />
   );
