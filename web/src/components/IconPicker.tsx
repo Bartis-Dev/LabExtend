@@ -5,13 +5,16 @@ import { Modal } from './Modal';
 type Source = {
   id: 'dashboard' | 'simple';
   label: string;
-  manifestUrl: string;
-  // Map a file entry from the manifest to a usable icon name (or null to skip).
-  parseName: (filePath: string) => string | null;
+  // Ordered list of manifest URLs — the picker tries each one until one
+  // succeeds. Lets us tolerate jsdelivr blips by falling back to the
+  // GitHub git-tree API.
+  manifestUrls: string[];
+  // Map a raw entry from the chosen manifest to a usable icon name (or
+  // null to skip). Each loader is paired with a list of URL templates.
+  parseFlatJsdelivr: (filePath: string) => string | null;
+  parseGitTree: (path: string) => string | null;
   // Build the CDN URL for a given name.
   iconUrl: (name: string) => string;
-  // Tailwind class applied to the <img> tag — used to invert single-color
-  // SVG icons so they read on a dark background.
   imgClass?: string;
 };
 
@@ -19,40 +22,109 @@ const SOURCES: Record<Source['id'], Source> = {
   dashboard: {
     id: 'dashboard',
     label: 'Dashboard Icons',
-    manifestUrl:
+    manifestUrls: [
+      // homarr-labs is the current maintainer; walkxcode is kept as a
+      // legacy fallback in case the user's network reaches the old path.
+      'https://data.jsdelivr.com/v1/package/gh/homarr-labs/dashboard-icons/flat?branch=main',
+      'https://api.github.com/repos/homarr-labs/dashboard-icons/git/trees/main?recursive=1',
       'https://data.jsdelivr.com/v1/package/gh/walkxcode/dashboard-icons/flat?branch=main',
-    parseName: (p) => {
+    ],
+    parseFlatJsdelivr: (p) => {
       const m = p.match(/^\/png\/(.+)\.png$/);
       return m ? m[1] : null;
     },
-    iconUrl: (n) => `https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/${n}.png`,
+    parseGitTree: (p) => {
+      const m = p.match(/^png\/(.+)\.png$/);
+      return m ? m[1] : null;
+    },
+    iconUrl: (n) => `https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/${n}.png`,
   },
   simple: {
     id: 'simple',
     label: 'Simple Icons',
-    manifestUrl: 'https://data.jsdelivr.com/v1/package/npm/simple-icons/flat',
-    parseName: (p) => {
+    manifestUrls: [
+      'https://data.jsdelivr.com/v1/package/npm/simple-icons/flat',
+      'https://api.github.com/repos/simple-icons/simple-icons/git/trees/develop?recursive=1',
+    ],
+    parseFlatJsdelivr: (p) => {
       const m = p.match(/^\/icons\/(.+)\.svg$/);
       return m ? m[1] : null;
     },
+    parseGitTree: (p) => {
+      const m = p.match(/^icons\/(.+)\.svg$/);
+      return m ? m[1] : null;
+    },
     iconUrl: (n) => `https://cdn.jsdelivr.net/npm/simple-icons/icons/${n}.svg`,
-    imgClass: 'invert', // single-color brand SVGs default to black; invert for dark theme
+    imgClass: 'invert',
   },
 };
 
-type ManifestResponse = { files: { name: string }[] };
+type ManifestResult = {
+  names: string[];
+};
+
+async function fetchManifest(src: Source): Promise<ManifestResult> {
+  let lastErr: unknown = null;
+  for (const url of src.manifestUrls) {
+    try {
+      const res = await fetch(url, {
+        // No credentials — these are public CDN/API endpoints.
+        credentials: 'omit',
+      });
+      if (!res.ok) {
+        lastErr = new Error(`${url} → HTTP ${res.status}`);
+        continue;
+      }
+      const data: unknown = await res.json();
+      const names = parseManifest(data, src);
+      if (names.length > 0) return { names };
+      lastErr = new Error(`${url} → empty list`);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr ?? new Error('all manifest sources failed');
+}
+
+function parseManifest(data: unknown, src: Source): string[] {
+  // jsdelivr legacy /flat shape: { files: [{ name: '/path' }] }
+  if (data && typeof data === 'object' && 'files' in data) {
+    const files = (data as { files?: Array<{ name?: string }> }).files ?? [];
+    return collectNames(files.map((f) => f.name ?? ''), src.parseFlatJsdelivr);
+  }
+  // GitHub git/trees shape: { tree: [{ path: 'png/plex.png', type: 'blob' }] }
+  if (data && typeof data === 'object' && 'tree' in data) {
+    const tree = (data as { tree?: Array<{ path?: string; type?: string }> }).tree ?? [];
+    return collectNames(
+      tree.filter((t) => t.type === 'blob').map((t) => t.path ?? ''),
+      src.parseGitTree,
+    );
+  }
+  return [];
+}
+
+function collectNames(entries: string[], parse: (s: string) => string | null): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const e of entries) {
+    const n = parse(e);
+    if (n && !seen.has(n)) {
+      seen.add(n);
+      out.push(n);
+    }
+  }
+  out.sort();
+  return out;
+}
 
 function useIconManifest(src: Source, enabled: boolean) {
   return useQuery({
     queryKey: ['icons', src.id],
-    queryFn: async () => {
-      const res = await fetch(src.manifestUrl);
-      if (!res.ok) throw new Error(`manifest ${src.id} ${res.status}`);
-      return (await res.json()) as ManifestResponse;
-    },
+    queryFn: () => fetchManifest(src),
     enabled,
     staleTime: 24 * 60 * 60 * 1000,
     gcTime: 24 * 60 * 60 * 1000,
+    retry: 1,
   });
 }
 
@@ -70,26 +142,12 @@ export function IconPicker({
   const src = SOURCES[tab];
   const query = useIconManifest(src, open);
 
-  const allNames = useMemo(() => {
-    if (!query.data?.files) return [];
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const f of query.data.files) {
-      const n = src.parseName(f.name);
-      if (n && !seen.has(n)) {
-        seen.add(n);
-        out.push(n);
-      }
-    }
-    out.sort();
-    return out;
-  }, [query.data, src]);
-
   const filtered = useMemo(() => {
+    const all = query.data?.names ?? [];
     const q = search.toLowerCase().trim();
-    if (!q) return allNames.slice(0, 240);
-    return allNames.filter((n) => n.toLowerCase().includes(q)).slice(0, 240);
-  }, [allNames, search]);
+    if (!q) return all.slice(0, 240);
+    return all.filter((n) => n.toLowerCase().includes(q)).slice(0, 240);
+  }, [query.data, search]);
 
   const pick = (name: string) => {
     onPick(src.iconUrl(name));
@@ -132,13 +190,19 @@ export function IconPicker({
             </div>
           )}
           {query.isError && (
-            <div className="grid h-48 place-items-center text-sm text-danger">
-              Failed to load icon manifest. Check your network.
+            <div className="grid h-48 place-items-center px-6 text-center text-sm text-danger">
+              <div>
+                Failed to load icon manifest.
+                <br />
+                <span className="text-xs text-fg-muted">
+                  {String((query.error as Error)?.message ?? 'unknown error')}
+                </span>
+              </div>
             </div>
           )}
           {!query.isLoading && !query.isError && filtered.length === 0 && (
             <div className="grid h-48 place-items-center text-sm text-fg-muted">
-              No icons match “{search}”.
+              No icons match "{search}".
             </div>
           )}
           {!query.isLoading && filtered.length > 0 && (
@@ -170,8 +234,8 @@ export function IconPicker({
         </div>
 
         <p className="text-xs text-fg-muted">
-          Icons are served via CDN. The selected icon URL is stored on the service,
-          so the dashboard always pulls the latest version.
+          Icons are served via the public jsDelivr CDN. The selected URL is stored
+          on the service so the dashboard always pulls the latest version.
         </p>
       </div>
     </Modal>

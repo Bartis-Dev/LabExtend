@@ -290,7 +290,7 @@ function HostRow({
       <span className="flex shrink-0 items-center border-r border-border/40 px-2 font-mono text-[10px] font-medium uppercase tracking-wider text-fg-muted">
         {protocol}
       </span>
-      <span className="flex-1 truncate px-3 py-1 font-mono text-xs leading-relaxed">
+      <span className="flex flex-1 items-center truncate px-3 font-mono text-xs">
         {display}
       </span>
       <span className="flex items-center pr-2.5">

@@ -49,12 +49,15 @@ export function ContextMenu({ open, x, y, items, onClose }: Props) {
       onClose();
     };
     const onScroll = () => onClose();
+    // Capture-phase listener: fires before any descendant can call
+    // stopPropagation() in bubble phase. Otherwise a card that does
+    // onMouseDown={e => e.stopPropagation()} would swallow the close.
     window.addEventListener('keydown', onKey);
-    window.addEventListener('mousedown', onPointer);
+    window.addEventListener('mousedown', onPointer, true);
     window.addEventListener('scroll', onScroll, true);
     return () => {
       window.removeEventListener('keydown', onKey);
-      window.removeEventListener('mousedown', onPointer);
+      window.removeEventListener('mousedown', onPointer, true);
       window.removeEventListener('scroll', onScroll, true);
     };
   }, [open, onClose]);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import GridLayout from 'react-grid-layout';
 import {
   useCategories,
@@ -18,6 +18,11 @@ const MARGIN = 24;
 const CATEGORY_TITLE_PX = 40;
 const CATEGORY_INNER_PADDING = 20;
 const CATEGORY_INNER_MARGIN = 20;
+// Fixed cell width: cards and categories keep the same physical size no
+// matter how wide the browser is. If the viewport gets narrow, the
+// dashboard scrolls horizontally instead of squeezing every card.
+const CELL_PX = 240;
+const ROW_PX = 120;
 
 export default function Dashboard() {
   const [addServiceOpen, setAddServiceOpen] = useState(false);
@@ -29,27 +34,18 @@ export default function Dashboard() {
   const cols = Number(settings.data?.grid_cols ?? DEFAULT_COLS);
   const safeCols = Number.isFinite(cols) && cols >= 4 && cols <= 12 ? cols : DEFAULT_COLS;
 
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState(1200);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const w = entry.contentRect.width;
-      if (w > 0) setWidth(w);
-    });
-    ro.observe(containerRef.current);
-    return () => ro.disconnect();
-  }, []);
-
   const { outerLayout, flushOuter, flushInner } = useDashboardGrid(
     services.data,
     categories.data,
     safeCols,
   );
 
-  const cellPx = (width - (safeCols - 1) * MARGIN) / safeCols;
-  const rowHeight = Math.max(70, Math.round(cellPx / 2));
+  // Grid width derived from a fixed cell size — the dashboard does not
+  // shrink with the viewport, the outer container scrolls horizontally
+  // when the user makes the window narrower than the grid.
+  const cellPx = CELL_PX;
+  const rowHeight = ROW_PX;
+  const gridWidth = safeCols * CELL_PX + (safeCols - 1) * MARGIN;
 
   const uncategorized = (services.data ?? []).filter((s) => s.category_id == null);
   const servicesByCategory = new Map<number, typeof uncategorized>();
@@ -99,9 +95,8 @@ export default function Dashboard() {
       )}
 
       <div
-        ref={containerRef}
         onContextMenu={handleBgContextMenu}
-        className="min-h-[200px]"
+        className="min-h-[200px] overflow-x-auto"
       >
         {((services.data?.length ?? 0) > 0 || (categories.data?.length ?? 0) > 0) && (
           <GridLayout
@@ -109,7 +104,7 @@ export default function Dashboard() {
             layout={outerLayout}
             cols={safeCols}
             rowHeight={rowHeight}
-            width={width}
+            width={gridWidth}
             margin={[MARGIN, MARGIN]}
             containerPadding={[0, 0]}
             compactType="vertical"
