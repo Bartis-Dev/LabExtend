@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import GridLayout from 'react-grid-layout';
 import {
   useCategories,
   useServices,
   useSettings,
+  useUpdateCategory,
 } from '@/api/queries';
 import { ServiceCard } from '@/components/ServiceCard';
 import { ServiceForm } from '@/components/ServiceForm';
@@ -57,6 +58,40 @@ export default function Dashboard() {
       servicesByCategory.set(s.category_id, arr);
     }
   }
+
+  // Auto-expand categories whose inner services no longer fit (e.g. user
+  // just added a 5th service to a 2×2 category — the new one would land
+  // at (0, 2) below the visible area). We grow the smaller side first to
+  // try to keep the overall shape balanced.
+  const updateCat = useUpdateCategory();
+  useEffect(() => {
+    if (!categories.data || !services.data) return;
+    if (updateCat.isPending) return;
+    for (const cat of categories.data) {
+      const inCat = (services.data ?? []).filter((s) => s.category_id === cat.id);
+      if (inCat.length === 0) continue;
+      const maxX = inCat.reduce((m, s) => Math.max(m, s.layout.x + s.layout.w), 0);
+      const maxY = inCat.reduce((m, s) => Math.max(m, s.layout.y + s.layout.h), 0);
+      const tooWide = maxX > cat.layout.w;
+      const tooTall = maxY > cat.layout.h;
+      if (!tooWide && !tooTall) continue;
+      // Prefer growing the dimension that is already shorter so the
+      // category stays balanced. Tie → grow height (vertical scroll
+      // is the cheaper direction for a dashboard).
+      const newW = tooWide ? Math.min(safeCols, maxX) : cat.layout.w;
+      const newH = tooTall ? Math.min(20, maxY) : cat.layout.h;
+      updateCat.mutate({
+        id: cat.id,
+        input: {
+          name: cat.name,
+          border_color: cat.border_color,
+          layout: { x: cat.layout.x, y: cat.layout.y, w: newW, h: newH },
+        },
+      });
+      // One mutation per render to avoid pile-ups.
+      return;
+    }
+  }, [services.data, categories.data, updateCat, safeCols]);
 
   // Background right-click → Add service / Add category. Cards/categories
   // stopPropagation on their own contextmenu so this only fires when the

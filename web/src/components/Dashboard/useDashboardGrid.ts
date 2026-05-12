@@ -78,6 +78,21 @@ export function useDashboardGrid(
   // Build outer layout, clamping everything to current cols.
   const safeCols = Math.max(2, cols);
 
+  // For each category, compute the minimum (w, h) needed to fit its
+  // current inner services. RGL's minW/minH bind the resize handle so
+  // the user simply cannot drag a category smaller than the area its
+  // services already occupy — no error dialog needed, the handle just
+  // stops moving once the threshold is reached.
+  const requiredByCat = new Map<number, { w: number; h: number }>();
+  for (const s of services ?? []) {
+    if (s.category_id == null) continue;
+    const prev = requiredByCat.get(s.category_id) ?? { w: 1, h: 1 };
+    requiredByCat.set(s.category_id, {
+      w: Math.max(prev.w, s.layout.x + s.layout.w),
+      h: Math.max(prev.h, s.layout.y + s.layout.h),
+    });
+  }
+
   const catItems: Layout[] = (categories ?? []).map((c) => {
     let w = clamp(c.layout.w, 1, safeCols);
     let h = clamp(c.layout.h, 1, 10);
@@ -86,6 +101,7 @@ export function useDashboardGrid(
       if (w <= h) h = 2;
       else w = 2;
     }
+    const req = requiredByCat.get(c.id) ?? { w: 1, h: 1 };
     const x = clamp(c.layout.x, 0, Math.max(0, safeCols - w));
     return {
       i: `c-${c.id}`,
@@ -93,8 +109,8 @@ export function useDashboardGrid(
       y: Math.max(0, c.layout.y),
       w,
       h,
-      minW: 1,
-      minH: 1,
+      minW: Math.max(1, req.w),
+      minH: Math.max(1, req.h),
       maxW: safeCols,
       maxH: 10,
     };

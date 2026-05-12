@@ -53,9 +53,13 @@ function iconUrl(p?: string | null): string | null {
   return `/api/icons/${name}`;
 }
 
-function Avatar({ name, icon }: { name: string; icon?: string | null }) {
+function Avatar({ icon }: { icon?: string | null }) {
   const url = iconUrl(icon);
-  if (!url) return null;
+  if (!url) {
+    // Invisible spacer keeps every card header aligned even when no
+    // icon is set, so a column of cards reads as a tidy grid.
+    return <div className="h-8 w-8 shrink-0" aria-hidden />;
+  }
   return (
     <img
       src={url}
@@ -64,7 +68,6 @@ function Avatar({ name, icon }: { name: string; icon?: string | null }) {
       onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')}
     />
   );
-  void name;
 }
 
 export function ServiceCard({ service }: { service: Service }) {
@@ -89,22 +92,24 @@ export function ServiceCard({ service }: { service: Service }) {
         <GripIcon width={13} height={13} />
       </div>
 
-      {/* Header */}
+      {/* Header — avatar slot always reserved (invisible if no icon),
+          description slot always rendered (NBSP keeps the height stable
+          when empty). Result: every card has identical header geometry. */}
       <div className="flex items-center gap-3 pr-8">
-        <Avatar name={service.name} icon={service.icon_path} />
+        <Avatar icon={service.icon_path} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold leading-tight">
             {service.name}
           </div>
-          {service.description && (
-            <div className="mt-1 truncate text-[11px] text-fg-muted">
-              {service.description}
-            </div>
-          )}
+          <div className="mt-1 truncate text-[11px] leading-4 text-fg-muted">
+            {service.description || ' '}
+          </div>
         </div>
       </div>
 
-      {/* Hosts — wider buttons (min-width forces them to fill more of the card), taller. */}
+      {/* Hosts — always two slots so cards with one host align with cards
+          that have two. The alt slot is a faded placeholder when no alt
+          host is configured. */}
       <div className="mt-3.5 flex flex-col items-start gap-2">
         <HostRow
           href={hostHref(service.host_primary, service.port_primary)}
@@ -112,7 +117,7 @@ export function ServiceCard({ service }: { service: Service }) {
           protocol={protocolLabel(service.host_primary)}
           status={status?.primary}
         />
-        {service.host_alt && (
+        {service.host_alt ? (
           <HostRow
             href={hostHref(service.host_alt, service.port_alt)}
             display={hostDisplay(service.host_alt, service.port_alt)}
@@ -120,6 +125,8 @@ export function ServiceCard({ service }: { service: Service }) {
             status={status?.alt}
             secondary
           />
+        ) : (
+          <HostRowPlaceholder />
         )}
       </div>
 
@@ -157,6 +164,21 @@ export function ServiceCard({ service }: { service: Service }) {
           },
         ]}
       />
+    </div>
+  );
+}
+
+// HostRowPlaceholder reserves the same physical space as a HostRow so
+// cards line up vertically regardless of how many hosts each service
+// configures. Dashed border + muted dash signals "intentionally empty",
+// not "broken".
+function HostRowPlaceholder() {
+  return (
+    <div
+      aria-hidden
+      className="inline-flex h-9 min-w-[14rem] max-w-full items-center justify-center rounded-md border border-dashed border-border/40 px-3 font-mono text-xs text-fg-muted/40"
+    >
+      —
     </div>
   );
 }

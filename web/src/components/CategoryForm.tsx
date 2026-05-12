@@ -4,6 +4,7 @@ import { hexToHsva, hsvaToHex } from '@uiw/color-convert';
 import { Modal } from './Modal';
 import {
   useCreateCategory,
+  useServices,
   useSettings,
   useUpdateCategory,
 } from '@/api/queries';
@@ -36,6 +37,7 @@ const COLOR_PRESETS = [
 
 export function CategoryForm({ open, onClose, initial, defaultLayout }: Props) {
   const settings = useSettings();
+  const services = useServices();
   const cols = clampInt(Number(settings.data?.grid_cols ?? DEFAULT_COLS), 4, 12);
 
   const [name, setName] = useState('');
@@ -45,6 +47,21 @@ export function CategoryForm({ open, onClose, initial, defaultLayout }: Props) {
   const [error, setError] = useState<string | null>(null);
   const create = useCreateCategory();
   const update = useUpdateCategory();
+
+  // For an existing category, figure out the minimum (w, h) that still
+  // fits all services currently inside. Used to block a manual shrink
+  // that would lose cards.
+  const inCat = initial
+    ? (services.data ?? []).filter((s) => s.category_id === initial.id)
+    : [];
+  const minRequiredW = inCat.reduce(
+    (m, s) => Math.max(m, s.layout.x + s.layout.w),
+    1,
+  );
+  const minRequiredH = inCat.reduce(
+    (m, s) => Math.max(m, s.layout.y + s.layout.h),
+    1,
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -73,6 +90,12 @@ export function CategoryForm({ open, onClose, initial, defaultLayout }: Props) {
     setError(null);
     if (!validSize) {
       setError('Minimum size is 1×2 or 2×1.');
+      return;
+    }
+    if (initial && (safeW < minRequiredW || safeH < minRequiredH)) {
+      setError(
+        `Too many services in this category. Minimum size for the current ${inCat.length} service(s): ${minRequiredW} × ${minRequiredH}. Remove or move some services first.`,
+      );
       return;
     }
     const payload: CategoryInput = {
