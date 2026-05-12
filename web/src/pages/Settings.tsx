@@ -9,6 +9,9 @@ import { api, ApiError } from '@/api/client';
 export default function Settings() {
   return (
     <div className="mx-auto max-w-5xl space-y-10 p-6">
+      <Section title="Branding">
+        <BrandingSettings />
+      </Section>
       <Section title="Theme">
         <ThemeEditor />
       </Section>
@@ -21,6 +24,55 @@ export default function Settings() {
       <Section title="Account">
         <PasswordChange />
       </Section>
+    </div>
+  );
+}
+
+// --- Branding -------------------------------------------------------------
+
+function BrandingSettings() {
+  const settings = useSettings();
+  const update = useUpdateSettings();
+  const [name, setName] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setName(settings.data?.dashboard_name ?? '');
+  }, [settings.data]);
+
+  const save = async () => {
+    setMsg(null);
+    try {
+      await update.mutateAsync({ ...(settings.data ?? {}), dashboard_name: name });
+      setMsg('Saved.');
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : 'save failed');
+    }
+  };
+
+  return (
+    <div className="flex items-end gap-3">
+      <label className="block flex-1 max-w-md">
+        <span className="mb-1 block text-xs text-fg-muted">
+          Dashboard name (top-left navbar). Leave empty for the default
+          "LabExtend".
+        </span>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Homelab, Bartis Lab, …"
+          maxLength={64}
+          className="w-full rounded border border-border bg-bg-elevated px-3 py-2 outline-none focus:border-accent"
+        />
+      </label>
+      <button
+        onClick={save}
+        disabled={update.isPending}
+        className="rounded bg-accent px-4 py-2 text-white hover:bg-accent-hover disabled:opacity-50"
+      >
+        Save
+      </button>
+      {msg && <span className="text-sm text-fg-muted">{msg}</span>}
     </div>
   );
 }

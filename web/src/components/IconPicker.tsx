@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Modal } from './Modal';
 
 type Source = {
-  id: 'dashboard' | 'simple';
+  id: 'dashboard' | 'simple' | 'material' | 'mdi';
   label: string;
   // Ordered list of manifest URLs — the picker tries each one until one
   // succeeds. Lets us tolerate jsdelivr blips by falling back to the
@@ -55,6 +55,37 @@ const SOURCES: Record<Source['id'], Source> = {
       return m ? m[1] : null;
     },
     iconUrl: (n) => `https://cdn.jsdelivr.net/npm/simple-icons/icons/${n}.svg`,
+    imgClass: 'invert',
+  },
+  material: {
+    id: 'material',
+    label: 'Material',
+    manifestUrls: [
+      'https://data.jsdelivr.com/v1/package/npm/@material-design-icons/svg/flat',
+    ],
+    // Files look like /outlined/home/24px.svg — we map them to the
+    // category/name pair we serve from.
+    parseFlatJsdelivr: (p) => {
+      const m = p.match(/^\/outlined\/([^/]+)\/24px\.svg$/);
+      return m ? m[1] : null;
+    },
+    parseGitTree: () => null,
+    iconUrl: (n) =>
+      `https://cdn.jsdelivr.net/npm/@material-design-icons/svg/outlined/${n}/24px.svg`,
+    imgClass: 'invert',
+  },
+  mdi: {
+    id: 'mdi',
+    label: 'MDI',
+    manifestUrls: [
+      'https://data.jsdelivr.com/v1/package/npm/@mdi/svg/flat',
+    ],
+    parseFlatJsdelivr: (p) => {
+      const m = p.match(/^\/svg\/(.+)\.svg$/);
+      return m ? m[1] : null;
+    },
+    parseGitTree: () => null,
+    iconUrl: (n) => `https://cdn.jsdelivr.net/npm/@mdi/svg/svg/${n}.svg`,
     imgClass: 'invert',
   },
 };

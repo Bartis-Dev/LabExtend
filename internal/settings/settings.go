@@ -15,6 +15,7 @@ const (
 	KeyJWTSecret           = "jwt_secret"
 	KeyGridCols            = "grid_cols"
 	KeyHealthcheckInterval = "healthcheck_interval"
+	KeyDashboardName       = "dashboard_name"
 )
 
 type Store struct{ db *sql.DB }

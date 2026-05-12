@@ -33,6 +33,12 @@ var allowedSettings = map[string]func(value string) (string, error){
 		}
 		return v, nil
 	},
+	settingsstore.KeyDashboardName: func(v string) (string, error) {
+		if len(v) > 64 {
+			return "", &validationError{Msg: "dashboard_name must be at most 64 characters"}
+		}
+		return v, nil
+	},
 }
 
 type validationError struct{ Msg string }
