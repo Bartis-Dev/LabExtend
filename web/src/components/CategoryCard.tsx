@@ -13,9 +13,11 @@ type Props = {
   services: Service[];
   innerWidth: number;
   innerCols: number;
+  innerRows: number;
   innerRowHeight: number;
   innerMargin: number;
-  innerPadding: number;
+  innerPaddingX: number;
+  innerPaddingY: number;
   onInnerLayoutChange: (catID: number, layouts: Layout[]) => void;
 };
 
@@ -24,11 +26,15 @@ export function CategoryCard({
   services,
   innerWidth,
   innerCols,
+  innerRows,
   innerRowHeight,
   innerMargin,
-  innerPadding,
+  innerPaddingX,
+  innerPaddingY,
   onInnerLayoutChange,
 }: Props) {
+  // Suppress unused-param lint without changing the public API.
+  void innerRows;
   const [editOpen, setEditOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const del = useDeleteCategory();
@@ -78,7 +84,12 @@ export function CategoryCard({
       {/* Inner body */}
       <div
         className="relative flex-1"
-        style={{ padding: innerPadding }}
+        style={{
+          paddingLeft: innerPaddingX,
+          paddingRight: innerPaddingX,
+          paddingTop: innerPaddingY,
+          paddingBottom: innerPaddingY,
+        }}
         onMouseDown={(e) => e.stopPropagation()}
       >
         {services.length === 0 ? (

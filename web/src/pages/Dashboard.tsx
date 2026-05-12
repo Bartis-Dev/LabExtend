@@ -15,14 +15,14 @@ import { FolderIcon, GripIcon, PlusIcon } from '@/components/icons';
 
 const DEFAULT_COLS = 5;
 const MARGIN = 24;
-const CATEGORY_TITLE_PX = 40;
-const CATEGORY_INNER_PADDING = 20;
-const CATEGORY_INNER_MARGIN = 20;
+const CATEGORY_INNER_PADDING_X = 12;
+const CATEGORY_INNER_PADDING_Y = 12;
+const CATEGORY_INNER_MARGIN = 24;
 // Fixed cell width: cards and categories keep the same physical size no
 // matter how wide the browser is. If the viewport gets narrow, the
 // dashboard scrolls horizontally instead of squeezing every card.
-const CELL_PX = 240;
-const ROW_PX = 120;
+const CELL_PX = 300;
+const ROW_PX = 150;
 
 export default function Dashboard() {
   const [addServiceOpen, setAddServiceOpen] = useState(false);
@@ -116,16 +116,18 @@ export default function Dashboard() {
             onLayoutChange={(l) => flushOuter(l)}
           >
             {(categories.data ?? []).map((c) => {
-              const outerW = cellPx * c.layout.w + MARGIN * (c.layout.w - 1);
-              const outerH = rowHeight * c.layout.h + MARGIN * (c.layout.h - 1);
-              const innerW = Math.max(80, outerW - CATEGORY_INNER_PADDING * 2);
+              // c.layout.h is the *inner* card-row count (what the user
+              // picked in the form). useDashboardGrid maps that to a
+              // taller outer row count so the chrome row sits on top
+              // without stealing space from the inner cards. Here we
+              // derive inner pixel dims directly from the inner rows
+              // and the outer rowHeight — guarantees inner cards
+              // render at exactly the same size as outer cards.
               const innerCols = Math.max(1, c.layout.w);
-              const usableH = outerH - CATEGORY_TITLE_PX - CATEGORY_INNER_PADDING * 2;
               const innerRows = Math.max(1, c.layout.h);
-              const innerRowHeight = Math.max(
-                50,
-                (usableH - CATEGORY_INNER_MARGIN * (innerRows - 1)) / innerRows,
-              );
+              const innerW =
+                innerCols * cellPx + (innerCols - 1) * MARGIN; // flush, no horizontal padding shrink
+              const innerRowHeight = rowHeight;
               return (
                 <div key={`c-${c.id}`}>
                   <CategoryCard
@@ -133,9 +135,11 @@ export default function Dashboard() {
                     services={servicesByCategory.get(c.id) ?? []}
                     innerWidth={innerW}
                     innerCols={innerCols}
+                    innerRows={innerRows}
                     innerRowHeight={innerRowHeight}
                     innerMargin={CATEGORY_INNER_MARGIN}
-                    innerPadding={CATEGORY_INNER_PADDING}
+                    innerPaddingX={CATEGORY_INNER_PADDING_X}
+                    innerPaddingY={CATEGORY_INNER_PADDING_Y}
                     onInnerLayoutChange={flushInner}
                   />
                 </div>

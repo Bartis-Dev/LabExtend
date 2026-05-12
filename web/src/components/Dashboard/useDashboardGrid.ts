@@ -12,6 +12,12 @@ import type { Category, Service } from '@/api/types';
 // when the user reduces the column count from 6 to 4). Clamping happens
 // purely client-side; the next drag flushes corrected values back to the
 // server.
+// One outer row is added to every category in the layout we hand to RGL so
+// the title bar + padding don't steal space from the inner card area. The
+// inverse subtraction happens before we persist (so the stored 'h' always
+// represents the inner card-row count, the user's mental model).
+const CATEGORY_CHROME_ROWS = 1;
+
 export function useDashboardGrid(
   services: Service[] | undefined,
   categories: Category[] | undefined,
@@ -48,7 +54,9 @@ export function useDashboardGrid(
               x: item.x,
               y: item.y,
               w: item.w,
-              h: item.h,
+              // Strip the chrome row before persisting so 'h' on disk
+              // always represents the inner card-row count.
+              h: Math.max(1, item.h - CATEGORY_CHROME_ROWS),
             });
           }
         }
@@ -82,22 +90,26 @@ export function useDashboardGrid(
     let w = clamp(c.layout.w, 1, safeCols);
     let h = clamp(c.layout.h, 1, 10);
     // Categories must have at least 2 cells of area (1×2, 2×1, …).
-    // Promote the shorter side to 2 if the user happens to land on 1×1.
     if (w * h < 2) {
       if (w <= h) h = 2;
       else w = 2;
     }
     const x = clamp(c.layout.x, 0, Math.max(0, safeCols - w));
+    // Outer-layout h = inner card rows + chrome row. The persisted value
+    // is the inner-row count; we add CATEGORY_CHROME_ROWS here so the
+    // grid renders the category with extra vertical space for the title
+    // and inner padding.
+    const outerH = h + CATEGORY_CHROME_ROWS;
     return {
       i: `c-${c.id}`,
       x,
       y: Math.max(0, c.layout.y),
       w,
-      h,
+      h: outerH,
       minW: 1,
-      minH: 1,
+      minH: 1 + CATEGORY_CHROME_ROWS,
       maxW: safeCols,
-      maxH: 10,
+      maxH: 10 + CATEGORY_CHROME_ROWS,
     };
   });
 
