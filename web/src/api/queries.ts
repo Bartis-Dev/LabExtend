@@ -162,11 +162,33 @@ export function useActivateTheme() {
 
 export const healthKey = ['healthcheck'] as const;
 
+// parseDurationMs handles the same 'Nd / Nh / Nm / Ns' suffixes the backend
+// uses, returning milliseconds for setInterval / TanStack's refetchInterval.
+function parseDurationMs(s: string | undefined, fallback: number): number {
+  if (!s) return fallback;
+  const m = s.match(/^(\d+)\s*(ms|s|m|h)?$/);
+  if (!m) return fallback;
+  const n = Number(m[1]);
+  switch (m[2]) {
+    case 'ms':
+      return n;
+    case 'm':
+      return n * 60_000;
+    case 'h':
+      return n * 3_600_000;
+    case 's':
+    default:
+      return n * 1000;
+  }
+}
+
 export function useHealth() {
+  const settings = useSettings();
+  const ms = parseDurationMs(settings.data?.status_refresh_interval, 10_000);
   return useQuery({
     queryKey: healthKey,
     queryFn: () => api.get<HealthMap>('/api/healthcheck/status'),
-    refetchInterval: 15_000,
+    refetchInterval: ms,
   });
 }
 

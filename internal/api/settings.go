@@ -39,6 +39,16 @@ var allowedSettings = map[string]func(value string) (string, error){
 		}
 		return v, nil
 	},
+	settingsstore.KeyStatusRefreshInterval: func(v string) (string, error) {
+		d, err := config.ParseDuration(v)
+		if err != nil {
+			return "", &validationError{Msg: "status_refresh_interval must be a duration (e.g. 10s, 30s)"}
+		}
+		if d < 2_000_000_000 || d > 300_000_000_000 { // 2s..5min
+			return "", &validationError{Msg: "status_refresh_interval must be between 2s and 5min"}
+		}
+		return v, nil
+	},
 }
 
 type validationError struct{ Msg string }

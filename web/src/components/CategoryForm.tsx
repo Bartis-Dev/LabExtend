@@ -204,7 +204,7 @@ export function CategoryForm({ open, onClose, initial, defaultLayout }: Props) {
                 label="Width"
                 value={safeW}
                 onChange={setW}
-                min={1}
+                min={initial ? Math.max(1, minRequiredW) : 1}
                 max={cols}
                 hint={`max ${cols} (grid width)`}
               />
@@ -212,10 +212,17 @@ export function CategoryForm({ open, onClose, initial, defaultLayout }: Props) {
                 label="Height"
                 value={safeH}
                 onChange={setH}
-                min={1}
+                min={initial ? Math.max(1, minRequiredH) : 1}
                 max={MAX_HEIGHT}
                 hint={`max ${MAX_HEIGHT}`}
               />
+              {initial && inCat.length > 0 && (
+                <div className="rounded border border-warning/40 bg-warning/10 px-2 py-1.5 text-[11px] text-fg-muted">
+                  This category holds {inCat.length} service
+                  {inCat.length === 1 ? '' : 's'}. Minimum size: {minRequiredW}×
+                  {minRequiredH}. To go smaller, move services out first.
+                </div>
+              )}
               <div className="border-t border-border pt-2 text-xs text-fg-muted">
                 Minimum total area: 1×2 or 2×1. Resize anytime by dragging the
                 bottom-right corner of the category.

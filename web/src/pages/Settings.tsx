@@ -21,6 +21,9 @@ export default function Settings() {
       <Section title="Healthcheck">
         <HealthcheckSettings />
       </Section>
+      <Section title="Status refresh">
+        <StatusRefreshSettings />
+      </Section>
       <Section title="Account">
         <PasswordChange />
       </Section>
@@ -168,6 +171,59 @@ function HealthcheckSettings() {
           value={interval}
           onChange={(e) => setInterval(e.target.value)}
           placeholder="60s"
+          className="w-40 rounded border border-border bg-bg-elevated px-3 py-2 outline-none focus:border-accent"
+        />
+      </label>
+      <button
+        onClick={save}
+        disabled={update.isPending}
+        className="rounded bg-accent px-4 py-2 text-white hover:bg-accent-hover disabled:opacity-50"
+      >
+        Save
+      </button>
+      {msg && <span className="text-sm text-fg-muted">{msg}</span>}
+    </div>
+  );
+}
+
+// --- Status refresh (frontend polling cadence) -----------------------------
+
+function StatusRefreshSettings() {
+  const settings = useSettings();
+  const update = useUpdateSettings();
+  const [interval, setInterval] = useState('10s');
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (settings.data?.status_refresh_interval) {
+      setInterval(settings.data.status_refresh_interval);
+    }
+  }, [settings.data]);
+
+  const save = async () => {
+    setMsg(null);
+    try {
+      await update.mutateAsync({
+        ...(settings.data ?? {}),
+        status_refresh_interval: interval,
+      });
+      setMsg('Saved.');
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : 'save failed');
+    }
+  };
+
+  return (
+    <div className="flex items-end gap-3">
+      <label className="block">
+        <span className="mb-1 block text-xs text-fg-muted">
+          How often the dashboard polls the backend for online status when
+          the WebSocket isn't connected (Go duration, 2s–5min). Default 10s.
+        </span>
+        <input
+          value={interval}
+          onChange={(e) => setInterval(e.target.value)}
+          placeholder="10s"
           className="w-40 rounded border border-border bg-bg-elevated px-3 py-2 outline-none focus:border-accent"
         />
       </label>

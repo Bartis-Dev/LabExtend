@@ -12,10 +12,11 @@ import (
 
 // Reserved keys used by the rest of the codebase.
 const (
-	KeyJWTSecret           = "jwt_secret"
-	KeyGridCols            = "grid_cols"
-	KeyHealthcheckInterval = "healthcheck_interval"
-	KeyDashboardName       = "dashboard_name"
+	KeyJWTSecret             = "jwt_secret"
+	KeyGridCols              = "grid_cols"
+	KeyHealthcheckInterval   = "healthcheck_interval"
+	KeyStatusRefreshInterval = "status_refresh_interval"
+	KeyDashboardName         = "dashboard_name"
 )
 
 type Store struct{ db *sql.DB }

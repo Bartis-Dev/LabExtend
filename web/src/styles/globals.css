@@ -47,6 +47,18 @@ html, body, #root {
   height: 100%;
 }
 
+/* Hide the browser-default spinner buttons on number inputs — the project
+   uses explicit +/- steppers everywhere a number field appears. */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 body {
   background: var(--bg);
   color: var(--fg);
