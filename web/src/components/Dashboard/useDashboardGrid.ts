@@ -12,12 +12,6 @@ import type { Category, Service } from '@/api/types';
 // when the user reduces the column count from 6 to 4). Clamping happens
 // purely client-side; the next drag flushes corrected values back to the
 // server.
-// One outer row is added to every category in the layout we hand to RGL so
-// the title bar + padding don't steal space from the inner card area. The
-// inverse subtraction happens before we persist (so the stored 'h' always
-// represents the inner card-row count, the user's mental model).
-const CATEGORY_CHROME_ROWS = 1;
-
 export function useDashboardGrid(
   services: Service[] | undefined,
   categories: Category[] | undefined,
@@ -54,9 +48,7 @@ export function useDashboardGrid(
               x: item.x,
               y: item.y,
               w: item.w,
-              // Strip the chrome row before persisting so 'h' on disk
-              // always represents the inner card-row count.
-              h: Math.max(1, item.h - CATEGORY_CHROME_ROWS),
+              h: item.h,
             });
           }
         }
@@ -95,21 +87,16 @@ export function useDashboardGrid(
       else w = 2;
     }
     const x = clamp(c.layout.x, 0, Math.max(0, safeCols - w));
-    // Outer-layout h = inner card rows + chrome row. The persisted value
-    // is the inner-row count; we add CATEGORY_CHROME_ROWS here so the
-    // grid renders the category with extra vertical space for the title
-    // and inner padding.
-    const outerH = h + CATEGORY_CHROME_ROWS;
     return {
       i: `c-${c.id}`,
       x,
       y: Math.max(0, c.layout.y),
       w,
-      h: outerH,
+      h,
       minW: 1,
-      minH: 1 + CATEGORY_CHROME_ROWS,
+      minH: 1,
       maxW: safeCols,
-      maxH: 10 + CATEGORY_CHROME_ROWS,
+      maxH: 10,
     };
   });
 

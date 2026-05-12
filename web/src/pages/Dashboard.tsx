@@ -15,6 +15,7 @@ import { FolderIcon, GripIcon, PlusIcon } from '@/components/icons';
 
 const DEFAULT_COLS = 5;
 const MARGIN = 24;
+const CATEGORY_TITLE_PX = 40;
 const CATEGORY_INNER_PADDING_X = 12;
 const CATEGORY_INNER_PADDING_Y = 12;
 const CATEGORY_INNER_MARGIN = 24;
@@ -116,18 +117,24 @@ export default function Dashboard() {
             onLayoutChange={(l) => flushOuter(l)}
           >
             {(categories.data ?? []).map((c) => {
-              // c.layout.h is the *inner* card-row count (what the user
-              // picked in the form). useDashboardGrid maps that to a
-              // taller outer row count so the chrome row sits on top
-              // without stealing space from the inner cards. Here we
-              // derive inner pixel dims directly from the inner rows
-              // and the outer rowHeight — guarantees inner cards
-              // render at exactly the same size as outer cards.
+              // c.layout.{w,h} are the category's *outer* dimensions in
+              // cells/rows. Compute the available inner area in pixels,
+              // then back out the inner cell width and row height. Inner
+              // cards end up slightly smaller than outer cards (the title
+              // bar + padding eat a fixed pixel budget) but a 2×2 category
+              // genuinely fits 2 cols × 2 rows of cards without overflow.
               const innerCols = Math.max(1, c.layout.w);
               const innerRows = Math.max(1, c.layout.h);
-              const innerW =
-                innerCols * cellPx + (innerCols - 1) * MARGIN; // flush, no horizontal padding shrink
-              const innerRowHeight = rowHeight;
+              const outerW =
+                innerCols * cellPx + (innerCols - 1) * MARGIN;
+              const outerH = innerRows * rowHeight + (innerRows - 1) * MARGIN;
+              const innerW = Math.max(80, outerW - CATEGORY_INNER_PADDING_X * 2);
+              const innerH =
+                outerH - CATEGORY_TITLE_PX - CATEGORY_INNER_PADDING_Y * 2;
+              const innerRowHeight = Math.max(
+                60,
+                (innerH - CATEGORY_INNER_MARGIN * (innerRows - 1)) / innerRows,
+              );
               return (
                 <div key={`c-${c.id}`}>
                   <CategoryCard
