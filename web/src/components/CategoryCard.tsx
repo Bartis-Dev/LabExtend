@@ -154,7 +154,7 @@ export function CategoryCard({
             width={innerWidth}
             margin={[innerMargin, innerMargin]}
             containerPadding={[0, 0]}
-            compactType={null}
+            compactType="vertical"
             preventCollision={false}
             isResizable
             isDraggable

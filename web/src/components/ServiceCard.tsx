@@ -28,15 +28,16 @@ function hostDisplay(host: string, port?: number | null): string {
   return noScheme;
 }
 
-function StatusDot({ status }: { status: HostStatus | undefined }) {
-  const cls =
-    status === 'up'
-      ? 'bg-success'
-      : status === 'down'
-        ? 'bg-danger'
-        : 'bg-fg-muted/30';
-  const label = status === 'up' ? 'Online' : status === 'down' ? 'Offline' : 'Not monitored';
-  return <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${cls}`} aria-label={label} title={label} />;
+function statusColor(status: HostStatus | undefined): string {
+  if (status === 'up') return 'bg-success';
+  if (status === 'down') return 'bg-danger';
+  return 'bg-fg-muted/30';
+}
+
+function statusLabel(status: HostStatus | undefined): string {
+  if (status === 'up') return 'Online';
+  if (status === 'down') return 'Offline';
+  return 'Not monitored';
 }
 
 function iconUrl(p?: string | null): string | null {
@@ -194,19 +195,32 @@ function HostRow({
   status: HostStatus | undefined;
   primary?: boolean;
 }) {
+  const isUp = status === 'up';
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
       onMouseDown={(e) => e.stopPropagation()}
-      className={`flex items-center gap-1.5 truncate rounded border border-border/60 bg-bg-elevated/50 px-2 py-1 font-mono text-[11px] transition-colors hover:border-accent hover:bg-bg-elevated ${
-        primary ? 'text-fg' : 'text-fg-muted'
+      aria-label={`${display} (${statusLabel(status)})`}
+      className={`group/host flex h-7 items-center overflow-hidden rounded-md border bg-bg-elevated/60 transition-all hover:translate-x-0.5 hover:border-accent hover:bg-bg-elevated ${
+        primary ? 'border-border-strong/60' : 'border-border/50'
       }`}
     >
-      <StatusDot status={status} />
-      <span className="flex-1 truncate">{display}</span>
-      <ExternalLinkIcon width={10} height={10} className="shrink-0 text-fg-muted opacity-50" />
+      <span
+        className={`flex h-full w-1 shrink-0 ${statusColor(status)} ${isUp ? 'animate-pulse' : ''}`}
+        title={statusLabel(status)}
+      />
+      <span
+        className={`flex-1 truncate px-2 font-mono text-xs ${primary ? 'text-fg' : 'text-fg-muted'}`}
+      >
+        {display}
+      </span>
+      <ExternalLinkIcon
+        width={11}
+        height={11}
+        className="mr-2 shrink-0 text-fg-muted opacity-40 transition-opacity group-hover/host:opacity-100"
+      />
     </a>
   );
 }

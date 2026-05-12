@@ -17,12 +17,12 @@ import {
 } from '@/components/Dashboard/crossGridDnd';
 import { FolderIcon, PlusIcon } from '@/components/icons';
 
-const DEFAULT_COLS = 6;
-const ROW_HEIGHT = 110;
-const MARGIN = 10;
-const CATEGORY_TITLE_PX = 36;
-const CATEGORY_INNER_PADDING = 8;
-const CATEGORY_INNER_MARGIN = 8;
+const DEFAULT_COLS = 5;
+const ROW_HEIGHT = 130;
+const MARGIN = 12;
+const CATEGORY_TITLE_PX = 40;
+const CATEGORY_INNER_PADDING = 10;
+const CATEGORY_INNER_MARGIN = 10;
 
 export default function Dashboard() {
   const [addServiceOpen, setAddServiceOpen] = useState(false);
@@ -159,7 +159,7 @@ export default function Dashboard() {
             width={width}
             margin={[MARGIN, MARGIN]}
             containerPadding={[0, 0]}
-            compactType={null}
+            compactType="vertical"
             preventCollision={false}
             isResizable
             isDraggable

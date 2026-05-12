@@ -79,8 +79,14 @@ export function useDashboardGrid(
   const safeCols = Math.max(2, cols);
 
   const catItems: Layout[] = (categories ?? []).map((c) => {
-    const w = clamp(c.layout.w, 2, safeCols);
-    const h = clamp(c.layout.h, 2, 10);
+    let w = clamp(c.layout.w, 1, safeCols);
+    let h = clamp(c.layout.h, 1, 10);
+    // Categories must have at least 2 cells of area (1×2, 2×1, …).
+    // Promote the shorter side to 2 if the user happens to land on 1×1.
+    if (w * h < 2) {
+      if (w <= h) h = 2;
+      else w = 2;
+    }
     const x = clamp(c.layout.x, 0, Math.max(0, safeCols - w));
     return {
       i: `c-${c.id}`,
@@ -88,8 +94,8 @@ export function useDashboardGrid(
       y: Math.max(0, c.layout.y),
       w,
       h,
-      minW: 2,
-      minH: 2,
+      minW: 1,
+      minH: 1,
       maxW: safeCols,
       maxH: 10,
     };
