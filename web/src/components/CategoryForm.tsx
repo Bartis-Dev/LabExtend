@@ -19,13 +19,27 @@ type Props = {
 
 const DEFAULT_COLS = 6;
 const MAX_HEIGHT = 10;
+const DEFAULT_BORDER = '#475569';
+
+// Curated muted swatches that read cleanly against a dark background.
+// Tailwind 600-700 tier — saturated enough to identify, never neon.
+const COLOR_PRESETS = [
+  '#475569', // slate
+  '#0f766e', // teal
+  '#1d4ed8', // blue
+  '#7c3aed', // violet
+  '#a21caf', // fuchsia
+  '#b91c1c', // red
+  '#b45309', // amber
+  '#15803d', // forest green
+];
 
 export function CategoryForm({ open, onClose, initial, defaultLayout }: Props) {
   const settings = useSettings();
   const cols = clampInt(Number(settings.data?.grid_cols ?? DEFAULT_COLS), 4, 12);
 
   const [name, setName] = useState('');
-  const [borderColor, setBorderColor] = useState('#3b82f6');
+  const [borderColor, setBorderColor] = useState(DEFAULT_BORDER);
   const [w, setW] = useState(3);
   const [h, setH] = useState(2);
   const [error, setError] = useState<string | null>(null);
@@ -109,26 +123,52 @@ export function CategoryForm({ open, onClose, initial, defaultLayout }: Props) {
             <span className="mb-2 block text-xs uppercase tracking-wide text-fg-muted">
               Border color
             </span>
-            <div className="rounded-lg border border-border bg-bg-elevated p-3">
-              <div className="grid place-items-center">
-                <Wheel
-                  width={180}
-                  height={180}
-                  color={hexToHsva(borderColor)}
-                  onChange={(c) => setBorderColor(hsvaToHex(c.hsva))}
-                />
+            <div className="space-y-3 rounded-lg border border-border bg-bg-elevated p-3">
+              {/* Curated swatch palette — 80% of users should pick from here. */}
+              <div className="grid grid-cols-8 gap-1.5">
+                {COLOR_PRESETS.map((c) => {
+                  const isActive = c.toLowerCase() === borderColor.toLowerCase();
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setBorderColor(c)}
+                      style={{ background: c }}
+                      className={`h-7 w-full rounded transition-all ${
+                        isActive
+                          ? 'scale-110 ring-2 ring-fg/40'
+                          : 'opacity-80 hover:scale-105 hover:opacity-100'
+                      }`}
+                      aria-label={`Color ${c}`}
+                    />
+                  );
+                })}
               </div>
-              <div className="mt-3 flex items-center gap-2">
-                <div
-                  className="h-8 w-8 shrink-0 rounded border border-border"
-                  style={{ background: borderColor }}
-                />
-                <input
-                  value={borderColor}
-                  onChange={(e) => setBorderColor(e.target.value)}
-                  className="flex-1 rounded border border-border bg-bg-card px-2 py-1 text-sm font-mono outline-none focus:border-accent"
-                />
-              </div>
+
+              <details className="text-xs">
+                <summary className="cursor-pointer select-none text-fg-muted hover:text-fg">
+                  Custom color
+                </summary>
+                <div className="mt-2 grid place-items-center">
+                  <Wheel
+                    width={140}
+                    height={140}
+                    color={hexToHsva(borderColor)}
+                    onChange={(c) => setBorderColor(hsvaToHex(c.hsva))}
+                  />
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <div
+                    className="h-7 w-7 shrink-0 rounded border border-border"
+                    style={{ background: borderColor }}
+                  />
+                  <input
+                    value={borderColor}
+                    onChange={(e) => setBorderColor(e.target.value)}
+                    className="flex-1 rounded border border-border bg-bg-card px-2 py-1 font-mono text-xs outline-none focus:border-accent"
+                  />
+                </div>
+              </details>
             </div>
           </div>
 

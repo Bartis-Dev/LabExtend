@@ -20,6 +20,14 @@
   opacity: 0.5;
 }
 
+/* While a grid item is being dragged, raise its z-index and make it
+   ignore any parent overflow:hidden so the card stays visible if the
+   cursor briefly crosses a category boundary. */
+.react-grid-item.react-draggable-dragging {
+  z-index: 50;
+  cursor: grabbing;
+}
+
 :root {
   --bg: #0a0a0a;
   --bg-card: #141414;

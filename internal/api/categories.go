@@ -63,7 +63,7 @@ func (s *Server) createCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.BorderColor == "" {
-		in.BorderColor = "#3b82f6"
+		in.BorderColor = "#475569"
 	}
 	if in.Layout.W <= 0 {
 		in.Layout.W = 3

@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS categories (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     name         TEXT    NOT NULL,
-    border_color TEXT    NOT NULL DEFAULT '#3b82f6',
+    border_color TEXT    NOT NULL DEFAULT '#475569',
     layout_x     INTEGER NOT NULL DEFAULT 0,
     layout_y     INTEGER NOT NULL DEFAULT 0,
     layout_w     INTEGER NOT NULL DEFAULT 3,

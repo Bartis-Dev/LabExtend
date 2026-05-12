@@ -10,16 +10,11 @@ import { ServiceForm } from '@/components/ServiceForm';
 import { CategoryCard } from '@/components/CategoryCard';
 import { CategoryForm } from '@/components/CategoryForm';
 import { useDashboardGrid } from '@/components/Dashboard/useDashboardGrid';
-import {
-  DND_MIME,
-  readPayload,
-  useMoveService,
-} from '@/components/Dashboard/crossGridDnd';
 import { FolderIcon, PlusIcon } from '@/components/icons';
 
 const DEFAULT_COLS = 5;
 const MARGIN = 12;
-const CATEGORY_TITLE_PX = 40;
+const CATEGORY_TITLE_PX = 36;
 const CATEGORY_INNER_PADDING = 10;
 const CATEGORY_INNER_MARGIN = 10;
 
@@ -52,55 +47,11 @@ export default function Dashboard() {
     safeCols,
   );
 
-  // cellPx: width of one outer grid cell, derived from container width and
-  // the active column count. rowHeight is bound to cellPx so a 1×1 cell is
-  // a square — same logic feeds the inner grid below so a 1×1 inner cell
-  // matches the outer baseline visually.
+  // cellPx: width of one outer grid cell. rowHeight is half of that so
+  // a 1×1 cell is a wide rectangle (2:1) — readable at a glance for the
+  // header + one host without wasting vertical space.
   const cellPx = (width - (safeCols - 1) * MARGIN) / safeCols;
-  const rowHeight = Math.max(120, Math.round(cellPx));
-
-  const move = useMoveService();
-  const [dropOutside, setDropOutside] = useState(false);
-
-  const acceptsSvc = (e: React.DragEvent) =>
-    Array.from(e.dataTransfer.types).includes(DND_MIME);
-
-  const onOuterDragOver = (e: React.DragEvent) => {
-    if (!acceptsSvc(e)) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    if (!dropOutside) setDropOutside(true);
-  };
-
-  const onOuterDragLeave = (e: React.DragEvent) => {
-    // Only clear when leaving the container itself, not when entering a child.
-    if (e.currentTarget === e.target) setDropOutside(false);
-  };
-
-  const onOuterDrop = (e: React.DragEvent) => {
-    setDropOutside(false);
-    const p = readPayload(e);
-    if (!p) return;
-    e.preventDefault();
-    if (p.fromCategoryId === null) return; // already loose
-    // Place at bottom of outer grid.
-    const loose = (services.data ?? []).filter((s) => s.category_id == null);
-    const cats = categories.data ?? [];
-    const maxY = Math.max(
-      0,
-      ...loose.map((s) => s.layout.y + s.layout.h),
-      ...cats.map((c) => c.layout.y + c.layout.h),
-    );
-    const w = Math.min(Math.max(1, p.w), safeCols);
-    move.mutate({
-      id: p.id,
-      categoryId: null,
-      x: 0,
-      y: maxY,
-      w,
-      h: Math.max(1, p.h),
-    });
-  };
+  const rowHeight = Math.max(70, Math.round(cellPx / 2));
 
   const uncategorized = (services.data ?? []).filter((s) => s.category_id == null);
   const servicesByCategory = new Map<number, typeof uncategorized>();
@@ -142,15 +93,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div
-        ref={containerRef}
-        onDragOver={onOuterDragOver}
-        onDragLeave={onOuterDragLeave}
-        onDrop={onOuterDrop}
-        className={`rounded transition-shadow ${
-          dropOutside ? 'shadow-[inset_0_0_0_2px_var(--accent)]' : ''
-        }`}
-      >
+      <div ref={containerRef}>
         {((services.data?.length ?? 0) > 0 || (categories.data?.length ?? 0) > 0) && (
           <GridLayout
             className="layout"
@@ -169,10 +112,8 @@ export default function Dashboard() {
             onLayoutChange={(l) => flushOuter(l)}
           >
             {(categories.data ?? []).map((c) => {
-              // Outer box size for this category, in pixels.
               const outerW = cellPx * c.layout.w + MARGIN * (c.layout.w - 1);
               const outerH = rowHeight * c.layout.h + MARGIN * (c.layout.h - 1);
-              // Inner grid usable area (minus title bar + inner padding).
               const innerW = Math.max(80, outerW - CATEGORY_INNER_PADDING * 2);
               const innerCols = Math.max(1, c.layout.w);
               const usableH = outerH - CATEGORY_TITLE_PX - CATEGORY_INNER_PADDING * 2;
