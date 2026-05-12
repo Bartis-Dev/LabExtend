@@ -60,11 +60,12 @@ const SOURCES: Record<Source['id'], Source> = {
   material: {
     id: 'material',
     label: 'Material',
+    // jsdelivr's legacy /v1/package/.../flat endpoint chokes on scoped
+    // npm packages (returns HTTP 400). Use the newer /v1/packages/...@latest
+    // form which handles scopes correctly. Response shape is the same.
     manifestUrls: [
-      'https://data.jsdelivr.com/v1/package/npm/@material-design-icons/svg/flat',
+      'https://data.jsdelivr.com/v1/packages/npm/@material-design-icons/svg@latest?structure=flat',
     ],
-    // Files look like /outlined/home/24px.svg — we map them to the
-    // category/name pair we serve from.
     parseFlatJsdelivr: (p) => {
       const m = p.match(/^\/outlined\/([^/]+)\/24px\.svg$/);
       return m ? m[1] : null;
@@ -78,13 +79,18 @@ const SOURCES: Record<Source['id'], Source> = {
     id: 'mdi',
     label: 'MDI',
     manifestUrls: [
-      'https://data.jsdelivr.com/v1/package/npm/@mdi/svg/flat',
+      'https://data.jsdelivr.com/v1/packages/npm/@mdi/svg@latest?structure=flat',
+      // Community mirror — used if jsdelivr blips.
+      'https://api.github.com/repos/Templarian/MaterialDesign-SVG/git/trees/master?recursive=1',
     ],
     parseFlatJsdelivr: (p) => {
       const m = p.match(/^\/svg\/(.+)\.svg$/);
       return m ? m[1] : null;
     },
-    parseGitTree: () => null,
+    parseGitTree: (p) => {
+      const m = p.match(/^svg\/(.+)\.svg$/);
+      return m ? m[1] : null;
+    },
     iconUrl: (n) => `https://cdn.jsdelivr.net/npm/@mdi/svg/svg/${n}.svg`,
     imgClass: 'invert',
   },
