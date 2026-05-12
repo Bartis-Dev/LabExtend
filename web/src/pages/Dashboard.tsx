@@ -10,13 +10,14 @@ import { ServiceForm } from '@/components/ServiceForm';
 import { CategoryCard } from '@/components/CategoryCard';
 import { CategoryForm } from '@/components/CategoryForm';
 import { useDashboardGrid } from '@/components/Dashboard/useDashboardGrid';
-import { FolderIcon, PlusIcon } from '@/components/icons';
+import { ContextMenu, useContextMenu } from '@/components/ContextMenu';
+import { FolderIcon, GripIcon, PlusIcon } from '@/components/icons';
 
 const DEFAULT_COLS = 5;
-const MARGIN = 12;
-const CATEGORY_TITLE_PX = 36;
-const CATEGORY_INNER_PADDING = 10;
-const CATEGORY_INNER_MARGIN = 10;
+const MARGIN = 24;
+const CATEGORY_TITLE_PX = 40;
+const CATEGORY_INNER_PADDING = 20;
+const CATEGORY_INNER_MARGIN = 20;
 
 export default function Dashboard() {
   const [addServiceOpen, setAddServiceOpen] = useState(false);
@@ -47,9 +48,6 @@ export default function Dashboard() {
     safeCols,
   );
 
-  // cellPx: width of one outer grid cell. rowHeight is half of that so
-  // a 1×1 cell is a wide rectangle (2:1) — readable at a glance for the
-  // header + one host without wasting vertical space.
   const cellPx = (width - (safeCols - 1) * MARGIN) / safeCols;
   const rowHeight = Math.max(70, Math.round(cellPx / 2));
 
@@ -63,24 +61,27 @@ export default function Dashboard() {
     }
   }
 
+  // Background right-click → Add service / Add category. Cards/categories
+  // stopPropagation on their own contextmenu so this only fires when the
+  // user clicked truly empty space.
+  const bgMenu = useContextMenu();
+
+  const handleBgContextMenu = (e: React.MouseEvent) => {
+    // Only fire if the right-click is on the dashboard background itself,
+    // not bubbling from a child card/category that didn't intercept.
+    e.preventDefault();
+    bgMenu.onContextMenu(e);
+  };
+
   return (
     <div className="p-6">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-5 flex items-center justify-between">
         <h1 className="text-2xl font-bold">Dashboard</h1>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setAddCategoryOpen(true)}
-            className="flex items-center gap-2 rounded border border-border px-3 py-2 hover:bg-bg-elevated"
-          >
-            <FolderIcon /> Add category
-          </button>
-          <button
-            onClick={() => setAddServiceOpen(true)}
-            className="flex items-center gap-2 rounded bg-accent px-4 py-2 font-semibold text-white hover:bg-accent-hover"
-          >
-            <PlusIcon /> Add service
-          </button>
-        </div>
+        <p className="text-xs text-fg-muted">
+          Right-click anywhere for actions · drag the
+          <GripIcon className="-mt-0.5 mx-1 inline-block align-middle" width={12} height={12} />
+          handle to reorder
+        </p>
       </div>
 
       {(services.isLoading || categories.isLoading) && (
@@ -88,12 +89,20 @@ export default function Dashboard() {
       )}
 
       {services.data?.length === 0 && categories.data?.length === 0 && (
-        <div className="rounded border border-dashed border-border p-12 text-center text-fg-muted">
-          No services yet. Click <span className="text-fg">Add service</span> to get started.
+        <div
+          className="rounded border border-dashed border-border p-12 text-center text-fg-muted"
+          onContextMenu={handleBgContextMenu}
+        >
+          No services yet. <span className="text-fg">Right-click anywhere</span> to add a
+          service or a category.
         </div>
       )}
 
-      <div ref={containerRef}>
+      <div
+        ref={containerRef}
+        onContextMenu={handleBgContextMenu}
+        className="min-h-[200px]"
+      >
         {((services.data?.length ?? 0) > 0 || (categories.data?.length ?? 0) > 0) && (
           <GridLayout
             className="layout"
@@ -107,7 +116,7 @@ export default function Dashboard() {
             preventCollision={false}
             isResizable
             isDraggable
-            draggableHandle=".rgl-outer-drag"
+            draggableHandle=".rgl-drag-handle"
             draggableCancel="button, a, input, select, textarea, .no-drag"
             onLayoutChange={(l) => flushOuter(l)}
           >
@@ -138,7 +147,7 @@ export default function Dashboard() {
               );
             })}
             {uncategorized.map((s) => (
-              <div key={`s-${s.id}`} className="rgl-outer-drag">
+              <div key={`s-${s.id}`}>
                 <ServiceCard service={s} />
               </div>
             ))}
@@ -148,6 +157,26 @@ export default function Dashboard() {
 
       <ServiceForm open={addServiceOpen} onClose={() => setAddServiceOpen(false)} />
       <CategoryForm open={addCategoryOpen} onClose={() => setAddCategoryOpen(false)} />
+
+      <ContextMenu
+        open={bgMenu.open}
+        x={bgMenu.x}
+        y={bgMenu.y}
+        onClose={bgMenu.close}
+        items={[
+          {
+            label: 'Add service',
+            icon: <PlusIcon width={14} height={14} />,
+            onClick: () => setAddServiceOpen(true),
+          },
+          {
+            label: 'Add category',
+            icon: <FolderIcon width={14} height={14} />,
+            onClick: () => setAddCategoryOpen(true),
+          },
+        ]}
+      />
     </div>
   );
 }
+

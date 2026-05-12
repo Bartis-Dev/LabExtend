@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { EditIcon, ExternalLinkIcon, TrashIcon } from './icons';
+import { EditIcon, ExternalLinkIcon, GripIcon, TrashIcon } from './icons';
 import { ConfirmDialog } from './Modal';
 import { ServiceForm } from './ServiceForm';
+import { ContextMenu, useContextMenu } from './ContextMenu';
 import { useDeleteService, useHealth } from '@/api/queries';
 import type { HostStatus, Service } from '@/api/types';
 
@@ -25,6 +26,16 @@ function hostDisplay(host: string, port?: number | null): string {
   const noScheme = host.replace(/^https?:\/\//i, '');
   if (port && !noScheme.includes(':')) return `${noScheme}:${port}`;
   return noScheme;
+}
+
+// protocolLabel picks the 3-letter badge text:
+//   https:// → SSL
+//   http://  → WEB
+//   no scheme → TCP (e.g. Minecraft, raw services)
+function protocolLabel(host: string): string {
+  if (/^https:\/\//i.test(host)) return 'SSL';
+  if (/^http:\/\//i.test(host)) return 'WEB';
+  return 'TCP';
 }
 
 function statusColor(status: HostStatus | undefined): string {
@@ -52,89 +63,80 @@ function Avatar({ name, icon }: { name: string; icon?: string | null }) {
       <img
         src={url}
         alt=""
-        className="h-7 w-7 shrink-0 rounded-md border border-border/60 bg-bg-elevated object-cover"
+        className="h-8 w-8 shrink-0 rounded-md border border-border/60 bg-bg-elevated object-cover"
         onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')}
       />
     );
   }
   const letter = name.trim().charAt(0).toUpperCase() || '?';
   return (
-    <div className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-gradient-to-br from-accent to-accent-hover text-xs font-bold text-white">
+    <div className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-gradient-to-br from-accent to-accent-hover text-sm font-bold text-white">
       {letter}
     </div>
   );
 }
 
-// ServiceCard fills its react-grid-layout cell. The card content stays
-// compact so a 1×1 cell shows avatar + name + a single host comfortably;
-// larger cells (h=2+) reveal description and alt host through overflow.
 export function ServiceCard({ service }: { service: Service }) {
   const [editOpen, setEditOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const del = useDeleteService();
   const health = useHealth();
   const status = health.data?.[service.id];
+  const menu = useContextMenu();
 
   return (
-    <div className="service-card group relative flex h-full flex-col overflow-hidden rounded-lg border border-border bg-bg-card p-2.5 shadow-sm transition-colors hover:border-border-strong">
-      {/* Action bar — visible on hover */}
-      <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5 rounded bg-bg-elevated/90 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setEditOpen(true);
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-          className="rounded p-1 text-fg-muted hover:bg-bg-card hover:text-fg"
-          aria-label="Edit"
-        >
-          <EditIcon width={13} height={13} />
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setConfirmOpen(true);
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-          className="rounded p-1 text-fg-muted hover:bg-bg-card hover:text-danger"
-          aria-label="Delete"
-        >
-          <TrashIcon width={13} height={13} />
-        </button>
+    <div
+      className="service-card relative flex h-full flex-col rounded-lg border border-border bg-bg-card p-3 shadow-md shadow-black/30"
+      onContextMenu={menu.onContextMenu}
+    >
+      {/* Permanent drag handle — top right. RGL's draggableHandle picks
+          this up; the rest of the card body is not draggable so the user
+          can right-click anywhere on the card without dragging it. */}
+      <div
+        className="rgl-drag-handle absolute right-2 top-2 z-10 cursor-grab rounded p-1 text-fg-muted/60 hover:bg-bg-elevated hover:text-fg active:cursor-grabbing"
+        title="Drag to reorder"
+        onContextMenu={(e) => e.stopPropagation()}
+      >
+        <GripIcon width={13} height={13} />
       </div>
 
       {/* Header */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2.5 pr-8">
         <Avatar name={service.name} icon={service.icon_path} />
-        <div className="min-w-0 flex-1 pr-12">
+        <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold leading-tight">
             {service.name}
           </div>
+          {service.description && (
+            <div className="mt-0.5 truncate text-[11px] text-fg-muted">
+              {service.description}
+            </div>
+          )}
         </div>
       </div>
 
-      {service.description && (
-        <div className="mt-1 line-clamp-2 text-[11px] leading-snug text-fg-muted">
-          {service.description}
-        </div>
-      )}
-
-      {/* Hosts */}
-      <div className="mt-auto flex flex-col gap-1 pt-1.5">
+      {/* Hosts — not full-width, sized to fit content with a max cap. */}
+      <div className="mt-2.5 flex flex-col items-start gap-1.5">
         <HostRow
           href={hostHref(service.host_primary, service.port_primary)}
           display={hostDisplay(service.host_primary, service.port_primary)}
+          protocol={protocolLabel(service.host_primary)}
           status={status?.primary}
-          primary
         />
         {service.host_alt && (
           <HostRow
             href={hostHref(service.host_alt, service.port_alt)}
             display={hostDisplay(service.host_alt, service.port_alt)}
+            protocol={protocolLabel(service.host_alt)}
             status={status?.alt}
+            secondary
           />
         )}
       </div>
+
+      {/* Intentional empty space at the bottom — reserved for upcoming
+          per-card content (system metrics, custom widgets, etc.). */}
+      <div className="flex-1" />
 
       <ServiceForm open={editOpen} onClose={() => setEditOpen(false)} initial={service} />
       <ConfirmDialog
@@ -147,6 +149,26 @@ export function ServiceCard({ service }: { service: Service }) {
           setConfirmOpen(false);
         }}
       />
+
+      <ContextMenu
+        open={menu.open}
+        x={menu.x}
+        y={menu.y}
+        onClose={menu.close}
+        items={[
+          {
+            label: 'Edit',
+            icon: <EditIcon width={14} height={14} />,
+            onClick: () => setEditOpen(true),
+          },
+          {
+            label: 'Delete',
+            icon: <TrashIcon width={14} height={14} />,
+            onClick: () => setConfirmOpen(true),
+            danger: true,
+          },
+        ]}
+      />
     </div>
   );
 }
@@ -154,40 +176,44 @@ export function ServiceCard({ service }: { service: Service }) {
 function HostRow({
   href,
   display,
+  protocol,
   status,
-  primary,
+  secondary,
 }: {
   href: string;
   display: string;
+  protocol: string;
   status: HostStatus | undefined;
-  primary?: boolean;
+  secondary?: boolean;
 }) {
-  const isUp = status === 'up';
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
       onMouseDown={(e) => e.stopPropagation()}
-      aria-label={`${display} (${statusLabel(status)})`}
-      className={`group/host flex h-6 items-center overflow-hidden rounded border bg-bg-elevated/60 transition-all hover:border-accent hover:bg-bg-elevated ${
-        primary ? 'border-border-strong/60' : 'border-border/50'
+      onContextMenu={(e) => e.stopPropagation()}
+      aria-label={`${display} (${statusLabel(status)}, ${protocol})`}
+      className={`group/host inline-flex h-8 max-w-full items-stretch overflow-hidden rounded-md border bg-bg-elevated/60 text-fg transition-colors hover:border-accent ${
+        secondary ? 'border-border/50' : 'border-border-strong/60'
       }`}
     >
       <span
-        className={`flex h-full w-1 shrink-0 ${statusColor(status)} ${isUp ? 'animate-pulse' : ''}`}
-        title={statusLabel(status)}
-      />
-      <span
-        className={`flex-1 truncate px-2 font-mono text-[11px] ${primary ? 'text-fg' : 'text-fg-muted'}`}
+        className={`flex shrink-0 items-center justify-center px-2 font-mono text-[10px] font-bold uppercase tracking-wider text-white ${statusColor(status)}`}
+        title={`${statusLabel(status)} · ${protocol}`}
       >
+        {protocol}
+      </span>
+      <span className="flex-1 truncate px-2.5 py-1 font-mono text-xs leading-relaxed">
         {display}
       </span>
-      <ExternalLinkIcon
-        width={10}
-        height={10}
-        className="mr-1.5 shrink-0 text-fg-muted opacity-40 transition-opacity group-hover/host:opacity-100"
-      />
+      <span className="flex items-center pr-2">
+        <ExternalLinkIcon
+          width={11}
+          height={11}
+          className="text-fg-muted opacity-40 transition-opacity group-hover/host:opacity-100"
+        />
+      </span>
     </a>
   );
 }

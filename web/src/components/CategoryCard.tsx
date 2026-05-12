@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import GridLayout, { type Layout } from 'react-grid-layout';
-import { EditIcon, TrashIcon } from './icons';
+import { EditIcon, GripIcon, TrashIcon } from './icons';
 import { ConfirmDialog } from './Modal';
 import { CategoryForm } from './CategoryForm';
+import { ContextMenu, useContextMenu } from './ContextMenu';
 import { ServiceCard } from './ServiceCard';
 import { useDeleteCategory } from '@/api/queries';
 import type { Category, Service } from '@/api/types';
@@ -31,8 +32,8 @@ export function CategoryCard({
   const [editOpen, setEditOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const del = useDeleteCategory();
+  const menu = useContextMenu();
 
-  // Defensive clamp for inner items.
   const innerLayout: Layout[] = services.map((s) => {
     const w = Math.min(Math.max(1, s.layout.w), innerCols);
     const h = Math.max(1, s.layout.h);
@@ -50,47 +51,33 @@ export function CategoryCard({
 
   return (
     <div
-      className="flex h-full flex-col rounded-lg border-2 bg-bg-card/40"
-      style={{ borderColor: category.border_color }}
+      className="flex h-full flex-col rounded-lg border border-border bg-bg-elevated/30 shadow-lg shadow-black/40"
+      onContextMenu={menu.onContextMenu}
     >
-      {/* Title bar — only this is a drag handle for the outer grid. */}
-      <div
-        className="rgl-outer-drag flex h-9 shrink-0 cursor-move items-center justify-between gap-2 rounded-t-md border-b px-3"
-        style={{ borderColor: category.border_color }}
-      >
-        <div className="flex-1 truncate text-sm font-semibold">{category.name}</div>
-        <div className="flex items-center gap-0.5">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setEditOpen(true);
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-            className="no-drag rounded p-1 text-fg-muted hover:bg-bg-elevated hover:text-fg"
-            aria-label="Edit category"
-          >
-            <EditIcon width={13} height={13} />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setConfirmOpen(true);
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-            className="no-drag rounded p-1 text-fg-muted hover:bg-bg-elevated hover:text-danger"
-            aria-label="Delete category"
-          >
-            <TrashIcon width={13} height={13} />
-          </button>
+      {/* Title bar — neutral; the category's chosen color shows as a small
+          dot next to the name, so the frame stays calm and one category's
+          color choice doesn't overpower the whole canvas. */}
+      <div className="flex h-10 shrink-0 items-center justify-between gap-2 rounded-t-md border-b border-border bg-bg-card px-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span
+            className="h-2.5 w-2.5 shrink-0 rounded-full"
+            style={{ background: category.border_color }}
+            aria-hidden
+          />
+          <div className="truncate text-sm font-semibold">{category.name}</div>
+        </div>
+        <div
+          className="rgl-drag-handle cursor-grab rounded p-1 text-fg-muted/60 hover:bg-bg-elevated hover:text-fg active:cursor-grabbing"
+          title="Drag to reorder"
+          onContextMenu={(e) => e.stopPropagation()}
+        >
+          <GripIcon width={13} height={13} />
         </div>
       </div>
 
-      {/* Inner body — service cards inside live in their own RGL grid.
-          Intentionally no overflow:hidden so a card being dragged within
-          the inner grid stays visible if it briefly extends past the
-          category bounds. */}
+      {/* Inner body */}
       <div
-        className="no-drag relative flex-1"
+        className="relative flex-1"
         style={{ padding: innerPadding }}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -111,6 +98,7 @@ export function CategoryCard({
             preventCollision={false}
             isResizable
             isDraggable
+            draggableHandle=".rgl-drag-handle"
             draggableCancel="button, a, input, select, textarea, .no-drag"
             onLayoutChange={(l) => onInnerLayoutChange(category.id, l)}
           >
@@ -133,6 +121,26 @@ export function CategoryCard({
           await del.mutateAsync(category.id);
           setConfirmOpen(false);
         }}
+      />
+
+      <ContextMenu
+        open={menu.open}
+        x={menu.x}
+        y={menu.y}
+        onClose={menu.close}
+        items={[
+          {
+            label: 'Edit category',
+            icon: <EditIcon width={14} height={14} />,
+            onClick: () => setEditOpen(true),
+          },
+          {
+            label: 'Delete category',
+            icon: <TrashIcon width={14} height={14} />,
+            onClick: () => setConfirmOpen(true),
+            danger: true,
+          },
+        ]}
       />
     </div>
   );
