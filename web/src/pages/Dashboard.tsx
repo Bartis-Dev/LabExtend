@@ -18,7 +18,6 @@ import {
 import { FolderIcon, PlusIcon } from '@/components/icons';
 
 const DEFAULT_COLS = 5;
-const ROW_HEIGHT = 130;
 const MARGIN = 12;
 const CATEGORY_TITLE_PX = 40;
 const CATEGORY_INNER_PADDING = 10;
@@ -54,9 +53,11 @@ export default function Dashboard() {
   );
 
   // cellPx: width of one outer grid cell, derived from container width and
-  // the active column count. Drives both the outer cards and the inner-grid
-  // sizing math so 1 inner cell ≈ 1 outer cell visually.
+  // the active column count. rowHeight is bound to cellPx so a 1×1 cell is
+  // a square — same logic feeds the inner grid below so a 1×1 inner cell
+  // matches the outer baseline visually.
   const cellPx = (width - (safeCols - 1) * MARGIN) / safeCols;
+  const rowHeight = Math.max(120, Math.round(cellPx));
 
   const move = useMoveService();
   const [dropOutside, setDropOutside] = useState(false);
@@ -155,7 +156,7 @@ export default function Dashboard() {
             className="layout"
             layout={outerLayout}
             cols={safeCols}
-            rowHeight={ROW_HEIGHT}
+            rowHeight={rowHeight}
             width={width}
             margin={[MARGIN, MARGIN]}
             containerPadding={[0, 0]}
@@ -170,7 +171,7 @@ export default function Dashboard() {
             {(categories.data ?? []).map((c) => {
               // Outer box size for this category, in pixels.
               const outerW = cellPx * c.layout.w + MARGIN * (c.layout.w - 1);
-              const outerH = ROW_HEIGHT * c.layout.h + MARGIN * (c.layout.h - 1);
+              const outerH = rowHeight * c.layout.h + MARGIN * (c.layout.h - 1);
               // Inner grid usable area (minus title bar + inner padding).
               const innerW = Math.max(80, outerW - CATEGORY_INNER_PADDING * 2);
               const innerCols = Math.max(1, c.layout.w);

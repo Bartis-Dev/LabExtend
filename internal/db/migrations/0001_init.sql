@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS settings (
 INSERT INTO themes (name, palette_json, custom_css, is_default, is_active, created_at, updated_at)
 VALUES (
     'Default Dark',
-    '{"--bg":"#0a0a0a","--bg-card":"#141414","--bg-elevated":"#1c1c1c","--fg":"#e5e5e5","--fg-muted":"#9ca3af","--accent":"#6366f1","--accent-hover":"#818cf8","--border":"#262626","--border-strong":"#3f3f46","--danger":"#ef4444","--success":"#22c55e","--warning":"#eab308"}',
+    '{"--bg":"#0a0a0a","--bg-card":"#141414","--bg-elevated":"#1c1c1c","--fg":"#e5e5e5","--fg-muted":"#9ca3af","--accent":"#15803d","--accent-hover":"#16a34a","--border":"#262626","--border-strong":"#3f3f46","--danger":"#b91c1c","--success":"#15803d","--warning":"#b45309"}',
     '',
     1,
     1,

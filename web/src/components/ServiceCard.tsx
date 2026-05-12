@@ -95,78 +95,82 @@ export function ServiceCard({ service }: { service: Service }) {
   return (
     <div
       ref={cardRef}
-      className="service-card group relative flex h-full flex-col overflow-hidden rounded-lg border border-border bg-bg-card p-2.5 shadow-sm transition-colors hover:border-border-strong"
+      className="service-card group relative flex h-full overflow-hidden rounded-lg border border-border bg-bg-card shadow-sm transition-colors hover:border-border-strong"
     >
-      {/* Action bar — visible on hover */}
-      <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5 rounded bg-bg-elevated/90 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setEditOpen(true);
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-          className="rounded p-1 text-fg-muted hover:bg-bg-card hover:text-fg"
-          aria-label="Edit"
-        >
-          <EditIcon width={13} height={13} />
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setConfirmOpen(true);
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-          className="rounded p-1 text-fg-muted hover:bg-bg-card hover:text-danger"
-          aria-label="Delete"
-        >
-          <TrashIcon width={13} height={13} />
-        </button>
-      </div>
-
-      {/* Cross-grid drag handle — visible on hover. HTML5 native DnD so it
-          coexists with react-grid-layout's mouse-driven within-grid drag. */}
+      {/* Cross-grid drag rail — visible at all times. Click+drag this strip
+          to move the card to another category (or out of one). HTML5 native
+          DnD; coexists with react-grid-layout's within-grid mouse drag
+          because '.no-drag' is in RGL's draggableCancel list. */}
       <div
         draggable
         onDragStart={handleDragStart}
         onMouseDown={(e) => e.stopPropagation()}
-        className="absolute left-1.5 top-1.5 z-10 cursor-grab rounded bg-bg-elevated/90 p-0.5 text-fg-muted opacity-0 backdrop-blur-sm transition-opacity hover:text-fg group-hover:opacity-100 active:cursor-grabbing"
+        className="no-drag flex w-3 shrink-0 cursor-grab items-center justify-center border-r border-border/40 bg-bg-elevated/30 text-fg-muted/40 transition-colors hover:bg-bg-elevated hover:text-fg active:cursor-grabbing"
         aria-label="Drag between categories"
         title="Drag to another category or outside"
       >
-        <GripIcon width={13} height={13} />
+        <GripIcon width={12} height={12} />
       </div>
 
-      {/* Header */}
-      <div className="flex items-center gap-2">
-        <Avatar name={service.name} icon={service.icon_path} />
-        <div className="min-w-0 flex-1 pr-12">
-          <div className="truncate text-sm font-semibold leading-tight">
-            {service.name}
+      <div className="relative flex min-w-0 flex-1 flex-col p-2.5">
+        {/* Action bar — visible on hover */}
+        <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5 rounded bg-bg-elevated/90 opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditOpen(true);
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="rounded p-1 text-fg-muted hover:bg-bg-card hover:text-fg"
+            aria-label="Edit"
+          >
+            <EditIcon width={13} height={13} />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfirmOpen(true);
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="rounded p-1 text-fg-muted hover:bg-bg-card hover:text-danger"
+            aria-label="Delete"
+          >
+            <TrashIcon width={13} height={13} />
+          </button>
+        </div>
+
+        {/* Header */}
+        <div className="flex items-center gap-2">
+          <Avatar name={service.name} icon={service.icon_path} />
+          <div className="min-w-0 flex-1 pr-12">
+            <div className="truncate text-sm font-semibold leading-tight">
+              {service.name}
+            </div>
           </div>
         </div>
-      </div>
 
-      {service.description && (
-        <div className="mt-1.5 line-clamp-2 text-[11px] leading-snug text-fg-muted">
-          {service.description}
-        </div>
-      )}
-
-      {/* Hosts */}
-      <div className="mt-auto flex flex-col gap-1 pt-2">
-        <HostRow
-          href={hostHref(service.host_primary, service.port_primary)}
-          display={hostDisplay(service.host_primary, service.port_primary)}
-          status={status?.primary}
-          primary
-        />
-        {service.host_alt && (
-          <HostRow
-            href={hostHref(service.host_alt, service.port_alt)}
-            display={hostDisplay(service.host_alt, service.port_alt)}
-            status={status?.alt}
-          />
+        {service.description && (
+          <div className="mt-1.5 line-clamp-2 text-[11px] leading-snug text-fg-muted">
+            {service.description}
+          </div>
         )}
+
+        {/* Hosts */}
+        <div className="mt-auto flex flex-col gap-1 pt-2">
+          <HostRow
+            href={hostHref(service.host_primary, service.port_primary)}
+            display={hostDisplay(service.host_primary, service.port_primary)}
+            status={status?.primary}
+            primary
+          />
+          {service.host_alt && (
+            <HostRow
+              href={hostHref(service.host_alt, service.port_alt)}
+              display={hostDisplay(service.host_alt, service.port_alt)}
+              status={status?.alt}
+            />
+          )}
+        </div>
       </div>
 
       <ServiceForm open={editOpen} onClose={() => setEditOpen(false)} initial={service} />

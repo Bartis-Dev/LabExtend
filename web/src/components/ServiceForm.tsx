@@ -26,7 +26,7 @@ function emptyInput(): ServiceInput {
     host_alt: null,
     port_alt: null,
     category_id: null,
-    layout: { x: 0, y: 0, w: 1, h: 2 },
+    layout: { x: 0, y: 0, w: 1, h: 1 },
     ping_primary: false,
     ping_alt: false,
     hc_primary_enabled: false,

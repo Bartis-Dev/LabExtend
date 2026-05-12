@@ -158,7 +158,7 @@ export function CategoryCard({
             preventCollision={false}
             isResizable
             isDraggable
-            draggableCancel="button, a, input, select, textarea"
+            draggableCancel="button, a, input, select, textarea, .no-drag"
             onLayoutChange={(l) => onInnerLayoutChange(category.id, l)}
           >
             {services.map((s) => (
