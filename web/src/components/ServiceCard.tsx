@@ -4,7 +4,7 @@ import { ConfirmDialog } from './Modal';
 import { ServiceForm } from './ServiceForm';
 import { ContextMenu, useContextMenu } from './ContextMenu';
 import { useDeleteService, useHealth } from '@/api/queries';
-import type { HostStatus, Service, ServiceStatus } from '@/api/types';
+import type { HostStatus, Service } from '@/api/types';
 
 function hostHref(host: string, port?: number | null): string {
   if (/^https?:\/\//i.test(host)) {
@@ -46,40 +46,8 @@ function statusDotColor(status: HostStatus | undefined): string {
   return 'bg-fg-muted/40';
 }
 
-// Aggregate status across both hosts: 'up' when every monitored host is up,
-// 'partial' when at least one is up and at least one is down, 'down' when
-// every monitored host is down, 'na' when nothing is monitored at all.
-function aggregateStatus(svc: Service, st: ServiceStatus | undefined): 'up' | 'down' | 'partial' | 'na' {
-  const probes: HostStatus[] = [];
-  const primaryMon = svc.ping_primary || svc.hc_primary_enabled;
-  const altMon = !!svc.host_alt && (svc.ping_alt || svc.hc_alt_enabled);
-  if (primaryMon) probes.push(st?.primary ?? 'n/a');
-  if (altMon) probes.push(st?.alt ?? 'n/a');
-  if (probes.length === 0) return 'na';
-  const ups = probes.filter((s) => s === 'up').length;
-  const downs = probes.filter((s) => s === 'down').length;
-  if (ups === probes.length) return 'up';
-  if (downs === probes.length) return 'down';
-  return 'partial';
-}
-
-function bookmarkColor(s: 'up' | 'down' | 'partial' | 'na'): string {
-  if (s === 'up') return 'bg-success';
-  if (s === 'partial') return 'bg-warning';
-  if (s === 'down') return 'bg-danger';
-  return 'bg-fg-muted/40';
-}
-
-function bookmarkLabel(s: 'up' | 'down' | 'partial' | 'na'): string {
-  if (s === 'up') return 'Online';
-  if (s === 'partial') return 'Partial';
-  if (s === 'down') return 'Offline';
-  return 'N/A';
-}
-
 function iconUrl(p?: string | null): string | null {
   if (!p) return null;
-  // Allow either a remote URL (icon picker) or a local upload path.
   if (/^https?:\/\//i.test(p)) return p;
   const name = p.startsWith('icons/') ? p.slice('icons/'.length) : p;
   return `/api/icons/${name}`;
@@ -87,7 +55,7 @@ function iconUrl(p?: string | null): string | null {
 
 function Avatar({ name, icon }: { name: string; icon?: string | null }) {
   const url = iconUrl(icon);
-  if (!url) return null; // no fallback — empty header reads cleaner than a coloured letter block
+  if (!url) return null;
   return (
     <img
       src={url}
@@ -96,65 +64,22 @@ function Avatar({ name, icon }: { name: string; icon?: string | null }) {
       onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')}
     />
   );
-  // 'name' is intentionally unused here but kept for future fallback work.
   void name;
 }
 
 export function ServiceCard({ service }: { service: Service }) {
   const [editOpen, setEditOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [tooltipOpen, setTooltipOpen] = useState(false);
   const del = useDeleteService();
   const health = useHealth();
   const status = health.data?.[service.id];
   const menu = useContextMenu();
-  const agg = aggregateStatus(service, status);
 
   return (
     <div
       className="service-card relative flex h-full flex-col rounded-lg border border-border bg-bg-card p-3.5 shadow-md shadow-black/30"
       onContextMenu={menu.onContextMenu}
     >
-      {/* Status bookmark — hangs from the top edge, ~70% from left.
-          Aggregates across both hosts. Hovering shows a per-host breakdown. */}
-      {agg !== 'na' && (
-        <div
-          className="absolute -top-1.5 left-[68%] z-10"
-          onMouseEnter={() => setTooltipOpen(true)}
-          onMouseLeave={() => setTooltipOpen(false)}
-        >
-          <div
-            className={`rounded-md px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white shadow-md ${bookmarkColor(agg)}`}
-          >
-            {bookmarkLabel(agg)}
-          </div>
-          {tooltipOpen && (
-            <div className="absolute right-0 top-full z-20 mt-2 min-w-[14rem] rounded-md border border-border bg-bg-card p-2.5 text-xs shadow-2xl">
-              <StatusRow
-                label="Primary"
-                display={hostDisplay(service.host_primary, service.port_primary)}
-                status={
-                  service.ping_primary || service.hc_primary_enabled
-                    ? (status?.primary ?? 'n/a')
-                    : undefined
-                }
-              />
-              {service.host_alt && (
-                <StatusRow
-                  label="Alt"
-                  display={hostDisplay(service.host_alt, service.port_alt)}
-                  status={
-                    service.ping_alt || service.hc_alt_enabled
-                      ? (status?.alt ?? 'n/a')
-                      : undefined
-                  }
-                />
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Drag handle — top right */}
       <div
         className="rgl-drag-handle absolute right-2 top-2 z-10 cursor-grab rounded p-1 text-fg-muted/60 hover:bg-bg-elevated hover:text-fg active:cursor-grabbing"
@@ -236,27 +161,6 @@ export function ServiceCard({ service }: { service: Service }) {
   );
 }
 
-function StatusRow({
-  label,
-  display,
-  status,
-}: {
-  label: string;
-  display: string;
-  status: HostStatus | undefined;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 py-1">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className={`h-2 w-2 shrink-0 rounded-full ${statusDotColor(status)}`} />
-        <span className="text-fg-muted">{label}:</span>
-        <span className="truncate font-mono text-fg">{display}</span>
-      </div>
-      <span className="shrink-0 text-fg-muted">{status ? statusLabel(status) : 'Off'}</span>
-    </div>
-  );
-}
-
 function HostRow({
   href,
   display,
@@ -282,11 +186,9 @@ function HostRow({
         secondary ? 'border-border/50' : 'border-border-strong/60'
       }`}
     >
-      {/* Status dot — small, on its own */}
       <span className="flex shrink-0 items-center pl-2.5">
         <span className={`h-2 w-2 rounded-full ${statusDotColor(status)}`} title={statusLabel(status)} />
       </span>
-      {/* Protocol label — plain text, subtle background, no shouting */}
       <span className="flex shrink-0 items-center border-r border-border/40 px-2 font-mono text-[10px] font-medium uppercase tracking-wider text-fg-muted">
         {protocol}
       </span>
