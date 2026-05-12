@@ -129,6 +129,9 @@ export function useDashboardGrid(
         minH: 1,
         maxW: safeCols,
         maxH: 10,
+        // Service cards are not user-resizable — their size is implied
+        // by the grid baseline (1×1 = one card). Only categories resize.
+        isResizable: false,
       };
     });
 

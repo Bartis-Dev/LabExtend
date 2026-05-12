@@ -52,6 +52,9 @@ export function CategoryCard({
       h,
       minW: 1,
       minH: 1,
+      // Inner service cards are not resizable either; their 1×1
+      // footprint inside the category matches the dashboard baseline.
+      isResizable: false,
     };
   });
 

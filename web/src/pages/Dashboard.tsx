@@ -21,8 +21,8 @@ const CATEGORY_INNER_MARGIN = 24;
 // Fixed cell width: cards and categories keep the same physical size no
 // matter how wide the browser is. If the viewport gets narrow, the
 // dashboard scrolls horizontally instead of squeezing every card.
-const CELL_PX = 300;
-const ROW_PX = 150;
+const CELL_PX = 240;
+const ROW_PX = 120;
 
 export default function Dashboard() {
   const [addServiceOpen, setAddServiceOpen] = useState(false);
