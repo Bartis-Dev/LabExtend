@@ -15,7 +15,15 @@ import (
 	"github.com/Bartis-Dev/LabExtend/internal/config"
 	"github.com/Bartis-Dev/LabExtend/internal/db"
 	"github.com/Bartis-Dev/LabExtend/internal/healthcheck"
+	"github.com/Bartis-Dev/LabExtend/internal/ddns"
+	"github.com/Bartis-Dev/LabExtend/internal/docs"
+	"github.com/Bartis-Dev/LabExtend/internal/modules"
+	"github.com/Bartis-Dev/LabExtend/internal/notes"
+	"github.com/Bartis-Dev/LabExtend/internal/servercrypto"
 	"github.com/Bartis-Dev/LabExtend/internal/settings"
+	"github.com/Bartis-Dev/LabExtend/internal/stats"
+	"github.com/Bartis-Dev/LabExtend/internal/vault"
+	"github.com/Bartis-Dev/LabExtend/internal/wol"
 	web "github.com/Bartis-Dev/LabExtend/web"
 )
 
@@ -40,6 +48,8 @@ func main() {
 	}
 
 	st := settings.New(database)
+	mods := modules.New(database)
+	vlt := vault.New(database)
 
 	if cfg.PasswordReset {
 		if _, err := database.Exec(`DELETE FROM users`); err != nil {
@@ -61,7 +71,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	srv := api.New(database, cfg, st, []byte(jwtSecret))
+	tokenCipher, err := servercrypto.New([]byte(jwtSecret), "ddns/provider-token")
+	if err != nil {
+		slog.Error("ddns token cipher", "err", err)
+		os.Exit(1)
+	}
+	ddnsStore := ddns.New(database, tokenCipher)
+	wolStore := wol.New(database)
+	docsStore := docs.New(database)
+	notesStore := notes.New(database)
+	statsStore := stats.New(database)
+
+	srv := api.New(database, cfg, st, mods, vlt, ddnsStore, wolStore, docsStore, notesStore, statsStore, []byte(jwtSecret))
 
 	// Healthcheck worker + hub. The interval can be overridden at runtime
 	// via PUT /api/settings; we honour the env-supplied default here.
@@ -75,6 +96,17 @@ func main() {
 	srv.Hub = hub
 	srv.Worker = worker
 	go worker.Run(ctx)
+
+	// DDNS worker honours the ddns_check_interval setting (default 5min).
+	ddnsInterval := 5 * time.Minute
+	if v, _ := st.Get(settings.KeyDDNSCheckInterval); v != "" {
+		if d, err := config.ParseDuration(v); err == nil {
+			ddnsInterval = d
+		}
+	}
+	ddnsWorker := ddns.NewWorker(ddnsStore, ddnsInterval)
+	srv.DDNSWorker = ddnsWorker
+	go ddnsWorker.Run(ctx)
 
 	webHandler := spaHandler(http.FS(web.FS()))
 	handler := srv.Routes(webHandler)

@@ -39,6 +39,26 @@ var allowedSettings = map[string]func(value string) (string, error){
 		}
 		return v, nil
 	},
+	settingsstore.KeyDDNSCheckInterval: func(v string) (string, error) {
+		d, err := config.ParseDuration(v)
+		if err != nil {
+			return "", &validationError{Msg: "ddns_check_interval must be a duration (e.g. 5m, 15m)"}
+		}
+		if d < 60_000_000_000 || d > 3_600_000_000_000 { // 1min..1h
+			return "", &validationError{Msg: "ddns_check_interval must be between 1m and 1h"}
+		}
+		return v, nil
+	},
+	settingsstore.KeyVaultAutoLockMinutes: func(v string) (string, error) {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return "", &validationError{Msg: "vault_auto_lock_minutes must be an integer"}
+		}
+		if n < 1 || n > 60 {
+			return "", &validationError{Msg: "vault_auto_lock_minutes must be between 1 and 60"}
+		}
+		return strconv.Itoa(n), nil
+	},
 	settingsstore.KeyStatusRefreshInterval: func(v string) (string, error) {
 		d, err := config.ParseDuration(v)
 		if err != nil {

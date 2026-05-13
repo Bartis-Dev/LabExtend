@@ -1,0 +1,140 @@
+import type { Shell } from './types';
+
+export const docker: Shell = {
+  id: 'docker',
+  label: 'Docker',
+  description: 'Common docker and docker compose commands.',
+  icon: 'container',
+  commands: [
+    {
+      id: 'run',
+      name: 'docker run',
+      category: 'Containers',
+      description: 'Run a command in a new container.',
+      template: 'docker run {flags} {image} {command}',
+      args: [
+        { key: 'image', name: 'Image', description: 'Image name and optional tag.', required: true, placeholder: 'nginx:alpine' },
+        { key: 'command', name: 'Command', description: 'Optional command to run.', placeholder: '' },
+      ],
+      flags: [
+        { key: 'detach', flag: '-d', description: 'Run in background.', type: 'bool' },
+        { key: 'interactive', flag: '-it', description: 'Interactive TTY (combine flag).', type: 'bool' },
+        { key: 'rm', flag: '--rm', description: 'Remove container when it exits.', type: 'bool' },
+        { key: 'name', flag: '--name', description: 'Container name.', type: 'string', placeholder: 'my-app' },
+        { key: 'port', flag: '-p', description: 'Publish port (HOST:CONTAINER).', type: 'string', placeholder: '8080:80' },
+        { key: 'env', flag: '-e', description: 'Environment variable.', type: 'string', placeholder: 'KEY=value' },
+        { key: 'volume', flag: '-v', description: 'Bind mount (HOST:CONTAINER).', type: 'string', placeholder: '/data:/data' },
+        { key: 'network', flag: '--network', description: 'Network to attach.', type: 'string', placeholder: 'bridge' },
+        { key: 'restart', flag: '--restart', description: 'Restart policy.', type: 'enum', options: ['no', 'on-failure', 'unless-stopped', 'always'] },
+        { key: 'user', flag: '--user', description: 'UID:GID inside container.', type: 'string', placeholder: '1000:1000' },
+      ],
+      examples: [
+        'docker run -d --name web -p 8080:80 nginx:alpine',
+        'docker run --rm -it ubuntu:24.04 bash',
+      ],
+    },
+    {
+      id: 'compose-up',
+      name: 'docker compose up',
+      category: 'Compose',
+      description: 'Create and start services defined in a compose file.',
+      template: 'docker compose {flags} up {upflags} {service}',
+      args: [
+        { key: 'service', name: 'Service', description: 'Optional service name.', placeholder: '' },
+      ],
+      flags: [
+        { key: 'file', flag: '-f', description: 'Compose file path.', type: 'string', placeholder: 'docker-compose.yml' },
+        { key: 'project', flag: '-p', description: 'Project name override.', type: 'string', placeholder: 'my-stack' },
+      ],
+      examples: [
+        'docker compose up -d',
+        'docker compose -f stack.yml up -d',
+      ],
+      notes: 'Add upflags like -d and --build separately. (This builder shows the main `compose` flags; chain `-d --build` manually after "up".)',
+    },
+    {
+      id: 'exec',
+      name: 'docker exec',
+      category: 'Containers',
+      description: 'Run a command inside a running container.',
+      template: 'docker exec {flags} {container} {command}',
+      args: [
+        { key: 'container', name: 'Container', description: 'Name or ID.', required: true, placeholder: 'web' },
+        { key: 'command', name: 'Command', description: 'Command to run.', required: true, placeholder: 'sh' },
+      ],
+      flags: [
+        { key: 'interactive', flag: '-it', description: 'Interactive TTY.', type: 'bool' },
+        { key: 'user', flag: '--user', description: 'UID inside container.', type: 'string', placeholder: 'root' },
+        { key: 'workdir', flag: '--workdir', description: 'Working directory.', type: 'string', placeholder: '/app' },
+      ],
+      examples: ['docker exec -it web sh', 'docker exec --user root web apt update'],
+    },
+    {
+      id: 'logs',
+      name: 'docker logs',
+      category: 'Containers',
+      description: 'Fetch container logs.',
+      template: 'docker logs {flags} {container}',
+      args: [
+        { key: 'container', name: 'Container', description: 'Name or ID.', required: true, placeholder: 'web' },
+      ],
+      flags: [
+        { key: 'follow', flag: '-f', description: 'Follow log output.', type: 'bool' },
+        { key: 'tail', flag: '--tail', description: 'Number of lines from the end.', type: 'number', placeholder: '100' },
+        { key: 'since', flag: '--since', description: 'Show logs since timestamp/duration.', type: 'string', placeholder: '1h' },
+        { key: 'timestamps', flag: '-t', description: 'Show timestamps.', type: 'bool' },
+      ],
+      examples: ['docker logs -f --tail 200 web'],
+    },
+    {
+      id: 'ps',
+      name: 'docker ps',
+      category: 'Containers',
+      description: 'List containers.',
+      template: 'docker ps {flags}',
+      flags: [
+        { key: 'all', flag: '-a', description: 'Show all (including stopped).', type: 'bool' },
+        { key: 'quiet', flag: '-q', description: 'Only display IDs.', type: 'bool' },
+        { key: 'filter', flag: '--filter', description: 'Filter (e.g. status=exited).', type: 'string', placeholder: 'status=exited' },
+      ],
+      examples: ['docker ps -a', 'docker ps -q --filter status=exited'],
+    },
+    {
+      id: 'network-create',
+      name: 'docker network create',
+      category: 'Networks',
+      description: 'Create a docker network.',
+      template: 'docker network create {flags} {name}',
+      args: [
+        { key: 'name', name: 'Name', description: 'Network name.', required: true, placeholder: 'app-net' },
+      ],
+      flags: [
+        { key: 'driver', flag: '--driver', description: 'Driver.', type: 'enum', options: ['bridge', 'overlay', 'host', 'macvlan'] },
+        { key: 'subnet', flag: '--subnet', description: 'CIDR for the bridge subnet.', type: 'string', placeholder: '172.20.0.0/24' },
+      ],
+      examples: ['docker network create --driver bridge app-net'],
+    },
+    {
+      id: 'system-prune',
+      name: 'docker system prune',
+      category: 'Cleanup',
+      description: 'Remove unused data (stopped containers, dangling images, networks).',
+      template: 'docker system prune {flags}',
+      flags: [
+        { key: 'force', flag: '-f', description: 'Don\'t prompt for confirmation.', type: 'bool' },
+        { key: 'volumes', flag: '--volumes', description: 'Also prune anonymous volumes. ⚠️', type: 'bool' },
+        { key: 'all', flag: '-a', description: 'Remove all unused images, not just dangling.', type: 'bool' },
+      ],
+      examples: ['docker system prune -af'],
+      notes: '⚠️ With --volumes, anonymous volumes are deleted; named volumes are kept. Always double-check before running on shared hosts.',
+    },
+  ],
+  paths: [
+    { path: '/var/lib/docker', description: 'Docker root data directory (overlay layers, volumes).', category: 'Daemon' },
+    { path: '/etc/docker/daemon.json', description: 'Docker daemon configuration.', category: 'Daemon' },
+    { path: '~/.docker/config.json', description: 'Per-user Docker config (registry auth, plugins).', category: 'Client' },
+    { path: 'docker-compose.yml', description: 'Compose service definitions.', category: 'Compose' },
+    { path: '.dockerignore', description: 'Patterns to exclude from build context.', category: 'Build' },
+    { path: 'Dockerfile', description: 'Image build recipe.', category: 'Build' },
+  ],
+};

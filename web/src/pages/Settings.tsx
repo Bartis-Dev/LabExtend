@@ -1,32 +1,68 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ThemeEditor } from '@/components/theme/ThemeEditor';
+import { ModulesTab } from '@/components/settings/ModulesTab';
 import {
   useSettings,
   useUpdateSettings,
 } from '@/api/queries';
 import { api, ApiError } from '@/api/client';
 
+const TABS = [
+  { id: 'branding', label: 'Branding' },
+  { id: 'theme', label: 'Theme' },
+  { id: 'layout', label: 'Layout' },
+  { id: 'healthcheck', label: 'Healthcheck' },
+  { id: 'modules', label: 'Modules' },
+  { id: 'vault', label: 'Vault' },
+  { id: 'account', label: 'Account' },
+] as const;
+type TabId = (typeof TABS)[number]['id'];
+
 export default function Settings() {
+  const [params, setParams] = useSearchParams();
+  const raw = params.get('tab') ?? 'branding';
+  const tab: TabId =
+    (TABS.map((t) => t.id) as readonly string[]).includes(raw) ? (raw as TabId) : 'branding';
+
   return (
-    <div className="mx-auto max-w-5xl space-y-10 p-6">
-      <Section title="Branding">
-        <BrandingSettings />
-      </Section>
-      <Section title="Theme">
-        <ThemeEditor />
-      </Section>
-      <Section title="Layout">
-        <LayoutSettings />
-      </Section>
-      <Section title="Healthcheck">
-        <HealthcheckSettings />
-      </Section>
-      <Section title="Status refresh">
-        <StatusRefreshSettings />
-      </Section>
-      <Section title="Account">
-        <PasswordChange />
-      </Section>
+    <div className="mx-auto max-w-5xl p-6">
+      <nav className="mb-6 flex flex-wrap gap-1 border-b border-border">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setParams({ tab: t.id }, { replace: true })}
+            className={
+              '-mb-px px-4 py-2 text-sm transition-colors ' +
+              (tab === t.id
+                ? 'border-b-2 border-accent text-fg'
+                : 'border-b-2 border-transparent text-fg-muted hover:text-fg')
+            }
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {tab === 'branding' && <BrandingSettings />}
+      {tab === 'theme' && <ThemeEditor />}
+      {tab === 'layout' && <LayoutSettings />}
+      {tab === 'healthcheck' && (
+        <div className="space-y-6">
+          <Section title="Healthcheck">
+            <HealthcheckSettings />
+          </Section>
+          <Section title="Status refresh">
+            <StatusRefreshSettings />
+          </Section>
+          <Section title="DDNS check interval">
+            <DDNSIntervalSettings />
+          </Section>
+        </div>
+      )}
+      {tab === 'modules' && <ModulesTab />}
+      {tab === 'vault' && <VaultSettings />}
+      {tab === 'account' && <PasswordChange />}
     </div>
   );
 }
@@ -235,6 +271,115 @@ function StatusRefreshSettings() {
         Save
       </button>
       {msg && <span className="text-sm text-fg-muted">{msg}</span>}
+    </div>
+  );
+}
+
+// --- DDNS interval --------------------------------------------------------
+
+function DDNSIntervalSettings() {
+  const settings = useSettings();
+  const update = useUpdateSettings();
+  const [interval, setInterval] = useState('5m');
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (settings.data?.ddns_check_interval) setInterval(settings.data.ddns_check_interval);
+  }, [settings.data]);
+
+  const save = async () => {
+    setMsg(null);
+    try {
+      await update.mutateAsync({
+        ...(settings.data ?? {}),
+        ddns_check_interval: interval,
+      });
+      setMsg('Saved.');
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : 'save failed');
+    }
+  };
+
+  return (
+    <div className="flex items-end gap-3">
+      <label className="block">
+        <span className="mb-1 block text-xs text-fg-muted">
+          How often the DDNS worker checks the public IP and updates flagged records
+          (Go duration, 1m–1h). Default 5m.
+        </span>
+        <input
+          value={interval}
+          onChange={(e) => setInterval(e.target.value)}
+          placeholder="5m"
+          className="w-40 rounded border border-border bg-bg-elevated px-3 py-2 outline-none focus:border-accent"
+        />
+      </label>
+      <button
+        onClick={save}
+        disabled={update.isPending}
+        className="rounded bg-accent px-4 py-2 text-white hover:bg-accent-hover disabled:opacity-50"
+      >
+        Save
+      </button>
+      {msg && <span className="text-sm text-fg-muted">{msg}</span>}
+    </div>
+  );
+}
+
+// --- Vault ----------------------------------------------------------------
+
+function VaultSettings() {
+  const settings = useSettings();
+  const update = useUpdateSettings();
+  const [minutes, setMinutes] = useState('5');
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const v = settings.data?.vault_auto_lock_minutes;
+    if (v) setMinutes(v);
+  }, [settings.data]);
+
+  const save = async () => {
+    setMsg(null);
+    try {
+      await update.mutateAsync({
+        ...(settings.data ?? {}),
+        vault_auto_lock_minutes: minutes,
+      });
+      setMsg('Saved.');
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : 'save failed');
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-fg-muted">
+        The Secrets vault locks itself automatically when you stop interacting
+        with the page. The master password is required to unlock again — it is
+        never stored anywhere on the server.
+      </p>
+      <div className="flex items-end gap-3">
+        <label className="block">
+          <span className="mb-1 block text-xs text-fg-muted">Auto-lock after (minutes, 1–60)</span>
+          <input
+            type="number"
+            min={1}
+            max={60}
+            value={minutes}
+            onChange={(e) => setMinutes(e.target.value)}
+            className="w-32 rounded border border-border bg-bg-elevated px-3 py-2 outline-none focus:border-accent"
+          />
+        </label>
+        <button
+          onClick={save}
+          disabled={update.isPending}
+          className="rounded bg-accent px-4 py-2 text-white hover:bg-accent-hover disabled:opacity-50"
+        >
+          Save
+        </button>
+        {msg && <span className="text-sm text-fg-muted">{msg}</span>}
+      </div>
     </div>
   );
 }

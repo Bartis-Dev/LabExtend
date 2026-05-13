@@ -33,6 +33,11 @@ func (s *Server) Routes(webHandler http.Handler) http.Handler {
 		// caller cannot enumerate the directory.
 		r.Get("/icons/{filename}", s.serveIcon)
 
+		// Stats ingest: token-authed by URL, not by JWT. Sits in the public
+		// group on purpose so external scripts (cron jobs, smart-home
+		// dashboards, etc.) can push metrics without holding a session cookie.
+		r.Post("/stats/ingest/{token}", s.ingestStatsPoint)
+
 		// Protected.
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
@@ -65,6 +70,68 @@ func (s *Server) Routes(webHandler http.Handler) http.Handler {
 
 			r.Get("/settings", s.handleGetSettings)
 			r.Put("/settings", s.handlePutSettings)
+
+			r.Get("/modules", s.listModules)
+			r.Post("/modules", s.createModule)
+			r.Put("/modules/{id}", s.updateModule)
+			r.Delete("/modules/{id}", s.deleteModule)
+
+			r.Get("/vault/state", s.handleVaultState)
+			r.Post("/vault/setup", s.handleVaultSetup)
+			r.Get("/vault/entries", s.handleVaultList)
+			r.Post("/vault/entries", s.handleVaultCreate)
+			r.Put("/vault/entries/{id}", s.handleVaultUpdate)
+			r.Delete("/vault/entries/{id}", s.handleVaultDelete)
+
+			r.Get("/ddns/providers", s.listDDNSProviders)
+			r.Post("/ddns/providers", s.createDDNSProvider)
+			r.Put("/ddns/providers/{id}", s.updateDDNSProvider)
+			r.Delete("/ddns/providers/{id}", s.deleteDDNSProvider)
+			r.Get("/ddns/providers/{id}/zones", s.listDDNSZones)
+
+			r.Get("/ddns/cards", s.listDDNSCards)
+			r.Post("/ddns/cards", s.createDDNSCard)
+			r.Put("/ddns/cards/{id}", s.updateDDNSCard)
+			r.Delete("/ddns/cards/{id}", s.deleteDDNSCard)
+			r.Get("/ddns/cards/{id}/records", s.listCardRecords)
+			r.Post("/ddns/cards/{id}/records", s.createCardRecord)
+			r.Put("/ddns/cards/{id}/records/{record_id}", s.updateCardRecord)
+			r.Delete("/ddns/cards/{id}/records/{record_id}", s.deleteCardRecord)
+			r.Post("/ddns/cards/{id}/auto-update", s.toggleAutoUpdate)
+
+			r.Get("/ddns/auto-update", s.listAutoUpdates)
+
+			r.Get("/wol", s.listWoL)
+			r.Post("/wol", s.createWoL)
+			r.Put("/wol/{id}", s.updateWoL)
+			r.Delete("/wol/{id}", s.deleteWoL)
+			r.Post("/wol/{id}/wake", s.wakeWoL)
+
+			r.Get("/docs", s.listDocs)
+			r.Post("/docs", s.createDoc)
+			r.Get("/docs/{id}", s.getDoc)
+			r.Put("/docs/{id}", s.updateDoc)
+			r.Delete("/docs/{id}", s.deleteDoc)
+
+			r.Get("/notes", s.listNotes)
+			r.Post("/notes/cards", s.createNotesCard)
+			r.Put("/notes/cards/{id}", s.updateNotesCard)
+			r.Patch("/notes/cards/{id}/layout", s.patchNotesCardLayout)
+			r.Delete("/notes/cards/{id}", s.deleteNotesCard)
+			r.Post("/notes/cards/{id}/items", s.createNotesItem)
+			r.Put("/notes/items/{id}", s.updateNotesItem)
+			r.Delete("/notes/items/{id}", s.deleteNotesItem)
+
+			r.Get("/stats/sources", s.listStatsSources)
+			r.Post("/stats/sources", s.createStatsSource)
+			r.Put("/stats/sources/{id}", s.updateStatsSource)
+			r.Post("/stats/sources/{id}/rotate-token", s.rotateStatsSourceToken)
+			r.Delete("/stats/sources/{id}", s.deleteStatsSource)
+			r.Get("/stats/sources/{id}/points", s.queryStatsPoints)
+			r.Get("/stats/widgets", s.listStatsWidgets)
+			r.Post("/stats/widgets", s.createStatsWidget)
+			r.Put("/stats/widgets/{id}", s.updateStatsWidget)
+			r.Delete("/stats/widgets/{id}", s.deleteStatsWidget)
 		})
 
 		// WebSocket: own auth path that runs before websocket.Accept owns the writer.

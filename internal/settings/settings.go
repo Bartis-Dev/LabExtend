@@ -17,6 +17,8 @@ const (
 	KeyHealthcheckInterval   = "healthcheck_interval"
 	KeyStatusRefreshInterval = "status_refresh_interval"
 	KeyDashboardName         = "dashboard_name"
+	KeyVaultAutoLockMinutes  = "vault_auto_lock_minutes"
+	KeyDDNSCheckInterval     = "ddns_check_interval"
 )
 
 type Store struct{ db *sql.DB }

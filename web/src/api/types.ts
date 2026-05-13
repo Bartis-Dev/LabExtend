@@ -87,3 +87,201 @@ export type HealthMap = Record<string, ServiceStatus>;
 
 // Settings
 export type Settings = Record<string, string>;
+
+// Stats
+export type StatsSource = {
+  id: number;
+  name: string;
+  unit: string;
+  token: string;
+  created_at: number;
+  updated_at: number;
+};
+export type StatsSourceInput = { name: string; unit: string };
+
+export type StatsPoint = { ts: number; value: number };
+
+export type StatsPointsResponse = {
+  from: number;
+  to: number;
+  points: StatsPoint[];
+  latest: StatsPoint | null;
+};
+
+export type StatsWidgetKind = 'line' | 'gauge';
+export type StatsWidget = {
+  id: number;
+  source_id: number;
+  name: string;
+  kind: StatsWidgetKind;
+  time_range_minutes: number;
+  position: number;
+  config_json: string;
+  created_at: number;
+  updated_at: number;
+};
+export type StatsWidgetInput = {
+  source_id: number;
+  name: string;
+  kind: StatsWidgetKind;
+  time_range_minutes: number;
+  position: number;
+  config_json: string;
+};
+
+// Notes
+export type NotesItem = {
+  id: number;
+  card_id: number;
+  text: string;
+  is_favorite: boolean;
+  position: number;
+  created_at: number;
+  updated_at: number;
+};
+export type NotesCard = {
+  id: number;
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  created_at: number;
+  updated_at: number;
+  items: NotesItem[];
+};
+export type NotesCardInput = {
+  name: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+};
+export type NotesItemInput = {
+  text: string;
+  is_favorite: boolean;
+  position: number;
+};
+
+// Docs
+export type DocPage = {
+  id: number;
+  slug: string;
+  title: string;
+  category: string;
+  content_markdown: string;
+  is_link: boolean;
+  link_url: string | null;
+  position: number;
+  created_at: number;
+  updated_at: number;
+};
+export type DocPageInput = {
+  slug: string;
+  title: string;
+  category: string;
+  content_markdown: string;
+  is_link: boolean;
+  link_url: string | null;
+  position: number;
+};
+
+// Wake on LAN
+export type WoLTarget = {
+  id: number;
+  name: string;
+  mac: string;
+  broadcast_addr: string;
+  port: number;
+  last_sent_at: number | null;
+  last_error: string | null;
+  created_at: number;
+  updated_at: number;
+};
+export type WoLTargetInput = {
+  name: string;
+  mac: string;
+  broadcast_addr: string;
+  port: number;
+};
+
+// DDNS
+export type DDNSProvider = {
+  id: number;
+  name: string;
+  kind: 'cloudflare';
+  created_at: number;
+  updated_at: number;
+};
+export type DDNSProviderInput = { name: string; kind: 'cloudflare'; token: string };
+
+export type DDNSZone = { id: string; name: string };
+
+export type DDNSRecord = {
+  id?: string;
+  name: string;
+  type: string;
+  content: string;
+  ttl: number;
+  proxied: boolean;
+  comment?: string;
+};
+
+export type DDNSCard = {
+  id: number;
+  provider_id: number;
+  remote_id: string;
+  name: string;
+  show_types: string[];
+  layout: LayoutRect;
+  created_at: number;
+  updated_at: number;
+};
+
+export type DDNSCardInput = {
+  provider_id: number;
+  remote_id: string;
+  name: string;
+  show_types: string[];
+};
+
+export type DDNSAutoUpdate = {
+  id: number;
+  card_id: number;
+  record_remote_id: string;
+  record_name: string;
+  record_type: 'A' | 'AAAA';
+  last_synced_ip: string | null;
+  last_synced_at: number | null;
+  last_error: string | null;
+  created_at: number;
+};
+
+// Modules
+export type ModuleKind = 'builtin' | 'iframe';
+export type Module = {
+  id: number;
+  slug: string;
+  kind: ModuleKind;
+  name: string;
+  icon: string;
+  url?: string | null;
+  enabled: boolean;
+  position: number;
+  builtin_key?: string | null;
+};
+export type IframeModuleInput = {
+  name: string;
+  url: string;
+  icon: string;
+  slug?: string;
+};
+export type ModulePatch = Partial<{
+  name: string;
+  icon: string;
+  url: string;
+  enabled: boolean;
+  position: number;
+}>;

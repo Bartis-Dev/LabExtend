@@ -10,7 +10,15 @@ import (
 
 	"github.com/Bartis-Dev/LabExtend/internal/config"
 	"github.com/Bartis-Dev/LabExtend/internal/db"
+	"github.com/Bartis-Dev/LabExtend/internal/ddns"
+	"github.com/Bartis-Dev/LabExtend/internal/docs"
+	"github.com/Bartis-Dev/LabExtend/internal/modules"
+	"github.com/Bartis-Dev/LabExtend/internal/notes"
+	"github.com/Bartis-Dev/LabExtend/internal/servercrypto"
+	"github.com/Bartis-Dev/LabExtend/internal/stats"
 	"github.com/Bartis-Dev/LabExtend/internal/settings"
+	"github.com/Bartis-Dev/LabExtend/internal/vault"
+	"github.com/Bartis-Dev/LabExtend/internal/wol"
 )
 
 // newTestServer spins up an httptest.Server backed by a fresh migrated DB
@@ -37,7 +45,18 @@ func newTestServer(t *testing.T) (*httptest.Server, *http.Client) {
 		DataDir:        dir,
 		SessionTimeout: 1_000_000_000_000, // 1000s
 	}
-	srv := New(d, cfg, st, []byte(secret))
+	mods := modules.New(d)
+	vlt := vault.New(d)
+	cipher, err := servercrypto.New([]byte(secret), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dd := ddns.New(d, cipher)
+	wl := wol.New(d)
+	dx := docs.New(d)
+	nt := notes.New(d)
+	sts := stats.New(d)
+	srv := New(d, cfg, st, mods, vlt, dd, wl, dx, nt, sts, []byte(secret))
 	handler := srv.Routes(http.NotFoundHandler())
 
 	ts := httptest.NewServer(handler)

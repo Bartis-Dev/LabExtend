@@ -1,0 +1,95 @@
+import type { Shell } from './types';
+
+export const cmd: Shell = {
+  id: 'cmd',
+  label: 'cmd',
+  description: 'Classic Windows command shell (cmd.exe).',
+  icon: 'square-terminal',
+  commands: [
+    {
+      id: 'dir',
+      name: 'dir',
+      category: 'Filesystem',
+      description: 'List directory contents.',
+      template: 'dir {flags} {path}',
+      args: [
+        { key: 'path', name: 'Path', description: 'Optional path or wildcard.', placeholder: 'C:\\Users' },
+      ],
+      flags: [
+        { key: 'sub', flag: '/S', description: 'Include all subdirectories.', type: 'bool' },
+        { key: 'attr', flag: '/A', description: 'Show files with these attributes.', type: 'string', placeholder: 'H' },
+        { key: 'bare', flag: '/B', description: 'Bare format (no header).', type: 'bool' },
+        { key: 'order', flag: '/O', description: 'Sort order.', type: 'enum', options: ['N', '-N', 'S', '-S', 'D', '-D'] },
+      ],
+      examples: ['dir /S /B C:\\logs'],
+    },
+    {
+      id: 'ipconfig',
+      name: 'ipconfig',
+      category: 'Network',
+      description: 'Show / reset IP configuration.',
+      template: 'ipconfig {flags}',
+      flags: [
+        { key: 'all', flag: '/all', description: 'Full info (MAC, DHCP, DNS).', type: 'bool' },
+        { key: 'release', flag: '/release', description: 'Release the current lease.', type: 'bool' },
+        { key: 'renew', flag: '/renew', description: 'Renew the current lease.', type: 'bool' },
+        { key: 'flushdns', flag: '/flushdns', description: 'Clear the DNS resolver cache.', type: 'bool' },
+      ],
+      examples: ['ipconfig /all', 'ipconfig /flushdns'],
+    },
+    {
+      id: 'netstat',
+      name: 'netstat',
+      category: 'Network',
+      description: 'Show network statistics and open sockets.',
+      template: 'netstat {flags}',
+      flags: [
+        { key: 'all', flag: '-a', description: 'All connections and listening ports.', type: 'bool' },
+        { key: 'numeric', flag: '-n', description: 'Numeric addresses (no DNS).', type: 'bool' },
+        { key: 'owner', flag: '-o', description: 'Owning PID.', type: 'bool' },
+        { key: 'tcp', flag: '-p TCP', description: 'TCP only.', type: 'bool' },
+      ],
+      examples: ['netstat -ano | findstr LISTENING'],
+    },
+    {
+      id: 'robocopy',
+      name: 'robocopy',
+      category: 'Filesystem',
+      description: 'Robust file copy.',
+      template: 'robocopy {source} {dest} {flags}',
+      args: [
+        { key: 'source', name: 'Source', description: 'Source directory.', required: true, placeholder: 'C:\\src' },
+        { key: 'dest', name: 'Destination', description: 'Destination directory.', required: true, placeholder: 'D:\\dst' },
+      ],
+      flags: [
+        { key: 'mirror', flag: '/MIR', description: 'Mirror source to dest (deletes extras). ⚠️', type: 'bool' },
+        { key: 'recurse', flag: '/E', description: 'Recurse subdirs including empty.', type: 'bool' },
+        { key: 'multi', flag: '/MT', description: 'Multithreaded (default 8).', type: 'bool' },
+        { key: 'log', flag: '/LOG', description: 'Log to file.', type: 'string', placeholder: 'copy.log' },
+      ],
+      examples: ['robocopy C:\\src D:\\dst /E /MT'],
+      notes: '/MIR mirrors and DELETES files in destination that don\'t exist in source. Use with care.',
+    },
+    {
+      id: 'sfc',
+      name: 'sfc',
+      category: 'System',
+      description: 'System File Checker — verifies/repairs Windows files.',
+      template: 'sfc {flags}',
+      flags: [
+        { key: 'scannow', flag: '/scannow', description: 'Scan and repair now.', type: 'bool' },
+        { key: 'verify', flag: '/verifyonly', description: 'Scan without repairing.', type: 'bool' },
+      ],
+      examples: ['sfc /scannow'],
+      notes: 'Run as Administrator.',
+    },
+  ],
+  paths: [
+    { path: '%SystemRoot%', description: 'Windows install dir (usually C:\\Windows).', category: 'System' },
+    { path: '%USERPROFILE%', description: 'Current user\'s home (C:\\Users\\<name>).', category: 'User' },
+    { path: '%APPDATA%', description: 'Roaming app data per user.', category: 'User' },
+    { path: '%LOCALAPPDATA%', description: 'Local app data per user.', category: 'User' },
+    { path: '%TEMP%', description: 'Temp directory.', category: 'User' },
+    { path: 'C:\\Windows\\System32\\drivers\\etc\\hosts', description: 'Static hostname-to-IP mappings.', category: 'Network' },
+  ],
+};
