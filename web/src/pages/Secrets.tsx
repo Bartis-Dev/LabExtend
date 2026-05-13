@@ -41,16 +41,50 @@ export default function Secrets() {
 
 // --- Setup ----------------------------------------------------------------
 
+// Web Crypto and the Argon2id WASM only work in a secure context (HTTPS or
+// localhost). If you opened LabExtend via http://<server-ip>, the vault
+// can't function — show a clear error before the user even tries.
+function secureContextError(): string | null {
+  if (typeof window === 'undefined') return null;
+  if (!window.isSecureContext) {
+    return (
+      'The Secrets vault uses the browser\'s Web Crypto API, which only works in a secure context. ' +
+      'You\'re currently on an http:// origin that is not localhost, so the browser refuses to derive keys. ' +
+      'Access LabExtend via https:// (e.g. behind a reverse proxy with TLS) or open it as http://localhost.'
+    );
+  }
+  if (typeof crypto === 'undefined' || !crypto.subtle) {
+    return 'Web Crypto API not available in this browser. Try a recent Chrome, Firefox, or Edge.';
+  }
+  return null;
+}
+
+function describeError(e: unknown): string {
+  if (e instanceof ApiError) return e.message;
+  if (e instanceof Error) {
+    // Vite / hash-wasm sometimes wraps things; surface the chain.
+    const cause = (e as { cause?: unknown }).cause;
+    if (cause instanceof Error) return `${e.message} (cause: ${cause.message})`;
+    return e.message || e.name || 'unknown error';
+  }
+  return String(e);
+}
+
 function SetupScreen() {
   const setup = useVault((s) => s.setup);
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const ctxError = secureContextError();
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
+    if (ctxError) {
+      setErr(ctxError);
+      return;
+    }
     if (p1.length < 12) {
       setErr('Vault password must be at least 12 characters.');
       return;
@@ -63,7 +97,8 @@ function SetupScreen() {
     try {
       await setup(p1);
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'setup failed');
+      console.error('vault setup failed:', e);
+      setErr(`Setup failed: ${describeError(e)}`);
     } finally {
       setBusy(false);
     }
@@ -80,6 +115,11 @@ function SetupScreen() {
           password, the data cannot be recovered.
         </p>
       </div>
+      {ctxError && (
+        <div className="mb-4 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
+          {ctxError}
+        </div>
+      )}
       <form onSubmit={submit} className="space-y-3">
         <PwField label="Master password" value={p1} onChange={setP1} autoFocus />
         <PwField label="Confirm master password" value={p2} onChange={setP2} />
@@ -90,7 +130,7 @@ function SetupScreen() {
         )}
         <button
           type="submit"
-          disabled={busy}
+          disabled={busy || !!ctxError}
           className="w-full rounded bg-accent px-4 py-2 text-white hover:bg-accent-hover disabled:opacity-50"
         >
           {busy ? 'Deriving key…' : 'Create vault'}
@@ -108,15 +148,21 @@ function UnlockScreen() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const ctxError = secureContextError();
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
+    if (ctxError) {
+      setErr(ctxError);
+      return;
+    }
     setBusy(true);
     try {
       const ok = await unlock(pw);
       if (!ok) setErr('Wrong master password.');
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'unlock failed');
+      console.error('vault unlock failed:', e);
+      setErr(`Unlock failed: ${describeError(e)}`);
     } finally {
       setBusy(false);
     }
@@ -131,6 +177,11 @@ function UnlockScreen() {
           Enter your master password to unlock your secrets.
         </p>
       </div>
+      {ctxError && (
+        <div className="mb-4 rounded border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
+          {ctxError}
+        </div>
+      )}
       <form onSubmit={submit} className="space-y-3">
         <PwField label="Master password" value={pw} onChange={setPw} autoFocus />
         {err && (
@@ -140,7 +191,7 @@ function UnlockScreen() {
         )}
         <button
           type="submit"
-          disabled={busy}
+          disabled={busy || !!ctxError}
           className="w-full rounded bg-accent px-4 py-2 text-white hover:bg-accent-hover disabled:opacity-50"
         >
           {busy ? 'Deriving key…' : 'Unlock'}

@@ -29,6 +29,45 @@ function overlaps(a: { x: number; y: number; w: number; h: number }, b: { x: num
   );
 }
 
+// Given a desired (wx, wy) and a list of existing cards, return the
+// closest non-overlapping position. We probe in a spiral around the
+// click point, stepping by the card width / height + a small gap so the
+// resulting placement looks deliberate, not jammed against neighbours.
+function findFreeSpot(
+  wx: number,
+  wy: number,
+  w: number,
+  h: number,
+  others: { x: number; y: number; w: number; h: number }[],
+): { x: number; y: number } {
+  const gap = 16;
+  const stepX = w + gap;
+  const stepY = h + gap;
+  const free = (x: number, y: number) =>
+    !others.some((o) => overlaps({ x, y, w, h }, o));
+  if (free(wx, wy)) return { x: wx, y: wy };
+  // Try increasingly wide rings: each ring tests positions at multiples
+  // of stepX/stepY from the click. Cap at 12 rings (=> > 600 candidates)
+  // so we never loop indefinitely.
+  for (let ring = 1; ring <= 12; ring++) {
+    const candidates: Array<[number, number]> = [];
+    for (let i = -ring; i <= ring; i++) {
+      candidates.push([wx + i * stepX, wy - ring * stepY]);
+      candidates.push([wx + i * stepX, wy + ring * stepY]);
+    }
+    for (let j = -ring + 1; j < ring; j++) {
+      candidates.push([wx - ring * stepX, wy + j * stepY]);
+      candidates.push([wx + ring * stepX, wy + j * stepY]);
+    }
+    for (const [cx, cy] of candidates) {
+      if (free(cx, cy)) return { x: cx, y: cy };
+    }
+  }
+  // Last-resort fallback: stack vertically below the lowest existing card.
+  const maxY = others.reduce((m, o) => Math.max(m, o.y + o.h), 0);
+  return { x: wx, y: maxY + gap };
+}
+
 // ---- Page ----------------------------------------------------------------
 
 export default function NotesPage() {
@@ -54,22 +93,36 @@ export default function NotesPage() {
   }, [notes.data, pendingPos]);
 
   // ---- Pan + zoom handling -----------------------------------------------
-
-  const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-    const factor = e.deltaY < 0 ? 1 + ZOOM_STEP : 1 - ZOOM_STEP;
-    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * factor));
-    if (newZoom === zoom) return;
-    // Keep world point under cursor stable.
-    const worldX = (mouseX - pan.x) / zoom;
-    const worldY = (mouseY - pan.y) / zoom;
-    setPan({ x: mouseX - worldX * newZoom, y: mouseY - worldY * newZoom });
-    setZoom(newZoom);
-  };
+  // React's onWheel is attached as a passive listener since React 17, so
+  // preventDefault() silently no-ops — the page would still scroll. We
+  // attach a native non-passive listener on the canvas container so the
+  // wheel only zooms and never propagates to the Layout's main element.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      const factor = e.deltaY < 0 ? 1 + ZOOM_STEP : 1 - ZOOM_STEP;
+      // Reading current values via the ref-equivalent: closures captured
+      // at registration would be stale, so we read from state directly
+      // each call by going through setters with the previous value.
+      setZoom((z) => {
+        const nz = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z * factor));
+        if (nz === z) return z;
+        setPan((p) => {
+          const worldX = (mouseX - p.x) / z;
+          const worldY = (mouseY - p.y) / z;
+          return { x: mouseX - worldX * nz, y: mouseY - worldY * nz };
+        });
+        return nz;
+      });
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
 
   // Background pan: only when middle mouse, or left mouse on empty canvas.
   const panState = useRef<{ startX: number; startY: number; pan0: { x: number; y: number } } | null>(null);
@@ -126,11 +179,13 @@ export default function NotesPage() {
 
   const addCardAt = async (wx: number, wy: number) => {
     setMenu(null);
+    const others = (notes.data ?? []).map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h }));
+    const spot = findFreeSpot(wx, wy, DEFAULT_CARD_W, DEFAULT_CARD_H, others);
     try {
       await create.mutateAsync({
         name: '',
-        x: wx,
-        y: wy,
+        x: spot.x,
+        y: spot.y,
         w: DEFAULT_CARD_W,
         h: DEFAULT_CARD_H,
         color: '#475569',
@@ -213,7 +268,7 @@ export default function NotesPage() {
   };
 
   return (
-    <div className="relative h-[calc(100vh-3.5rem)] w-full overflow-hidden bg-bg">
+    <div className="relative h-full w-full overflow-hidden bg-bg">
       {/* Top toolbar */}
       <div className="absolute left-0 right-0 top-0 z-20 flex items-center gap-2 border-b border-border bg-bg-card/90 px-4 py-2 backdrop-blur">
         <input
@@ -266,7 +321,6 @@ export default function NotesPage() {
           backgroundSize: `${24 * zoom}px ${24 * zoom}px`,
           backgroundPosition: `${pan.x}px ${pan.y}px`,
         }}
-        onWheel={onWheel}
         onMouseDown={onMouseDown}
         onContextMenu={onContextMenu}
       >
@@ -300,7 +354,7 @@ export default function NotesPage() {
               onClick={() => addCardAt(menu.wx, menu.wy)}
               className="block w-full px-4 py-1.5 text-left text-sm hover:bg-bg-elevated"
             >
-              + Add card here
+              + Add note here
             </button>
           </div>
         )}

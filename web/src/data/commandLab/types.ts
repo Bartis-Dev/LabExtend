@@ -23,6 +23,10 @@ export type Argument = {
   description: string;
   required?: boolean;
   placeholder?: string;
+  // Optional custom input renderer. Default is a plain text input.
+  // 'permissions' renders a u/g/o × r/w/x checkbox grid that compiles
+  // to an octal mode string (e.g. "755") — handy for chmod.
+  kind?: 'text' | 'permissions';
 };
 
 export type Command = {

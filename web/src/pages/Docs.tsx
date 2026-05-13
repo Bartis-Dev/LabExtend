@@ -27,7 +27,7 @@ export default function Docs() {
   }, [pages, selectedId]);
 
   return (
-    <div className="mx-auto grid h-[calc(100vh-3.5rem)] max-w-7xl grid-cols-[260px_1fr] gap-0 overflow-hidden">
+    <div className="mx-auto grid h-full max-w-7xl grid-cols-[260px_1fr] gap-0 overflow-hidden">
       <Sidebar
         pages={pages}
         loading={docs.isPending}

@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Navigate, useParams } from 'react-router-dom';
-import type { Command, Flag, Shell } from '@/data/commandLab';
+import type { Argument, Command, Flag, Shell } from '@/data/commandLab';
 import { SHELLS, getShell } from '@/data/commandLab';
 import { ModuleIcon } from '@/components/ModuleIcon';
 
@@ -231,21 +231,20 @@ function CommandBuilder({ command }: { command: Command }) {
           </div>
           <div className="space-y-3 rounded-lg border border-border bg-bg-card/40 p-4">
             {command.args.map((a) => (
-              <label key={a.key} className="block">
-                <span className="mb-1 flex items-baseline justify-between text-xs">
+              <div key={a.key}>
+                <div className="mb-1 flex items-baseline justify-between text-xs">
                   <span className="font-medium">
                     {a.name}
                     {a.required && <span className="ml-1 text-danger">*</span>}
                   </span>
                   <span className="text-fg-muted">{a.description}</span>
-                </span>
-                <input
+                </div>
+                <ArgumentInput
+                  arg={a}
                   value={state.args[a.key] ?? ''}
-                  onChange={(e) => setArg(a.key, e.target.value)}
-                  placeholder={a.placeholder}
-                  className="w-full rounded border border-border bg-bg-elevated px-3 py-2 font-mono text-sm outline-none focus:border-accent"
+                  onChange={(v) => setArg(a.key, v)}
                 />
-              </label>
+              </div>
             ))}
           </div>
         </div>
@@ -332,8 +331,8 @@ function FlagControl({
   }
   if (flag.type === 'enum' && flag.options) {
     return (
-      <div className="flex flex-col gap-1 text-sm sm:flex-row sm:items-center">
-        <div className="sm:w-44">
+      <div className="flex flex-col gap-1 text-sm sm:flex-row sm:items-start">
+        <div className="sm:w-44 sm:pt-1.5">
           <span className="font-mono text-xs">{flag.flag}</span>
           <span className="ml-2 text-[10px] text-fg-muted">{flag.description}</span>
         </div>
@@ -352,24 +351,190 @@ function FlagControl({
       </div>
     );
   }
-  // string / number
+  // string / number — autosize so long values wrap instead of overflowing.
   return (
-    <div className="flex flex-col gap-1 text-sm sm:flex-row sm:items-center">
-      <div className="sm:w-44">
+    <div className="flex flex-col gap-1 text-sm sm:flex-row sm:items-start">
+      <div className="sm:w-44 sm:pt-1.5">
         <span className="font-mono text-xs">{flag.flag}</span>
         <span className="ml-2 text-[10px] text-fg-muted">{flag.description}</span>
       </div>
-      <input
+      <AutoGrowInput
         value={String(value ?? '')}
-        onChange={(e) =>
-          onChange(flag.type === 'number' ? Number(e.target.value) : e.target.value)
-        }
-        type={flag.type === 'number' ? 'number' : 'text'}
+        onChange={(v) => onChange(flag.type === 'number' ? Number(v) : v)}
         placeholder={flag.placeholder}
-        className="flex-1 rounded border border-border bg-bg-elevated px-3 py-1.5 font-mono text-sm outline-none focus:border-accent"
+        inputMode={flag.type === 'number' ? 'numeric' : undefined}
+        className="flex-1"
       />
     </div>
   );
+}
+
+// ---- Argument input + special widgets ------------------------------------
+
+function ArgumentInput({
+  arg,
+  value,
+  onChange,
+}: {
+  arg: Argument;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  if (arg.kind === 'permissions') {
+    return <PermissionsInput value={value} onChange={onChange} />;
+  }
+  return (
+    <AutoGrowInput
+      value={value}
+      onChange={onChange}
+      placeholder={arg.placeholder}
+    />
+  );
+}
+
+// Textarea that grows downward as its content wraps. Standard <input>
+// scrolls horizontally for long values; we want long paths/URLs to wrap.
+function AutoGrowInput({
+  value,
+  onChange,
+  placeholder,
+  inputMode,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  inputMode?: 'text' | 'numeric';
+  className?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // Reset before measuring so it can both grow and shrink.
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      inputMode={inputMode}
+      rows={1}
+      onKeyDown={(e) => {
+        // Enter submits forms / inserts newlines depending on host; for
+        // single-line-ish use, treat Enter as a no-op newline.
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+        }
+      }}
+      className={
+        'block w-full resize-none overflow-hidden break-all rounded border border-border bg-bg-elevated px-3 py-1.5 font-mono text-sm outline-none focus:border-accent ' +
+        (className ?? '')
+      }
+    />
+  );
+}
+
+// chmod-style permissions: 3×3 grid (r/w/x × user/group/other).
+// Stores the resulting octal mode (e.g. "750") in the arg value.
+const PERM_CLASSES: { key: 'u' | 'g' | 'o'; label: string }[] = [
+  { key: 'u', label: 'User (owner)' },
+  { key: 'g', label: 'Group' },
+  { key: 'o', label: 'Other' },
+];
+const PERM_BITS: { key: 'r' | 'w' | 'x'; label: string; bit: number }[] = [
+  { key: 'r', label: 'Read', bit: 4 },
+  { key: 'w', label: 'Write', bit: 2 },
+  { key: 'x', label: 'Execute', bit: 1 },
+];
+
+function octalFromState(state: Record<string, boolean>): string {
+  return PERM_CLASSES.map((cls) =>
+    PERM_BITS.reduce(
+      (sum, b) => (state[`${cls.key}${b.key}`] ? sum + b.bit : sum),
+      0,
+    ).toString(),
+  ).join('');
+}
+
+function stateFromOctal(s: string): Record<string, boolean> {
+  // Pad to 3 chars, e.g. "55" → "055". Anything non-octal: zero everything.
+  const m = /^[0-7]{1,3}$/.test(s) ? s.padStart(3, '0') : '000';
+  const out: Record<string, boolean> = {};
+  PERM_CLASSES.forEach((cls, i) => {
+    const digit = Number(m[i]);
+    PERM_BITS.forEach((b) => {
+      out[`${cls.key}${b.key}`] = (digit & b.bit) !== 0;
+    });
+  });
+  return out;
+}
+
+function PermissionsInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  // Drive the checkbox state purely from the stored octal so the parent
+  // is the source of truth (re-renders, command switch, etc.).
+  const bits = useMemo(() => stateFromOctal(value || '000'), [value]);
+  const toggle = (k: string) => {
+    const next = { ...bits, [k]: !bits[k] };
+    onChange(octalFromState(next));
+  };
+
+  return (
+    <div className="rounded border border-border bg-bg-elevated p-3">
+      <div className="grid grid-cols-[120px_repeat(3,1fr)_70px] items-center gap-2 text-sm">
+        <div></div>
+        {PERM_BITS.map((b) => (
+          <div key={b.key} className="text-center text-xs text-fg-muted">
+            {b.label}
+          </div>
+        ))}
+        <div className="text-right text-xs text-fg-muted">Octal</div>
+        {PERM_CLASSES.map((cls) => {
+          const digit = PERM_BITS.reduce(
+            (sum, b) => (bits[`${cls.key}${b.key}`] ? sum + b.bit : sum),
+            0,
+          );
+          return (
+            <FragmentRow key={cls.key}>
+              <div className="text-xs">{cls.label}</div>
+              {PERM_BITS.map((b) => {
+                const k = `${cls.key}${b.key}`;
+                return (
+                  <label key={k} className="grid h-8 cursor-pointer place-items-center rounded hover:bg-bg-card">
+                    <input
+                      type="checkbox"
+                      checked={!!bits[k]}
+                      onChange={() => toggle(k)}
+                    />
+                  </label>
+                );
+              })}
+              <div className="text-right font-mono text-sm">{digit}</div>
+            </FragmentRow>
+          );
+        })}
+      </div>
+      <div className="mt-3 flex items-baseline justify-between border-t border-border pt-2">
+        <span className="text-[10px] uppercase tracking-wider text-fg-muted">Octal mode</span>
+        <span className="font-mono text-lg">{value || '000'}</span>
+      </div>
+    </div>
+  );
+}
+
+// React.Fragment doesn't accept className/key tricks for grid rows;
+// use a contents-display div instead.
+function FragmentRow({ children }: { children: React.ReactNode }) {
+  return <div className="contents">{children}</div>;
 }
 
 // Assemble the command line from template + state. Unknown placeholders

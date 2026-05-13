@@ -6,6 +6,7 @@ import {
   useCategories,
   useCreateService,
   useDeleteIcon,
+  useServices,
   useSetIconURL,
   useUpdateService,
 } from '@/api/queries';
@@ -19,6 +20,28 @@ type Props = {
   onClose: () => void;
   initial?: Service;
 };
+
+// Find the first 1×1 grid cell that isn't already occupied, scanning in
+// reading order (row by row, left to right). If the category is full to
+// `cols` width, we drop one row below the lowest occupied row and start
+// over — the dashboard's auto-expand effect will then grow the category
+// height to fit.
+function nextFreeCell(
+  peers: { x: number; y: number; w: number; h: number }[],
+  cols: number,
+): { x: number; y: number; w: number; h: number } {
+  const occupied = (x: number, y: number) =>
+    peers.some(
+      (p) => x >= p.x && x < p.x + p.w && y >= p.y && y < p.y + p.h,
+    );
+  const maxY = peers.reduce((m, p) => Math.max(m, p.y + p.h), 0);
+  for (let y = 0; y <= maxY; y++) {
+    for (let x = 0; x < cols; x++) {
+      if (!occupied(x, y)) return { x, y, w: 1, h: 1 };
+    }
+  }
+  return { x: 0, y: maxY, w: 1, h: 1 };
+}
 
 function emptyInput(): ServiceInput {
   return {
@@ -71,6 +94,7 @@ export function ServiceForm({ open, onClose, initial }: Props) {
   const setIconURL = useSetIconURL();
   const deleteIcon = useDeleteIcon();
   const cats = useCategories();
+  const services = useServices();
   const qc = useQueryClient();
 
   const iconPath = form.icon_path ?? null;
@@ -134,11 +158,23 @@ export function ServiceForm({ open, onClose, initial }: Props) {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    let toSave = form;
+    // When creating a NEW service inside a category, drop it into the
+    // first empty cell scanning left-to-right, top-to-bottom (reading
+    // order). Without this, every new service lands at (0,0) and the
+    // grid library compacts it somewhere arbitrary.
+    if (!initial && form.category_id != null) {
+      const cat = (cats.data ?? []).find((c) => c.id === form.category_id);
+      const peers = (services.data ?? []).filter((s) => s.category_id === form.category_id);
+      const cols = cat?.layout.w ?? 6;
+      const layout = nextFreeCell(peers.map((s) => s.layout), cols);
+      toSave = { ...form, layout };
+    }
     try {
       if (initial) {
         await update.mutateAsync({ id: initial.id, input: form });
       } else {
-        await create.mutateAsync(form);
+        await create.mutateAsync(toSave);
       }
       onClose();
     } catch (err) {
