@@ -99,8 +99,7 @@ export type TLSState = {
   not_before?: string;
   not_after?: string;
   self_signed?: boolean;
-  https_enabled: boolean;
-  https_listen: string;
+  listen: string;
 };
 
 // Stats

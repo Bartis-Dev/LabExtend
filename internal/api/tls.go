@@ -22,12 +22,10 @@ type tlsSelfSignInput struct {
 func (s *Server) handleTLSState(w http.ResponseWriter, _ *http.Request) {
 	out := struct {
 		tlsstore.Info
-		HTTPSEnabled bool   `json:"https_enabled"`
-		HTTPSListen  string `json:"https_listen"`
+		Listen string `json:"listen"`
 	}{
-		Info:         s.TLS.CurrentInfo(),
-		HTTPSEnabled: s.HTTPSStarted,
-		HTTPSListen:  s.Cfg.TLSListen,
+		Info:   s.TLS.CurrentInfo(),
+		Listen: s.Cfg.Listen,
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -82,10 +80,13 @@ func (s *Server) handleTLSSelfSign(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.TLS.CurrentInfo())
 }
 
-func (s *Server) handleTLSDelete(w http.ResponseWriter, _ *http.Request) {
-	if err := s.TLS.Delete(); err != nil {
+// handleTLSReset removes any cert files in the data dir and immediately
+// generates a fresh self-signed cert so HTTPS keeps working. UI calls
+// this when the user clicks "Reset to default self-signed".
+func (s *Server) handleTLSReset(w http.ResponseWriter, _ *http.Request) {
+	if err := s.TLS.Reset(); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusOK, s.TLS.CurrentInfo())
 }

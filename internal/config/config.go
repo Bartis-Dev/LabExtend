@@ -13,10 +13,8 @@ import (
 // Config holds all runtime configuration sourced from environment variables.
 type Config struct {
 	Listen              string
-	TLSListen           string
 	TLSCertFile         string
 	TLSKeyFile          string
-	TLSSelfSign         bool
 	DataDir             string
 	PasswordReset       bool
 	SessionTimeout      time.Duration
@@ -27,13 +25,16 @@ type Config struct {
 
 // Load reads LABEXTEND_* environment variables and returns a Config with
 // defaults filled in for any unset or unparseable values.
+//
+// LabExtend serves HTTPS only — on the listen address. If no cert is
+// configured via TLS_CERT_FILE/TLS_KEY_FILE or already present in
+// <datadir>/tls/, an ephemeral self-signed cert is generated at startup
+// so the server can boot. Users replace it via Settings → TLS.
 func Load() Config {
 	return Config{
 		Listen:              envDefault("LABEXTEND_LISTEN", "0.0.0.0:10000"),
-		TLSListen:           envDefault("LABEXTEND_TLS_LISTEN", "0.0.0.0:10001"),
 		TLSCertFile:         os.Getenv("LABEXTEND_TLS_CERT_FILE"),
 		TLSKeyFile:          os.Getenv("LABEXTEND_TLS_KEY_FILE"),
-		TLSSelfSign:         envBool("LABEXTEND_TLS_SELF_SIGN", false),
 		DataDir:             envDefault("LABEXTEND_DATA_DIR", "/data"),
 		PasswordReset:       envBool("LABEXTEND_PASSWORD_RESET", false),
 		SessionTimeout:      envDuration("LABEXTEND_SESSION_TIMEOUT", 7*24*time.Hour),

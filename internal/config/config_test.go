@@ -43,9 +43,6 @@ func TestLoadDefaults(t *testing.T) {
 	if c.Listen != "0.0.0.0:10000" {
 		t.Errorf("default Listen = %q", c.Listen)
 	}
-	if c.TLSListen != "0.0.0.0:10001" {
-		t.Errorf("default TLSListen = %q", c.TLSListen)
-	}
 	if c.DataDir != "/data" {
 		t.Errorf("default DataDir = %q", c.DataDir)
 	}

@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react';
 import { ApiError } from '@/api/client';
 import {
-  useDeleteTLSCert,
   useGenerateSelfSignedTLS,
+  useResetTLSCert,
   useTLSState,
   useUploadTLSCert,
 } from '@/api/queries';
@@ -11,7 +11,7 @@ export function TLSTab() {
   const state = useTLSState();
   const upload = useUploadTLSCert();
   const selfSign = useGenerateSelfSignedTLS();
-  const del = useDeleteTLSCert();
+  const reset = useResetTLSCert();
   const [err, setErr] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
 
@@ -19,6 +19,15 @@ export function TLSTab() {
 
   return (
     <div className="space-y-6">
+      <p className="text-sm text-fg-muted">
+        LabExtend serves HTTPS only. The server boots with an auto-generated
+        self-signed certificate if you haven&apos;t installed one yet — replace
+        it below with a certificate covering the hostname / IP you actually
+        use, or upload your own (e.g. issued by your internal CA / Let&apos;s
+        Encrypt). New certs are hot-swapped: the next TLS handshake picks them
+        up without a restart.
+      </p>
+
       <section>
         <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-fg-muted">
           Status
@@ -80,11 +89,7 @@ export function TLSTab() {
           setOkMsg(null);
           try {
             await selfSign.mutateAsync({ hostnames, validity_days: days });
-            setOkMsg(
-              data?.https_enabled
-                ? 'Self-signed certificate installed. HTTPS picks it up on the next handshake.'
-                : `Self-signed certificate installed. Restart LabExtend to start the HTTPS listener on ${data?.https_listen ?? ':10001'}.`,
-            );
+            setOkMsg('Self-signed certificate installed. Next HTTPS handshake will use it.');
           } catch (e) {
             setErr(e instanceof ApiError ? e.message : 'failed');
           }
@@ -98,77 +103,55 @@ export function TLSTab() {
           setOkMsg(null);
           try {
             await upload.mutateAsync({ cert_pem: certPEM, key_pem: keyPEM });
-            setOkMsg(
-              data?.https_enabled
-                ? 'Certificate installed. HTTPS picks it up on the next handshake.'
-                : `Certificate installed. Restart LabExtend to start the HTTPS listener on ${data?.https_listen ?? ':10001'}.`,
-            );
+            setOkMsg('Certificate installed. Next HTTPS handshake will use it.');
           } catch (e) {
             setErr(e instanceof ApiError ? e.message : 'failed');
           }
         }}
       />
 
-      {data?.loaded && (
-        <section>
-          <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-fg-muted">
-            Remove
-          </h3>
-          <div className="rounded-lg border border-border bg-bg-card/40 p-4 text-sm">
-            <p className="mb-3 text-fg-muted">
-              Removes the certificate files in <code className="font-mono">data/tls/</code>.
-              Env-based certs aren&apos;t deleted (clear the env vars and restart instead).
-              After removing, HTTPS handshakes will fail until you install a new cert.
-            </p>
-            <button
-              onClick={async () => {
-                if (!confirm('Remove the TLS certificate?')) return;
-                setErr(null);
-                setOkMsg(null);
-                try {
-                  await del.mutateAsync();
-                  setOkMsg('Certificate removed.');
-                } catch (e) {
-                  setErr(e instanceof ApiError ? e.message : 'failed');
-                }
-              }}
-              className="rounded border border-danger/40 px-3 py-2 text-sm text-danger hover:bg-danger/10"
-            >
-              Remove certificate
-            </button>
-          </div>
-        </section>
-      )}
+      <section>
+        <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-fg-muted">
+          Reset
+        </h3>
+        <div className="rounded-lg border border-border bg-bg-card/40 p-4 text-sm">
+          <p className="mb-3 text-fg-muted">
+            Deletes the cert files in <code className="font-mono">data/tls/</code> and
+            immediately replaces them with a fresh self-signed certificate covering
+            <code className="font-mono"> localhost</code> +
+            <code className="font-mono"> 127.0.0.1</code>. HTTPS keeps working
+            throughout — there&apos;s never a moment with no cert.
+            Env-pointed certs (<code className="font-mono">LABEXTEND_TLS_CERT_FILE</code>)
+            aren&apos;t touched.
+          </p>
+          <button
+            onClick={async () => {
+              if (!confirm('Reset to a fresh auto-generated self-signed certificate?')) return;
+              setErr(null);
+              setOkMsg(null);
+              try {
+                await reset.mutateAsync();
+                setOkMsg('Reset to a fresh self-signed certificate.');
+              } catch (e) {
+                setErr(e instanceof ApiError ? e.message : 'failed');
+              }
+            }}
+            className="rounded border border-border px-3 py-2 text-sm hover:bg-bg-elevated"
+          >
+            Reset to default self-signed
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
 
 function StatusBadge({ data }: { data: NonNullable<ReturnType<typeof useTLSState>['data']> }) {
-  if (data.loaded) {
-    return (
-      <div className="flex items-center gap-2">
-        <span className="inline-block h-2.5 w-2.5 rounded-full bg-success" />
-        <span className="text-sm">
-          Certificate loaded.{' '}
-          {data.https_enabled ? (
-            <>
-              HTTPS active on <code className="font-mono">{data.https_listen}</code>.
-            </>
-          ) : (
-            <>
-              HTTPS listener not started — restart LabExtend to bind{' '}
-              <code className="font-mono">{data.https_listen}</code>.
-            </>
-          )}
-        </span>
-      </div>
-    );
-  }
   return (
     <div className="flex items-center gap-2">
-      <span className="inline-block h-2.5 w-2.5 rounded-full bg-warning" />
+      <span className="inline-block h-2.5 w-2.5 rounded-full bg-success" />
       <span className="text-sm">
-        No certificate configured. Generate a self-signed one below or upload your own.
+        HTTPS active on <code className="font-mono">{data.listen}</code>.
       </span>
     </div>
   );

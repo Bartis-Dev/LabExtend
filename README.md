@@ -29,9 +29,13 @@ A self-hosted homelab dashboard. Single Go binary, embedded React frontend, SQLi
 
 ## Quick start — Docker
 
-LabExtend listens on **`10000`** (HTTP) and, when a TLS certificate is configured,
-**`10001`** (HTTPS). Wake-on-LAN (and other LAN-broadcast features) require
-`network_mode: host` so the magic packets actually reach your network.
+LabExtend serves **HTTPS only on port `10000`**. On first boot it generates a
+self-signed certificate (covering `localhost` + `127.0.0.1`) so the server
+boots straight into HTTPS — there is no plain-HTTP fallback. Replace the
+auto-generated cert via Settings → TLS once you're in.
+
+Wake-on-LAN (and other LAN-broadcast features) require `network_mode: host`
+so the magic packets reach your network.
 
 ```bash
 docker run -d \
@@ -42,7 +46,10 @@ docker run -d \
   ghcr.io/bartis-dev/labextend:latest
 ```
 
-Open <http://localhost:10000> and complete the setup wizard (pick username + password ≥ 8 chars). You're in.
+Open <https://localhost:10000> and accept the self-signed-cert warning the
+first time (browsers don't trust unknown CAs by default — replace the cert
+under Settings → TLS once you can log in). Complete the setup wizard (pick
+username + password ≥ 8 chars).
 
 ### docker-compose
 
@@ -51,7 +58,7 @@ services:
   labextend:
     image: ghcr.io/bartis-dev/labextend:latest
     container_name: labextend
-    # host networking is required for Wake-on-LAN broadcasts; if you don't
+    # host networking is required for Wake-on-LAN broadcasts. If you don't
     # use WoL you can switch back to a port mapping (see below).
     network_mode: host
     volumes:
@@ -69,35 +76,35 @@ mappings instead:
 
 ```yaml
     ports:
-      - "10000:10000"  # HTTP
-      - "10001:10001"  # HTTPS (only used when a TLS cert is configured)
+      - "10000:10000"  # HTTPS
 ```
 
 ---
 
 ## HTTPS
 
-The Secrets vault and a few other browser features (Web Crypto API) only work
-in a **secure context** — i.e. `https://` or `http://localhost`. There are
-three ways to enable HTTPS:
+LabExtend is HTTPS-only — no plain HTTP listener exists. On first boot it
+generates a self-signed certificate for `localhost` + `127.0.0.1` so the
+server has *something* to serve over TLS. Three ways to provide your own:
 
-1. **Upload a cert via the web UI** — open Settings → TLS, paste the PEM-encoded
-   certificate chain and private key, hit Install. Stored at
-   `data/tls/cert.pem` + `data/tls/key.pem` with mode `0600`. New handshakes
-   pick up the cert on the next connection; existing TCP sessions are not
-   interrupted. The HTTPS listener auto-starts on port `10001` after a
-   restart (or immediately on first boot if a cert was already on disk).
-2. **Generate a self-signed cert in-app** — Settings → TLS → "Generate self-
-   signed". List the hostnames / IPs you'll use to reach LabExtend. Browsers
-   warn about an unknown CA, but encryption works, and Web Crypto is happy.
-3. **Point at existing files via env vars** — set
-   `LABEXTEND_TLS_CERT_FILE` and `LABEXTEND_TLS_KEY_FILE` to absolute paths
-   (often a mounted secret). LabExtend reads them at startup and won't touch
-   them on disk afterwards.
+1. **Generate a better self-signed cert** — Settings → TLS → "Generate self-
+   signed". List the hostnames / IPs you'll actually use to reach LabExtend
+   (e.g. `labextend.lan`, `192.168.1.10`). Browsers still warn about an
+   unknown CA, but the cert covers your real host so the warning is one-time
+   per browser.
+2. **Upload a real cert** — Settings → TLS → Upload. Paste or pick a PEM
+   certificate chain (leaf first) and private key. The server validates the
+   pair before saving and stores them at `data/tls/cert.pem` +
+   `data/tls/key.pem` (mode `0600`). New handshakes pick up the cert on the
+   next connection — no restart needed.
+3. **Point at existing files via env vars** — set `LABEXTEND_TLS_CERT_FILE`
+   and `LABEXTEND_TLS_KEY_FILE` to absolute paths (often a mounted secret).
+   LabExtend reads them at startup and doesn't write back to those paths.
 
-`LABEXTEND_TLS_SELF_SIGN=true` makes LabExtend generate a self-signed cert
-automatically on first boot if none of the above produced one — handy for
-disposable test deployments. Persistent setups should pick path 1 or 3.
+The "Reset to default self-signed" button removes the cert files in
+`data/tls/` and immediately replaces them with a fresh auto-generated
+self-signed cert — there's never a window in which HTTPS handshakes would
+fail.
 
 ---
 
@@ -105,11 +112,9 @@ disposable test deployments. Persistent setups should pick path 1 or 3.
 
 | Variable | Default | Description |
 |---|---|---|
-| `LABEXTEND_LISTEN` | `0.0.0.0:10000` | HTTP listen address. |
-| `LABEXTEND_TLS_LISTEN` | `0.0.0.0:10001` | HTTPS listen address. The listener only starts when a certificate is available. |
-| `LABEXTEND_TLS_CERT_FILE` | *(empty)* | Path to a PEM certificate. Overrides any cert at `data/tls/cert.pem`. |
+| `LABEXTEND_LISTEN` | `0.0.0.0:10000` | HTTPS listen address (HTTPS-only — there is no plain-HTTP listener). |
+| `LABEXTEND_TLS_CERT_FILE` | *(empty)* | Path to a PEM certificate. When set together with `LABEXTEND_TLS_KEY_FILE`, the server uses it instead of `data/tls/cert.pem`. |
 | `LABEXTEND_TLS_KEY_FILE` | *(empty)* | Path to the matching PEM private key. |
-| `LABEXTEND_TLS_SELF_SIGN` | `false` | Generate a self-signed cert on first boot if none is configured. |
 | `LABEXTEND_DATA_DIR` | `/data` | Directory for the SQLite database, uploaded icons, and TLS files. Mount this as a volume. |
 | `LABEXTEND_SESSION_TIMEOUT` | `7d` | JWT cookie lifetime. Accepts Go duration syntax extended with `Nd` for days: `30m`, `3h`, `7d`, `720h`. |
 | `LABEXTEND_HEALTHCHECK_INTERVAL` | `60s` | Initial probe cadence on first boot. Editable in **Settings → Healthcheck** afterwards (10s – 1h). |
@@ -171,7 +176,10 @@ LabExtend speaks plain HTTP and supports WebSockets at `/api/ws`. Most reverse p
 
 ```nginx
 location / {
-    proxy_pass http://labextend:10000;
+    # LabExtend speaks HTTPS only; proxy with TLS verification disabled
+    # because the backend's cert is for the internal hostname, not yours.
+    proxy_pass https://labextend:10000;
+    proxy_ssl_verify off;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -207,14 +215,19 @@ make build
 Run frontend and backend in two terminals:
 
 ```bash
-# Terminal 1 — Vite dev server (HMR, proxies /api to :10000)
+# Terminal 1 — Vite dev server (HMR, proxies /api to backend's HTTPS).
+#             Vite also serves HTTPS via @vitejs/plugin-basic-ssl so the
+#             browser sees a secure context (needed for the Secrets vault
+#             & friends).
 cd web && npm run dev
 
-# Terminal 2 — Go server
+# Terminal 2 — Go server. Generates an ephemeral self-signed cert on
+#             first run; HTTPS is the only listener.
 go run ./cmd/labextend
 ```
 
-Visit <http://localhost:5173>.
+Visit <https://localhost:5173>. Accept the self-signed-cert warning once for
+Vite and once for the backend.
 
 ### Docker image (local)
 

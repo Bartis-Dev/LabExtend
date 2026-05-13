@@ -136,7 +136,7 @@ func (s *Server) Routes(webHandler http.Handler) http.Handler {
 			r.Get("/tls/state", s.handleTLSState)
 			r.Post("/tls/cert", s.handleTLSUpload)
 			r.Post("/tls/self-signed", s.handleTLSSelfSign)
-			r.Delete("/tls/cert", s.handleTLSDelete)
+			r.Post("/tls/reset", s.handleTLSReset)
 		})
 
 		// WebSocket: own auth path that runs before websocket.Accept owns the writer.

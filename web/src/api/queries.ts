@@ -731,10 +731,10 @@ export function useGenerateSelfSignedTLS() {
   });
 }
 
-export function useDeleteTLSCert() {
+export function useResetTLSCert() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.delete<void>('/api/tls/cert'),
+    mutationFn: () => api.post<TLSState>('/api/tls/reset'),
     onSuccess: () => qc.invalidateQueries({ queryKey: tlsStateKey }),
   });
 }

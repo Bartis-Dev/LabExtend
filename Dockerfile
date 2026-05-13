@@ -32,8 +32,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build --chown=nonroot:nonroot /out/data /data
 COPY --from=build /out/labextend /labextend
 VOLUME ["/data"]
-EXPOSE 10000 10001
+EXPOSE 10000
 ENV LABEXTEND_DATA_DIR=/data \
-    LABEXTEND_LISTEN=0.0.0.0:10000 \
-    LABEXTEND_TLS_LISTEN=0.0.0.0:10001
+    LABEXTEND_LISTEN=0.0.0.0:10000
 ENTRYPOINT ["/labextend"]

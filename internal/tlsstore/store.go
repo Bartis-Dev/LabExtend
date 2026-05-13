@@ -74,29 +74,24 @@ func New(dataDir, envCertFile, envKeyFile string) *Store {
 func (s *Store) CertPath() string { return filepath.Join(s.dataDir, subdir, certName) }
 func (s *Store) KeyPath() string  { return filepath.Join(s.dataDir, subdir, keyName) }
 
-// LoadOnStartup picks the active cert source in priority order: env paths,
-// then datadir/tls, then optional self-sign if requested. Returns whether
-// a cert was loaded (so the caller can decide whether to start HTTPS).
-func (s *Store) LoadOnStartup(selfSign bool) (bool, error) {
+// LoadOrCreate picks the active cert source in priority order: env paths,
+// then datadir/tls. If neither yields a cert, it generates a fresh
+// self-signed cert covering localhost + 127.0.0.1 so the server can
+// always boot into HTTPS. The user can replace it later via the UI.
+func (s *Store) LoadOrCreate() error {
 	if s.envCert != "" && s.envKey != "" {
 		if err := s.loadFromFiles(s.envCert, s.envKey, SourceEnv); err == nil {
-			return true, nil
+			return nil
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return false, fmt.Errorf("env tls files: %w", err)
+			return fmt.Errorf("env tls files: %w", err)
 		}
 	}
 	if err := s.loadFromFiles(s.CertPath(), s.KeyPath(), SourceDataDir); err == nil {
-		return true, nil
+		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return false, fmt.Errorf("datadir tls files: %w", err)
+		return fmt.Errorf("datadir tls files: %w", err)
 	}
-	if selfSign {
-		if err := s.GenerateSelfSigned(nil, 365*24*time.Hour); err != nil {
-			return false, fmt.Errorf("self-sign generate: %w", err)
-		}
-		return true, nil
-	}
-	return false, nil
+	return s.GenerateSelfSigned(nil, 365*24*time.Hour)
 }
 
 func (s *Store) loadFromFiles(certFile, keyFile string, src Source) error {
@@ -193,22 +188,24 @@ func (s *Store) SavePEM(certPEM, keyPEM []byte) error {
 	return nil
 }
 
-// Delete removes the datadir cert/key files (env-pointed paths are left
-// alone) and clears the in-memory pointer. After this, HTTPS handshakes
-// will fail until a new cert is provided.
-func (s *Store) Delete() error {
+// Reset removes the datadir cert/key files (env-pointed paths are left
+// alone) and immediately generates a fresh self-signed cert. Since the
+// server is HTTPS-only, we never leave the store without an active cert.
+func (s *Store) Reset() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err := os.Remove(s.CertPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		s.mu.Unlock()
 		return err
 	}
 	if err := os.Remove(s.KeyPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		s.mu.Unlock()
 		return err
 	}
 	s.cert.Store(nil)
 	s.source.Store(nil)
 	s.parsed.Store(nil)
-	return nil
+	s.mu.Unlock()
+	return s.GenerateSelfSigned(nil, 365*24*time.Hour)
 }
 
 // GenerateSelfSigned creates a fresh ECDSA P-256 self-signed cert covering

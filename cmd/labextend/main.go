@@ -85,17 +85,15 @@ func main() {
 	statsStore := stats.New(database)
 
 	tlsStore := tlsstore.New(cfg.DataDir, cfg.TLSCertFile, cfg.TLSKeyFile)
-	tlsLoaded, err := tlsStore.LoadOnStartup(cfg.TLSSelfSign)
-	if err != nil {
-		slog.Error("tls load", "err", err)
+	if err := tlsStore.LoadOrCreate(); err != nil {
+		slog.Error("tls load/create", "err", err)
+		os.Exit(1)
 	}
-	if tlsLoaded {
-		info := tlsStore.CurrentInfo()
-		slog.Info("tls certificate loaded",
-			"source", info.Source, "subject", info.Subject,
-			"not_after", info.NotAfter.Format(time.RFC3339),
-		)
-	}
+	info := tlsStore.CurrentInfo()
+	slog.Info("tls certificate ready",
+		"source", info.Source, "subject", info.Subject,
+		"not_after", info.NotAfter.Format(time.RFC3339),
+	)
 
 	srv := api.New(database, cfg, st, mods, vlt, ddnsStore, wolStore, docsStore, notesStore, statsStore, tlsStore, []byte(jwtSecret))
 
@@ -126,60 +124,36 @@ func main() {
 	webHandler := spaHandler(http.FS(web.FS()))
 	handler := srv.Routes(webHandler)
 
-	httpSrv := &http.Server{
+	// LabExtend serves HTTPS only. The cert is read fresh on every
+	// handshake via tlsStore.GetCertificate, so uploads/regenerates from
+	// the UI take effect on the next connection without restart.
+	httpsSrv := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
+		TLSConfig: &tls.Config{
+			MinVersion:     tls.VersionTLS12,
+			GetCertificate: tlsStore.GetCertificate,
+		},
 	}
-
+	srv.HTTPSStarted = true
 	go func() {
-		slog.Info("http listening",
+		slog.Info("https listening",
 			"addr", cfg.Listen,
 			"data_dir", cfg.DataDir,
 			"session_timeout", cfg.SessionTimeout,
 		)
-		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("http server error", "err", err)
+		if err := httpsSrv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("https server error", "err", err)
 			os.Exit(1)
 		}
 	}()
-
-	// HTTPS: started only when a certificate is actually loaded. The
-	// server reads the current cert from tlsStore on every handshake, so
-	// uploading a new cert via the UI takes effect on next connection
-	// without restarting the process.
-	var httpsSrv *http.Server
-	if tlsLoaded {
-		httpsSrv = &http.Server{
-			Addr:              cfg.TLSListen,
-			Handler:           handler,
-			ReadHeaderTimeout: 10 * time.Second,
-			TLSConfig: &tls.Config{
-				MinVersion:     tls.VersionTLS12,
-				GetCertificate: tlsStore.GetCertificate,
-			},
-		}
-		srv.HTTPSStarted = true
-		go func() {
-			slog.Info("https listening", "addr", cfg.TLSListen)
-			if err := httpsSrv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				slog.Error("https server error", "err", err)
-			}
-		}()
-	} else {
-		slog.Info("https disabled (no certificate); upload one via Settings → TLS to enable",
-			"would_listen", cfg.TLSListen,
-		)
-	}
 
 	<-ctx.Done()
 	slog.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = httpSrv.Shutdown(shutdownCtx)
-	if httpsSrv != nil {
-		_ = httpsSrv.Shutdown(shutdownCtx)
-	}
+	_ = httpsSrv.Shutdown(shutdownCtx)
 }
 
 func spaHandler(fsys http.FileSystem) http.Handler {
