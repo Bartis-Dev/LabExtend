@@ -14,6 +14,7 @@ import type {
   StatsSourceInput,
   StatsWidget,
   StatsWidgetInput,
+  TLSState,
   DDNSAutoUpdate,
   DDNSCard,
   DDNSCardInput,
@@ -698,5 +699,42 @@ export function useDeleteStatsWidget() {
   return useMutation({
     mutationFn: (id: number) => api.delete<void>(`/api/stats/widgets/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: statsWidgetsKey }),
+  });
+}
+
+// --- TLS ------------------------------------------------------------------
+
+export const tlsStateKey = ['tls', 'state'] as const;
+
+export function useTLSState() {
+  return useQuery({
+    queryKey: tlsStateKey,
+    queryFn: () => api.get<TLSState>('/api/tls/state'),
+  });
+}
+
+export function useUploadTLSCert() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { cert_pem: string; key_pem: string }) =>
+      api.post<TLSState>('/api/tls/cert', args),
+    onSuccess: () => qc.invalidateQueries({ queryKey: tlsStateKey }),
+  });
+}
+
+export function useGenerateSelfSignedTLS() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { hostnames: string[]; validity_days: number }) =>
+      api.post<TLSState>('/api/tls/self-signed', args),
+    onSuccess: () => qc.invalidateQueries({ queryKey: tlsStateKey }),
+  });
+}
+
+export function useDeleteTLSCert() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete<void>('/api/tls/cert'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: tlsStateKey }),
   });
 }

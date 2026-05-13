@@ -157,7 +157,9 @@ export default function NotesPage() {
   // "Add card here". Coordinates are converted to world space.
   const [menu, setMenu] = useState<{ sx: number; sy: number; wx: number; wy: number } | null>(null);
   const onContextMenu = (e: React.MouseEvent) => {
-    if (e.target !== e.currentTarget) return;
+    // Always preventDefault so the browser's native menu never shows on
+    // the canvas. If the right-click was inside a card, the card's own
+    // handler stops propagation before we get here.
     e.preventDefault();
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -518,6 +520,12 @@ function CardView({
   return (
     <div
       ref={cardRef}
+      onContextMenu={(e) => {
+        // Suppress both the native browser menu and the canvas's "add
+        // note here" menu when the user right-clicks on a card.
+        e.preventDefault();
+        e.stopPropagation();
+      }}
       className={
         'absolute rounded-lg border bg-bg-card shadow-lg transition-opacity ' +
         (highlighted ? 'ring-2 ring-accent' : '') +

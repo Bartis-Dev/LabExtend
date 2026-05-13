@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"github.com/Bartis-Dev/LabExtend/internal/servercrypto"
 	"github.com/Bartis-Dev/LabExtend/internal/settings"
 	"github.com/Bartis-Dev/LabExtend/internal/stats"
+	"github.com/Bartis-Dev/LabExtend/internal/tlsstore"
 	"github.com/Bartis-Dev/LabExtend/internal/vault"
 	"github.com/Bartis-Dev/LabExtend/internal/wol"
 	web "github.com/Bartis-Dev/LabExtend/web"
@@ -82,7 +84,20 @@ func main() {
 	notesStore := notes.New(database)
 	statsStore := stats.New(database)
 
-	srv := api.New(database, cfg, st, mods, vlt, ddnsStore, wolStore, docsStore, notesStore, statsStore, []byte(jwtSecret))
+	tlsStore := tlsstore.New(cfg.DataDir, cfg.TLSCertFile, cfg.TLSKeyFile)
+	tlsLoaded, err := tlsStore.LoadOnStartup(cfg.TLSSelfSign)
+	if err != nil {
+		slog.Error("tls load", "err", err)
+	}
+	if tlsLoaded {
+		info := tlsStore.CurrentInfo()
+		slog.Info("tls certificate loaded",
+			"source", info.Source, "subject", info.Subject,
+			"not_after", info.NotAfter.Format(time.RFC3339),
+		)
+	}
+
+	srv := api.New(database, cfg, st, mods, vlt, ddnsStore, wolStore, docsStore, notesStore, statsStore, tlsStore, []byte(jwtSecret))
 
 	// Healthcheck worker + hub. The interval can be overridden at runtime
 	// via PUT /api/settings; we honour the env-supplied default here.
@@ -118,22 +133,53 @@ func main() {
 	}
 
 	go func() {
-		slog.Info("server listening",
+		slog.Info("http listening",
 			"addr", cfg.Listen,
 			"data_dir", cfg.DataDir,
 			"session_timeout", cfg.SessionTimeout,
 		)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("server error", "err", err)
+			slog.Error("http server error", "err", err)
 			os.Exit(1)
 		}
 	}()
+
+	// HTTPS: started only when a certificate is actually loaded. The
+	// server reads the current cert from tlsStore on every handshake, so
+	// uploading a new cert via the UI takes effect on next connection
+	// without restarting the process.
+	var httpsSrv *http.Server
+	if tlsLoaded {
+		httpsSrv = &http.Server{
+			Addr:              cfg.TLSListen,
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
+			TLSConfig: &tls.Config{
+				MinVersion:     tls.VersionTLS12,
+				GetCertificate: tlsStore.GetCertificate,
+			},
+		}
+		srv.HTTPSStarted = true
+		go func() {
+			slog.Info("https listening", "addr", cfg.TLSListen)
+			if err := httpsSrv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("https server error", "err", err)
+			}
+		}()
+	} else {
+		slog.Info("https disabled (no certificate); upload one via Settings → TLS to enable",
+			"would_listen", cfg.TLSListen,
+		)
+	}
 
 	<-ctx.Done()
 	slog.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)
+	if httpsSrv != nil {
+		_ = httpsSrv.Shutdown(shutdownCtx)
+	}
 }
 
 func spaHandler(fsys http.FileSystem) http.Handler {

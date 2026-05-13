@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ThemeEditor } from '@/components/theme/ThemeEditor';
 import { ModulesTab } from '@/components/settings/ModulesTab';
+import { TLSTab } from '@/components/settings/TLSTab';
 import {
   useSettings,
   useUpdateSettings,
@@ -15,6 +16,7 @@ const TABS = [
   { id: 'healthcheck', label: 'Healthcheck' },
   { id: 'modules', label: 'Modules' },
   { id: 'vault', label: 'Vault' },
+  { id: 'tls', label: 'TLS' },
   { id: 'account', label: 'Account' },
 ] as const;
 type TabId = (typeof TABS)[number]['id'];
@@ -62,6 +64,7 @@ export default function Settings() {
       )}
       {tab === 'modules' && <ModulesTab />}
       {tab === 'vault' && <VaultSettings />}
+      {tab === 'tls' && <TLSTab />}
       {tab === 'account' && <PasswordChange />}
     </div>
   );

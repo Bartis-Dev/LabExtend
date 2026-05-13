@@ -16,6 +16,7 @@ import (
 	"github.com/Bartis-Dev/LabExtend/internal/notes"
 	"github.com/Bartis-Dev/LabExtend/internal/servercrypto"
 	"github.com/Bartis-Dev/LabExtend/internal/stats"
+	"github.com/Bartis-Dev/LabExtend/internal/tlsstore"
 	"github.com/Bartis-Dev/LabExtend/internal/settings"
 	"github.com/Bartis-Dev/LabExtend/internal/vault"
 	"github.com/Bartis-Dev/LabExtend/internal/wol"
@@ -56,7 +57,8 @@ func newTestServer(t *testing.T) (*httptest.Server, *http.Client) {
 	dx := docs.New(d)
 	nt := notes.New(d)
 	sts := stats.New(d)
-	srv := New(d, cfg, st, mods, vlt, dd, wl, dx, nt, sts, []byte(secret))
+	tlsS := tlsstore.New(dir, "", "")
+	srv := New(d, cfg, st, mods, vlt, dd, wl, dx, nt, sts, tlsS, []byte(secret))
 	handler := srv.Routes(http.NotFoundHandler())
 
 	ts := httptest.NewServer(handler)

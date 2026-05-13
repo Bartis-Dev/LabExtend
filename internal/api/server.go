@@ -14,6 +14,7 @@ import (
 	"github.com/Bartis-Dev/LabExtend/internal/notes"
 	"github.com/Bartis-Dev/LabExtend/internal/settings"
 	"github.com/Bartis-Dev/LabExtend/internal/stats"
+	"github.com/Bartis-Dev/LabExtend/internal/tlsstore"
 	"github.com/Bartis-Dev/LabExtend/internal/vault"
 	"github.com/Bartis-Dev/LabExtend/internal/wol"
 )
@@ -30,9 +31,11 @@ type Server struct {
 	DDNSWorker *ddns.Worker
 	WoL        *wol.Store
 	Docs       *docs.Store
-	Notes      *notes.Store
-	Stats      *stats.Store
-	JWTSecret  []byte
+	Notes        *notes.Store
+	Stats        *stats.Store
+	TLS          *tlsstore.Store
+	HTTPSStarted bool
+	JWTSecret    []byte
 	LoginLimit *auth.Limiter
 	SetupLimit *auth.Limiter
 	Hub        *hc.Hub
@@ -42,7 +45,7 @@ type Server struct {
 // New constructs a Server with sensible rate-limiter defaults:
 //   - login: 5 attempts per 5 minutes per IP
 //   - setup: 5 attempts per minute globally (setup is a one-shot path)
-func New(db *sql.DB, cfg config.Config, st *settings.Store, mods *modules.Store, vlt *vault.Store, dd *ddns.Store, wl *wol.Store, dx *docs.Store, nt *notes.Store, sts *stats.Store, jwtSecret []byte) *Server {
+func New(db *sql.DB, cfg config.Config, st *settings.Store, mods *modules.Store, vlt *vault.Store, dd *ddns.Store, wl *wol.Store, dx *docs.Store, nt *notes.Store, sts *stats.Store, tlsS *tlsstore.Store, jwtSecret []byte) *Server {
 	return &Server{
 		DB:         db,
 		Cfg:        cfg,
@@ -54,6 +57,7 @@ func New(db *sql.DB, cfg config.Config, st *settings.Store, mods *modules.Store,
 		Docs:       dx,
 		Notes:      nt,
 		Stats:      sts,
+		TLS:        tlsS,
 		JWTSecret:  jwtSecret,
 		LoginLimit: auth.NewLimiter(5, 5*time.Minute),
 		SetupLimit: auth.NewLimiter(5, time.Minute),

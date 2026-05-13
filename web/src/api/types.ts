@@ -88,6 +88,21 @@ export type HealthMap = Record<string, ServiceStatus>;
 // Settings
 export type Settings = Record<string, string>;
 
+// TLS
+export type TLSState = {
+  loaded: boolean;
+  source?: 'env' | 'data_dir' | 'self_signed';
+  subject?: string;
+  issuer?: string;
+  dns_names?: string[];
+  ips?: string[];
+  not_before?: string;
+  not_after?: string;
+  self_signed?: boolean;
+  https_enabled: boolean;
+  https_listen: string;
+};
+
 // Stats
 export type StatsSource = {
   id: number;

@@ -144,13 +144,16 @@ function CommandList({
               <button
                 key={c.id}
                 onClick={() => onSelect(c.id)}
+                title={c.description}
                 className={
-                  'flex w-full flex-col items-start px-3 py-2 text-left transition-colors ' +
+                  'flex w-full min-w-0 flex-col gap-0.5 px-3 py-2 text-left transition-colors ' +
                   (selectedId === c.id ? 'bg-accent/10 text-fg' : 'hover:bg-bg-card')
                 }
               >
-                <span className="font-mono text-sm">{c.name}</span>
-                <span className="truncate text-[11px] text-fg-muted">{c.description}</span>
+                <span className="block w-full truncate font-mono text-sm">{c.name}</span>
+                <span className="block w-full truncate text-[11px] text-fg-muted">
+                  {c.description}
+                </span>
               </button>
             ))}
           </div>
