@@ -29,10 +29,15 @@ A self-hosted homelab dashboard. Single Go binary, embedded React frontend, SQLi
 
 ## Quick start — Docker
 
-LabExtend serves **HTTPS only on port `10000`**. On first boot it generates a
-self-signed certificate (covering `localhost` + `127.0.0.1`) so the server
-boots straight into HTTPS — there is no plain-HTTP fallback. Replace the
-auto-generated cert via Settings → TLS once you're in.
+LabExtend serves **HTTPS on port `10000`** with an auto-generated self-signed
+certificate on first boot (covering `localhost` + `127.0.0.1`). Replace it
+via Settings → TLS once you're logged in.
+
+Plain `http://host:10000` requests are accepted on the same port and
+**308-redirected to `https://`** automatically — the server multiplexes both
+protocols on one TCP listener by sniffing the first byte (TLS handshakes
+start with `0x16`; anything else is HTTP). You can type either scheme and
+end up in the right place.
 
 Wake-on-LAN (and other LAN-broadcast features) require `network_mode: host`
 so the magic packets reach your network.
@@ -46,10 +51,11 @@ docker run -d \
   ghcr.io/bartis-dev/labextend:latest
 ```
 
-Open <https://localhost:10000> and accept the self-signed-cert warning the
-first time (browsers don't trust unknown CAs by default — replace the cert
-under Settings → TLS once you can log in). Complete the setup wizard (pick
-username + password ≥ 8 chars).
+Open <https://localhost:10000> (or just `localhost:10000` — your browser
+will hit the HTTP side and get redirected to HTTPS). Accept the
+self-signed-cert warning the first time; you can replace the cert under
+Settings → TLS once you're in. Complete the setup wizard (pick username +
+password ≥ 8 chars).
 
 ### docker-compose
 
@@ -83,9 +89,15 @@ mappings instead:
 
 ## HTTPS
 
-LabExtend is HTTPS-only — no plain HTTP listener exists. On first boot it
-generates a self-signed certificate for `localhost` + `127.0.0.1` so the
-server has *something* to serve over TLS. Three ways to provide your own:
+LabExtend listens on a single TCP port (`10000` by default). The server
+sniffs the first byte of each connection: TLS handshakes go to the real
+HTTPS server, plain HTTP requests get a `308 Permanent Redirect` to
+`https://` on the same host+port. So you can paste either scheme and it
+just works.
+
+On first boot it generates a self-signed certificate for `localhost` +
+`127.0.0.1` so the server has *something* to serve over TLS. Three ways
+to provide your own:
 
 1. **Generate a better self-signed cert** — Settings → TLS → "Generate self-
    signed". List the hostnames / IPs you'll actually use to reach LabExtend

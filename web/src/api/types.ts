@@ -161,9 +161,21 @@ export type NotesCard = {
   w: number;
   h: number;
   color: string;
+  board_id: number | null;
+  slot_index: number;
   created_at: number;
   updated_at: number;
   items: NotesItem[];
+};
+export type NotesBoard = {
+  id: number;
+  name: string;
+  x: number;
+  y: number;
+  cols: number;
+  color: string;
+  created_at: number;
+  updated_at: number;
 };
 export type NotesCardInput = {
   name: string;
@@ -172,11 +184,24 @@ export type NotesCardInput = {
   w: number;
   h: number;
   color: string;
+  board_id?: number | null;
+  slot_index?: number;
 };
 export type NotesItemInput = {
   text: string;
   is_favorite: boolean;
   position: number;
+};
+export type NotesBoardInput = {
+  name: string;
+  x: number;
+  y: number;
+  cols: number;
+  color: string;
+};
+export type NotesState = {
+  cards: NotesCard[];
+  boards: NotesBoard[];
 };
 
 // Docs

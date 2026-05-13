@@ -1,17 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ContextMenu, type ContextMenuItem, useContextMenu } from '@/components/ContextMenu';
 import {
+  useCreateNotesBoard,
   useCreateNotesCard,
   useCreateNotesItem,
+  useDeleteNotesBoard,
   useDeleteNotesCard,
   useDeleteNotesItem,
+  useMoveNotesItem,
   useNotes,
+  usePatchNotesBoardPosition,
   usePatchNotesCardLayout,
+  useSwapNotesCardSlots,
+  useUpdateNotesBoard,
   useUpdateNotesCard,
   useUpdateNotesItem,
 } from '@/api/queries';
-import type { NotesCard, NotesItem } from '@/api/types';
+import type { NotesBoard, NotesCard, NotesItem } from '@/api/types';
 
-// ---- Constants -----------------------------------------------------------
+// ---- Tunables -----------------------------------------------------------
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 3.0;
@@ -19,8 +26,19 @@ const ZOOM_STEP = 0.1;
 const DEFAULT_CARD_W = 280;
 const DEFAULT_CARD_H = 140;
 
+const BOARD_HEADER_H = 36;
+const BOARD_INNER_PAD = 12;
+const BOARD_INNER_GAP = 16;
+
+// MIME type used by the item drag-and-drop. The string itself is
+// arbitrary — the only contract is "no other widget in this app uses it".
+const ITEM_DRAG_MIME = 'application/x-labextend-note-item';
+
 // AABB overlap with a 1px margin so abutting edges aren't called collisions.
-function overlaps(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): boolean {
+function overlaps(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number },
+): boolean {
   return !(
     a.x + a.w <= b.x + 1 ||
     b.x + b.w <= a.x + 1 ||
@@ -29,10 +47,6 @@ function overlaps(a: { x: number; y: number; w: number; h: number }, b: { x: num
   );
 }
 
-// Given a desired (wx, wy) and a list of existing cards, return the
-// closest non-overlapping position. We probe in a spiral around the
-// click point, stepping by the card width / height + a small gap so the
-// resulting placement looks deliberate, not jammed against neighbours.
 function findFreeSpot(
   wx: number,
   wy: number,
@@ -46,9 +60,6 @@ function findFreeSpot(
   const free = (x: number, y: number) =>
     !others.some((o) => overlaps({ x, y, w, h }, o));
   if (free(wx, wy)) return { x: wx, y: wy };
-  // Try increasingly wide rings: each ring tests positions at multiples
-  // of stepX/stepY from the click. Cap at 12 rings (=> > 600 candidates)
-  // so we never loop indefinitely.
   for (let ring = 1; ring <= 12; ring++) {
     const candidates: Array<[number, number]> = [];
     for (let i = -ring; i <= ring; i++) {
@@ -63,12 +74,15 @@ function findFreeSpot(
       if (free(cx, cy)) return { x: cx, y: cy };
     }
   }
-  // Last-resort fallback: stack vertically below the lowest existing card.
   const maxY = others.reduce((m, o) => Math.max(m, o.y + o.h), 0);
   return { x: wx, y: maxY + gap };
 }
 
-// ---- Page ----------------------------------------------------------------
+function boardWidth(cols: number): number {
+  return cols * DEFAULT_CARD_W + (cols - 1) * BOARD_INNER_GAP + 2 * BOARD_INNER_PAD;
+}
+
+// ---- Page --------------------------------------------------------------
 
 export default function NotesPage() {
   const notes = useNotes(true);
@@ -76,27 +90,46 @@ export default function NotesPage() {
   const update = useUpdateNotesCard();
   const patchLayout = usePatchNotesCardLayout();
   const del = useDeleteNotesCard();
+  const createBoard = useCreateNotesBoard();
   const [search, setSearch] = useState('');
 
-  // Canvas viewport state.
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Pending position overrides so we can render dragging without waiting
-  // on the server round-trip. Keyed by card id.
-  const [pendingPos, setPendingPos] = useState<Record<number, { x: number; y: number }>>({});
+  // Pending position overrides while dragging a free card or board.
+  const [pendingCardPos, setPendingCardPos] = useState<Record<number, { x: number; y: number }>>({});
+  const [pendingBoardPos, setPendingBoardPos] = useState<Record<number, { x: number; y: number }>>({});
 
-  const cards = useMemo<NotesCard[]>(() => {
-    const data = notes.data ?? [];
-    return data.map((c) => (pendingPos[c.id] ? { ...c, ...pendingPos[c.id] } : c));
-  }, [notes.data, pendingPos]);
+  const allCards = useMemo<NotesCard[]>(() => {
+    const data = notes.data?.cards ?? [];
+    return data.map((c) =>
+      pendingCardPos[c.id] ? { ...c, ...pendingCardPos[c.id] } : c,
+    );
+  }, [notes.data, pendingCardPos]);
 
-  // ---- Pan + zoom handling -----------------------------------------------
-  // React's onWheel is attached as a passive listener since React 17, so
-  // preventDefault() silently no-ops — the page would still scroll. We
-  // attach a native non-passive listener on the canvas container so the
-  // wheel only zooms and never propagates to the Layout's main element.
+  const boards = useMemo<NotesBoard[]>(() => {
+    const data = notes.data?.boards ?? [];
+    return data.map((b) =>
+      pendingBoardPos[b.id] ? { ...b, ...pendingBoardPos[b.id] } : b,
+    );
+  }, [notes.data, pendingBoardPos]);
+
+  const freeCards = useMemo(() => allCards.filter((c) => c.board_id == null), [allCards]);
+  const cardsByBoard = useMemo(() => {
+    const m = new Map<number, NotesCard[]>();
+    for (const c of allCards) {
+      if (c.board_id != null) {
+        const arr = m.get(c.board_id) ?? [];
+        arr.push(c);
+        m.set(c.board_id, arr);
+      }
+    }
+    for (const [, arr] of m) arr.sort((a, b) => a.slot_index - b.slot_index);
+    return m;
+  }, [allCards]);
+
+  // ---- Pan + zoom -------------------------------------------------------
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -106,9 +139,6 @@ export default function NotesPage() {
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
       const factor = e.deltaY < 0 ? 1 + ZOOM_STEP : 1 - ZOOM_STEP;
-      // Reading current values via the ref-equivalent: closures captured
-      // at registration would be stale, so we read from state directly
-      // each call by going through setters with the previous value.
       setZoom((z) => {
         const nz = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z * factor));
         if (nz === z) return z;
@@ -124,7 +154,6 @@ export default function NotesPage() {
     return () => el.removeEventListener('wheel', handler);
   }, []);
 
-  // Background pan: only when middle mouse, or left mouse on empty canvas.
   const panState = useRef<{ startX: number; startY: number; pan0: { x: number; y: number } } | null>(null);
   const onMouseDown = (e: React.MouseEvent) => {
     if (e.button === 1 || (e.button === 0 && e.target === e.currentTarget)) {
@@ -151,37 +180,26 @@ export default function NotesPage() {
     };
   }, []);
 
-  // ---- Card creation + actions -------------------------------------------
-
-  // Right-click on the background opens a tiny menu at cursor with
-  // "Add card here". Coordinates are converted to world space.
-  const [menu, setMenu] = useState<{ sx: number; sy: number; wx: number; wy: number } | null>(null);
+  // ---- Canvas right-click menu (add note / create canvas) ----------------
+  const canvasMenu = useContextMenu();
+  const [menuWorld, setMenuWorld] = useState<{ wx: number; wy: number } | null>(null);
   const onContextMenu = (e: React.MouseEvent) => {
-    // Always preventDefault so the browser's native menu never shows on
-    // the canvas. If the right-click was inside a card, the card's own
-    // handler stops propagation before we get here.
-    e.preventDefault();
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
-    setMenu({
-      sx,
-      sy,
-      wx: (sx - pan.x) / zoom,
-      wy: (sy - pan.y) / zoom,
-    });
+    setMenuWorld({ wx: (sx - pan.x) / zoom, wy: (sy - pan.y) / zoom });
+    canvasMenu.onContextMenu(e);
   };
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    window.addEventListener('mousedown', close);
-    return () => window.removeEventListener('mousedown', close);
-  }, [menu]);
 
   const addCardAt = async (wx: number, wy: number) => {
-    setMenu(null);
-    const others = (notes.data ?? []).map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h }));
+    const others = freeCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h }));
+    // Boards also occupy free-canvas space; include them in the collision set.
+    for (const b of boards) {
+      const cards = cardsByBoard.get(b.id) ?? [];
+      const h = Math.max(...cards.map((c) => c.h), DEFAULT_CARD_H);
+      others.push({ x: b.x, y: b.y, w: boardWidth(b.cols), h: h + BOARD_HEADER_H + BOARD_INNER_PAD * 2 });
+    }
     const spot = findFreeSpot(wx, wy, DEFAULT_CARD_W, DEFAULT_CARD_H, others);
     try {
       await create.mutateAsync({
@@ -197,70 +215,109 @@ export default function NotesPage() {
     }
   };
 
-  // ---- Card drag ---------------------------------------------------------
-
-  const tryMoveCard = (cardId: number, newX: number, newY: number) => {
-    setPendingPos((prev) => ({ ...prev, [cardId]: { x: newX, y: newY } }));
+  const createCanvasBoard = async (cols: number, wx: number, wy: number) => {
+    try {
+      await createBoard.mutateAsync({
+        name: '',
+        x: wx,
+        y: wy,
+        cols,
+        color: '#475569',
+      });
+    } catch (e) {
+      console.error('create board', e);
+    }
   };
 
+  const canvasMenuItems: ContextMenuItem[] = menuWorld
+    ? [
+        { label: 'Add note here', onClick: () => addCardAt(menuWorld.wx, menuWorld.wy) },
+        { separator: true },
+        ...([2, 3, 4, 5] as const).map(
+          (n): ContextMenuItem => ({
+            label: `Create canvas with ${n} cards`,
+            onClick: () => createCanvasBoard(n, menuWorld.wx, menuWorld.wy),
+          }),
+        ),
+      ]
+    : [];
+
+  // ---- Card move (free canvas) ------------------------------------------
+  const tryMoveCard = (cardId: number, nx: number, ny: number) =>
+    setPendingCardPos((p) => ({ ...p, [cardId]: { x: nx, y: ny } }));
   const commitMoveCard = async (cardId: number) => {
-    const current = pendingPos[cardId];
-    if (!current) return;
-    const card = (notes.data ?? []).find((c) => c.id === cardId);
+    const cur = pendingCardPos[cardId];
+    if (!cur) return;
+    const card = (notes.data?.cards ?? []).find((c) => c.id === cardId);
     if (!card) return;
-    const proposed = { x: current.x, y: current.y, w: card.w, h: card.h };
-    const others = (notes.data ?? []).filter((c) => c.id !== cardId);
-    const collision = others.some((o) =>
-      overlaps(proposed, { x: o.x, y: o.y, w: o.w, h: o.h }),
-    );
-    if (collision) {
-      // Snap back: drop the pending override so the card returns to its
-      // original position on the next render.
-      setPendingPos((prev) => {
-        const next = { ...prev };
+    const proposed = { x: cur.x, y: cur.y, w: card.w, h: card.h };
+    const others = (notes.data?.cards ?? [])
+      .filter((c) => c.id !== cardId && c.board_id == null)
+      .map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h }));
+    for (const b of boards) {
+      const inb = cardsByBoard.get(b.id) ?? [];
+      const h = Math.max(...inb.map((c) => c.h), DEFAULT_CARD_H);
+      others.push({ x: b.x, y: b.y, w: boardWidth(b.cols), h: h + BOARD_HEADER_H + BOARD_INNER_PAD * 2 });
+    }
+    if (others.some((o) => overlaps(proposed, o))) {
+      setPendingCardPos((p) => {
+        const next = { ...p };
         delete next[cardId];
         return next;
       });
       return;
     }
     try {
-      await patchLayout.mutateAsync({
-        id: cardId,
-        x: current.x,
-        y: current.y,
-        w: card.w,
-        h: card.h,
-      });
-      // Refetch BEFORE clearing the pending override so the card doesn't
-      // snap back to stale data for one render frame.
+      await patchLayout.mutateAsync({ id: cardId, x: cur.x, y: cur.y, w: card.w, h: card.h });
       await notes.refetch();
     } catch (e) {
-      console.error('patch layout', e);
+      console.error(e);
       await notes.refetch();
     } finally {
-      setPendingPos((prev) => {
-        const next = { ...prev };
+      setPendingCardPos((p) => {
+        const next = { ...p };
         delete next[cardId];
         return next;
       });
     }
   };
 
-  // ---- Search highlight --------------------------------------------------
+  // ---- Board move -------------------------------------------------------
+  const patchBoardPos = usePatchNotesBoardPosition();
+  const tryMoveBoard = (id: number, nx: number, ny: number) =>
+    setPendingBoardPos((p) => ({ ...p, [id]: { x: nx, y: ny } }));
+  const commitMoveBoard = async (id: number) => {
+    const cur = pendingBoardPos[id];
+    if (!cur) return;
+    try {
+      await patchBoardPos.mutateAsync({ id, x: cur.x, y: cur.y });
+      await notes.refetch();
+    } catch (e) {
+      console.error(e);
+      await notes.refetch();
+    } finally {
+      setPendingBoardPos((p) => {
+        const next = { ...p };
+        delete next[id];
+        return next;
+      });
+    }
+  };
 
+  // ---- Search ------------------------------------------------------------
   const q = search.trim().toLowerCase();
   const matchingIds = useMemo(() => {
     if (!q) return null;
     const out = new Set<number>();
-    for (const c of cards) {
+    for (const c of allCards) {
       if (c.name.toLowerCase().includes(q)) out.add(c.id);
       else if (c.items.some((i) => i.text.toLowerCase().includes(q))) out.add(c.id);
     }
     return out;
-  }, [cards, q]);
+  }, [allCards, q]);
 
   const focusCard = (cardId: number) => {
-    const c = (notes.data ?? []).find((x) => x.id === cardId);
+    const c = (notes.data?.cards ?? []).find((x) => x.id === cardId);
     if (!c || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     setPan({
@@ -271,7 +328,6 @@ export default function NotesPage() {
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-bg">
-      {/* Top toolbar */}
       <div className="absolute left-0 right-0 top-0 z-20 flex items-center gap-2 border-b border-border bg-bg-card/90 px-4 py-2 backdrop-blur">
         <input
           value={search}
@@ -330,10 +386,22 @@ export default function NotesPage() {
           className="absolute left-0 top-0 origin-top-left"
           style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
         >
-          {cards.map((card) => (
+          {boards.map((b) => (
+            <BoardView
+              key={b.id}
+              board={b}
+              cards={cardsByBoard.get(b.id) ?? []}
+              zoom={zoom}
+              dimmedSet={q && matchingIds ? matchingIds : null}
+              onMove={(x, y) => tryMoveBoard(b.id, x, y)}
+              onMoveEnd={() => commitMoveBoard(b.id)}
+            />
+          ))}
+          {freeCards.map((card) => (
             <CardView
               key={card.id}
               card={card}
+              mode="free"
               zoom={zoom}
               dimmed={!!q && matchingIds != null && !matchingIds.has(card.id)}
               highlighted={!!q && matchingIds != null && matchingIds.has(card.id)}
@@ -345,40 +413,33 @@ export default function NotesPage() {
           ))}
         </div>
 
-        {menu && (
-          <div
-            className="absolute z-30 rounded border border-border bg-bg-card py-1 shadow-lg"
-            style={{ left: menu.sx, top: menu.sy }}
-            onMouseDown={(e) => e.stopPropagation()}
-            onContextMenu={(e) => e.preventDefault()}
-          >
-            <button
-              onClick={() => addCardAt(menu.wx, menu.wy)}
-              className="block w-full px-4 py-1.5 text-left text-sm hover:bg-bg-elevated"
-            >
-              + Add note here
-            </button>
-          </div>
-        )}
+        <ContextMenu
+          open={canvasMenu.open}
+          x={canvasMenu.x}
+          y={canvasMenu.y}
+          items={canvasMenuItems}
+          onClose={canvasMenu.close}
+        />
 
         {notes.isPending && (
           <div className="absolute inset-0 grid place-items-center text-fg-muted">Loading…</div>
         )}
-        {!notes.isPending && cards.length === 0 && (
+        {!notes.isPending && allCards.length === 0 && boards.length === 0 && (
           <div className="absolute inset-0 grid place-items-center text-center text-fg-muted">
             <div>
               <p>Empty canvas.</p>
-              <p className="mt-1 text-sm">Right-click anywhere to add your first card.</p>
+              <p className="mt-1 text-sm">
+                Right-click to add a note or create a canvas of 2–5 cards.
+              </p>
             </div>
           </div>
         )}
       </div>
 
-      {/* Search results overlay */}
       {q && matchingIds && matchingIds.size > 0 && (
         <div className="absolute left-4 top-14 z-20 max-h-72 w-72 overflow-y-auto rounded-lg border border-border bg-bg-card shadow-lg">
           {[...matchingIds].map((id) => {
-            const c = cards.find((x) => x.id === id);
+            const c = allCards.find((x) => x.id === id);
             if (!c) return null;
             return (
               <button
@@ -399,54 +460,50 @@ export default function NotesPage() {
   );
 }
 
-// ---- CardView ------------------------------------------------------------
+// ---- BoardView ---------------------------------------------------------
 
-function CardView({
-  card,
+function BoardView({
+  board,
+  cards,
   zoom,
-  dimmed,
-  highlighted,
+  dimmedSet,
   onMove,
   onMoveEnd,
-  onUpdate,
-  onDelete,
 }: {
-  card: NotesCard;
+  board: NotesBoard;
+  cards: NotesCard[];
   zoom: number;
-  dimmed: boolean;
-  highlighted: boolean;
+  dimmedSet: Set<number> | null;
   onMove: (x: number, y: number) => void;
   onMoveEnd: () => void;
-  onUpdate: (input: { name: string; x: number; y: number; w: number; h: number; color: string }) => void;
-  onDelete: () => void;
 }) {
-  const createItem = useCreateNotesItem();
-  const updateItem = useUpdateNotesItem();
-  const deleteItem = useDeleteNotesItem();
-  const [editingName, setEditingName] = useState(false);
-  const [name, setName] = useState(card.name);
+  const update = useUpdateNotesBoard();
+  const del = useDeleteNotesBoard();
+  const swap = useSwapNotesCardSlots();
+  const updateCard = useUpdateNotesCard();
+  const delCard = useDeleteNotesCard();
+  const ctx = useContextMenu();
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(board.name);
+  const cardListRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => setName(card.name), [card.name]);
+  useEffect(() => setName(board.name), [board.name]);
 
-  // Drag handling — applied to the header only.
-  const dragState = useRef<{ startX: number; startY: number; cardX0: number; cardY0: number } | null>(null);
+  // ---- Board drag (move on free canvas) ---------------------------------
+  const dragState = useRef<{ sx: number; sy: number; x0: number; y0: number } | null>(null);
   const onHeaderMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     if ((e.target as HTMLElement).closest('button, input')) return;
     e.preventDefault();
-    dragState.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      cardX0: card.x,
-      cardY0: card.y,
-    };
+    e.stopPropagation();
+    dragState.current = { sx: e.clientX, sy: e.clientY, x0: board.x, y0: board.y };
   };
   useEffect(() => {
     const move = (e: MouseEvent) => {
       if (!dragState.current) return;
-      const dx = (e.clientX - dragState.current.startX) / zoom;
-      const dy = (e.clientY - dragState.current.startY) / zoom;
-      onMove(dragState.current.cardX0 + dx, dragState.current.cardY0 + dy);
+      const dx = (e.clientX - dragState.current.sx) / zoom;
+      const dy = (e.clientY - dragState.current.sy) / zoom;
+      onMove(dragState.current.x0 + dx, dragState.current.y0 + dy);
     };
     const up = () => {
       if (dragState.current) {
@@ -460,10 +517,261 @@ function CardView({
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
     };
-  }, [onMove, onMoveEnd, zoom]);
+  }, [zoom, onMove, onMoveEnd]);
+
+  // ---- In-board card slot drag (swap) ------------------------------------
+  const [draggingSlot, setDraggingSlot] = useState<{
+    cardId: number;
+    fromSlot: number;
+    hoverSlot: number;
+  } | null>(null);
+
+  const startSlotDrag = (cardId: number, fromSlot: number) => {
+    setDraggingSlot({ cardId, fromSlot, hoverSlot: fromSlot });
+  };
+  useEffect(() => {
+    if (!draggingSlot) return;
+    const move = (e: MouseEvent) => {
+      const rect = cardListRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      // Hover slot determined by cursor X within the card-row content area.
+      const localX = (e.clientX - rect.left) / zoom;
+      const slot = Math.max(
+        0,
+        Math.min(
+          board.cols - 1,
+          Math.floor(localX / (DEFAULT_CARD_W + BOARD_INNER_GAP)),
+        ),
+      );
+      // Only honour the hover if the cursor is also vertically inside the
+      // board — leaving the board cancels the drop.
+      const insideY = e.clientY >= rect.top && e.clientY <= rect.bottom;
+      const insideX = e.clientX >= rect.left && e.clientX <= rect.right;
+      setDraggingSlot((d) =>
+        d && insideX && insideY ? { ...d, hoverSlot: slot } : d && { ...d, hoverSlot: d.fromSlot },
+      );
+    };
+    const up = () => {
+      const d = draggingSlot;
+      setDraggingSlot(null);
+      if (!d || d.hoverSlot === d.fromSlot) return;
+      const target = cards.find((c) => c.slot_index === d.hoverSlot);
+      if (!target) return;
+      swap.mutate({ a: d.cardId, b: target.id });
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+  }, [draggingSlot, zoom, board.cols, cards, swap]);
+
+  // ---- Right-click menu --------------------------------------------------
+  const commitRename = () => {
+    setRenaming(false);
+    if (name === board.name) return;
+    update.mutate({
+      id: board.id,
+      input: { name, x: board.x, y: board.y, cols: board.cols, color: board.color },
+    });
+  };
+
+  const menuItems: ContextMenuItem[] = [
+    { label: 'Rename board', onClick: () => setRenaming(true) },
+    { separator: true },
+    {
+      label: 'Delete board (with all cards)',
+      danger: true,
+      onClick: () => {
+        if (confirm(`Delete board "${board.name || 'untitled'}" and all its cards?`)) {
+          del.mutate(board.id);
+        }
+      },
+    },
+  ];
+
+  const width = boardWidth(board.cols);
+
+  return (
+    <div
+      className="absolute rounded-xl border bg-bg-card/30 backdrop-blur"
+      style={{
+        left: board.x,
+        top: board.y,
+        width,
+        borderColor: board.color,
+        boxShadow: '0 0 0 1px var(--border)',
+      }}
+      onContextMenu={(e) => {
+        // Only fire when the user right-clicks the board chrome (header
+        // bar or padding around cards), NOT when they right-click a card
+        // inside the board. The card stops propagation on its own.
+        ctx.onContextMenu(e);
+      }}
+    >
+      <div
+        onMouseDown={onHeaderMouseDown}
+        className="flex h-9 cursor-grab items-center gap-2 rounded-t-xl px-3 active:cursor-grabbing"
+        style={{ background: `${board.color}33` }}
+      >
+        {renaming ? (
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitRename();
+              if (e.key === 'Escape') {
+                setName(board.name);
+                setRenaming(false);
+              }
+            }}
+            autoFocus
+            onMouseDown={(e) => e.stopPropagation()}
+            className="flex-1 rounded border border-border bg-bg-elevated px-2 py-0.5 text-sm outline-none focus:border-accent"
+          />
+        ) : (
+          <span className="flex-1 truncate text-sm font-semibold">
+            {board.name || <span className="italic text-fg-muted">canvas</span>}
+            <span className="ml-2 text-[10px] uppercase tracking-wider text-fg-muted/70">
+              {board.cols} cards
+            </span>
+          </span>
+        )}
+      </div>
+
+      <div
+        ref={cardListRef}
+        className="flex"
+        style={{
+          padding: BOARD_INNER_PAD,
+          gap: BOARD_INNER_GAP,
+        }}
+      >
+        {cards.map((c) => {
+          const dim = dimmedSet != null && !dimmedSet.has(c.id);
+          const highlight = dimmedSet != null && dimmedSet.has(c.id);
+          const isDraggedSource = draggingSlot?.cardId === c.id;
+          const isDropTarget =
+            draggingSlot != null &&
+            draggingSlot.cardId !== c.id &&
+            draggingSlot.hoverSlot === c.slot_index;
+          return (
+            <div
+              key={c.id}
+              className="relative"
+              style={{ width: DEFAULT_CARD_W }}
+            >
+              {isDropTarget && (
+                <div className="pointer-events-none absolute inset-0 z-10 rounded-lg border-2 border-dashed border-accent" />
+              )}
+              <CardView
+                card={c}
+                mode="inboard"
+                zoom={zoom}
+                dimmed={dim || (isDraggedSource && draggingSlot != null)}
+                highlighted={highlight}
+                onSlotDragStart={() => startSlotDrag(c.id, c.slot_index)}
+                onUpdate={(input) => updateCard.mutate({ id: c.id, input })}
+                onDelete={() => delCard.mutate(c.id)}
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      <ContextMenu open={ctx.open} x={ctx.x} y={ctx.y} items={menuItems} onClose={ctx.close} />
+    </div>
+  );
+}
+
+// ---- CardView ----------------------------------------------------------
+
+type CardMode = 'free' | 'inboard';
+
+function CardView({
+  card,
+  mode,
+  zoom,
+  dimmed,
+  highlighted,
+  onMove,
+  onMoveEnd,
+  onSlotDragStart,
+  onUpdate,
+  onDelete,
+}: {
+  card: NotesCard;
+  mode: CardMode;
+  zoom: number;
+  dimmed: boolean;
+  highlighted: boolean;
+  onMove?: (x: number, y: number) => void;
+  onMoveEnd?: () => void;
+  onSlotDragStart?: () => void;
+  onUpdate: (input: {
+    name: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    color: string;
+    board_id?: number | null;
+    slot_index?: number;
+  }) => void;
+  onDelete: () => void;
+}) {
+  const createItem = useCreateNotesItem();
+  const updateItem = useUpdateNotesItem();
+  const deleteItem = useDeleteNotesItem();
+  const moveItem = useMoveNotesItem();
+  const ctx = useContextMenu();
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(card.name);
+  useEffect(() => setName(card.name), [card.name]);
+
+  // ---- Drag handling — free vs in-board switch --------------------------
+  const dragState = useRef<{ sx: number; sy: number; x0: number; y0: number } | null>(null);
+  const onHeaderMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('button, input')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (mode === 'inboard' && onSlotDragStart) {
+      onSlotDragStart();
+      return;
+    }
+    if (mode === 'free') {
+      dragState.current = { sx: e.clientX, sy: e.clientY, x0: card.x, y0: card.y };
+    }
+  };
+  useEffect(() => {
+    if (mode !== 'free') return;
+    const move = (e: MouseEvent) => {
+      if (!dragState.current || !onMove) return;
+      const dx = (e.clientX - dragState.current.sx) / zoom;
+      const dy = (e.clientY - dragState.current.sy) / zoom;
+      onMove(dragState.current.x0 + dx, dragState.current.y0 + dy);
+    };
+    const up = () => {
+      if (dragState.current) {
+        dragState.current = null;
+        onMoveEnd?.();
+      }
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+  }, [mode, onMove, onMoveEnd, zoom]);
 
   const commitName = () => {
-    setEditingName(false);
+    setRenaming(false);
     if (name === card.name) return;
     onUpdate({
       name,
@@ -472,12 +780,13 @@ function CardView({
       w: card.w,
       h: card.h,
       color: card.color,
+      board_id: card.board_id,
+      slot_index: card.slot_index,
     });
   };
 
   const [addingItem, setAddingItem] = useState(false);
   const [newItemText, setNewItemText] = useState('');
-
   const addItem = async () => {
     if (!newItemText.trim()) {
       setAddingItem(false);
@@ -492,10 +801,10 @@ function CardView({
     setAddingItem(false);
   };
 
-  // Track rendered card height and persist back to the server (debounced)
-  // so collision detection has an accurate value.
-  const cardRef = useRef<HTMLDivElement>(null);
+  // Track rendered height so the server-side W/H stays accurate for
+  // free-card collision detection. Only useful for free cards.
   useEffect(() => {
+    if (mode !== 'free') return;
     const el = cardRef.current;
     if (!el) return;
     let timer: number | null = null;
@@ -504,7 +813,16 @@ function CardView({
       if (Math.abs(measured - card.h) < 4) return;
       if (timer) window.clearTimeout(timer);
       timer = window.setTimeout(() => {
-        onUpdate({ name: card.name, x: card.x, y: card.y, w: card.w, h: measured, color: card.color });
+        onUpdate({
+          name: card.name,
+          x: card.x,
+          y: card.y,
+          w: card.w,
+          h: measured,
+          color: card.color,
+          board_id: card.board_id,
+          slot_index: card.slot_index,
+        });
       }, 600);
     });
     ro.observe(el);
@@ -512,29 +830,47 @@ function CardView({
       ro.disconnect();
       if (timer) window.clearTimeout(timer);
     };
-    // We only want this to run on card identity / external geometry changes;
-    // intentionally not depending on onUpdate.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [card.id, card.x, card.y, card.w, card.color, card.name]);
+  }, [card.id, card.x, card.y, card.w, card.color, card.name, mode]);
+
+  // ---- Right-click menu for the card --------------------------------------
+  const menuItems: ContextMenuItem[] = [
+    { label: 'Rename', onClick: () => setRenaming(true) },
+    { label: 'Add note', onClick: () => setAddingItem(true) },
+    { separator: true },
+    {
+      label: 'Delete card',
+      danger: true,
+      onClick: () => {
+        if (confirm(`Delete card "${card.name || 'untitled'}" and its notes?`)) {
+          onDelete();
+        }
+      },
+    },
+  ];
+
+  // ---- Drop target on the card body for items appended to end -----------
+  const [dropAtEnd, setDropAtEnd] = useState(false);
+
+  const cardPositionStyle =
+    mode === 'free'
+      ? { left: card.x, top: card.y, width: card.w }
+      : { position: 'relative' as const, width: card.w };
 
   return (
     <div
       ref={cardRef}
       onContextMenu={(e) => {
-        // Suppress both the native browser menu and the canvas's "add
-        // note here" menu when the user right-clicks on a card.
-        e.preventDefault();
-        e.stopPropagation();
+        ctx.onContextMenu(e);
       }}
       className={
-        'absolute rounded-lg border bg-bg-card shadow-lg transition-opacity ' +
+        (mode === 'free' ? 'absolute ' : '') +
+        'rounded-lg border bg-bg-card shadow-lg transition-opacity ' +
         (highlighted ? 'ring-2 ring-accent' : '') +
         (dimmed ? ' opacity-30' : '')
       }
       style={{
-        left: card.x,
-        top: card.y,
-        width: card.w,
+        ...cardPositionStyle,
         borderColor: card.color,
       }}
     >
@@ -542,8 +878,9 @@ function CardView({
         onMouseDown={onHeaderMouseDown}
         className="flex cursor-grab items-center gap-2 rounded-t-lg px-3 py-2 active:cursor-grabbing"
         style={{ background: `${card.color}33` }}
+        title="Drag the title bar to move • right-click for actions"
       >
-        {editingName ? (
+        {renaming ? (
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -552,41 +889,63 @@ function CardView({
               if (e.key === 'Enter') commitName();
               if (e.key === 'Escape') {
                 setName(card.name);
-                setEditingName(false);
+                setRenaming(false);
               }
             }}
             autoFocus
+            onMouseDown={(e) => e.stopPropagation()}
             className="flex-1 rounded border border-border bg-bg-elevated px-2 py-0.5 text-sm outline-none focus:border-accent"
           />
         ) : (
-          <button
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => setEditingName(true)}
-            className="flex-1 truncate text-left text-sm font-semibold"
-          >
+          <span className="flex-1 truncate text-sm font-semibold select-none">
             {card.name || <span className="italic text-fg-muted">untitled</span>}
-          </button>
+          </span>
         )}
-        <button
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={() => {
-            if (confirm(`Delete card "${card.name || 'untitled'}" and its items?`)) onDelete();
-          }}
-          className="rounded p-1 text-fg-muted hover:bg-bg-elevated hover:text-danger"
-          aria-label="Delete card"
-          title="Delete card"
-        >
-          ✕
-        </button>
       </div>
 
-      <ul className="divide-y divide-border px-1">
+      <ul
+        className={
+          'divide-y divide-border px-1 transition-colors ' +
+          (dropAtEnd ? 'bg-accent/5' : '')
+        }
+        onDragOver={(e) => {
+          // Allow dropping in the empty space of the card.
+          if (!hasItemDrag(e)) return;
+          e.preventDefault();
+          if (e.target === e.currentTarget) {
+            e.dataTransfer.dropEffect = 'move';
+            setDropAtEnd(true);
+          }
+        }}
+        onDragLeave={(e) => {
+          if (e.target === e.currentTarget) setDropAtEnd(false);
+        }}
+        onDrop={(e) => {
+          if (!hasItemDrag(e)) return;
+          e.preventDefault();
+          setDropAtEnd(false);
+          const itemID = Number(e.dataTransfer.getData(ITEM_DRAG_MIME));
+          if (!itemID) return;
+          // Append to end: position = current count (the item count after
+          // removing the source if it was in this card is handled
+          // server-side by MoveItem).
+          moveItem.mutate({ id: itemID, card_id: card.id, position: card.items.length });
+        }}
+      >
         {card.items.map((item) => (
           <ItemRow
             key={item.id}
             item={item}
+            destCardID={card.id}
             onUpdate={(input) => updateItem.mutate({ id: item.id, input })}
             onDelete={() => deleteItem.mutate(item.id)}
+            onDropAbove={(droppedItemID) =>
+              moveItem.mutate({
+                id: droppedItemID,
+                card_id: card.id,
+                position: item.position,
+              })
+            }
           />
         ))}
         {addingItem && (
@@ -618,23 +977,36 @@ function CardView({
           + Add note
         </button>
       </div>
+
+      <ContextMenu open={ctx.open} x={ctx.x} y={ctx.y} items={menuItems} onClose={ctx.close} />
     </div>
   );
 }
 
-// ---- ItemRow -------------------------------------------------------------
+function hasItemDrag(e: React.DragEvent): boolean {
+  return e.dataTransfer.types.includes(ITEM_DRAG_MIME);
+}
+
+// ---- ItemRow ----------------------------------------------------------
 
 function ItemRow({
   item,
+  destCardID,
   onUpdate,
   onDelete,
+  onDropAbove,
 }: {
   item: NotesItem;
+  destCardID: number;
   onUpdate: (input: { text: string; is_favorite: boolean; position: number }) => void;
   onDelete: () => void;
+  onDropAbove: (droppedItemID: number) => void;
 }) {
+  const ctx = useContextMenu();
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(item.text);
+  const [dragOverHere, setDragOverHere] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   useEffect(() => setText(item.text), [item.text]);
 
   const commit = () => {
@@ -643,8 +1015,61 @@ function ItemRow({
     onUpdate({ text, is_favorite: item.is_favorite, position: item.position });
   };
 
+  const menuItems: ContextMenuItem[] = [
+    { label: 'Edit text', onClick: () => setEditing(true) },
+    {
+      label: item.is_favorite ? 'Remove from favourites' : 'Mark as favourite',
+      onClick: () =>
+        onUpdate({ text: item.text, is_favorite: !item.is_favorite, position: item.position }),
+    },
+    { separator: true },
+    {
+      label: 'Delete note',
+      danger: true,
+      onClick: () => {
+        if (confirm('Delete this note?')) onDelete();
+      },
+    },
+  ];
+
+  // Void unused so TS doesn't complain about destCardID — it's part of
+  // the parent contract (onDropAbove embeds the card id) but not used
+  // directly in this component.
+  void destCardID;
+
   return (
-    <li className="flex items-center gap-1 px-2 py-1 text-xs">
+    <li
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(ITEM_DRAG_MIME, String(item.id));
+        e.dataTransfer.effectAllowed = 'move';
+        setIsDragging(true);
+      }}
+      onDragEnd={() => setIsDragging(false)}
+      onDragOver={(e) => {
+        if (!hasItemDrag(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'move';
+        setDragOverHere(true);
+      }}
+      onDragLeave={() => setDragOverHere(false)}
+      onDrop={(e) => {
+        if (!hasItemDrag(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setDragOverHere(false);
+        const droppedID = Number(e.dataTransfer.getData(ITEM_DRAG_MIME));
+        if (!droppedID || droppedID === item.id) return;
+        onDropAbove(droppedID);
+      }}
+      onContextMenu={(e) => ctx.onContextMenu(e)}
+      className={
+        'flex items-center gap-1 px-2 py-1 text-xs transition-all ' +
+        (isDragging ? 'opacity-40 ' : '') +
+        (dragOverHere ? 'border-t-2 border-accent ' : '')
+      }
+    >
       <button
         onClick={() =>
           onUpdate({ text: item.text, is_favorite: !item.is_favorite, position: item.position })
@@ -653,7 +1078,7 @@ function ItemRow({
           'shrink-0 rounded p-1 hover:bg-bg-elevated ' +
           (item.is_favorite ? 'text-warning' : 'text-fg-muted/50 hover:text-fg-muted')
         }
-        title={item.is_favorite ? 'Remove from favourites' : 'Mark as favourite'}
+        title={item.is_favorite ? 'Remove favourite' : 'Mark as favourite'}
         aria-label="Toggle favourite"
       >
         {item.is_favorite ? '★' : '☆'}
@@ -671,28 +1096,18 @@ function ItemRow({
             }
           }}
           autoFocus
+          onMouseDown={(e) => e.stopPropagation()}
           className="flex-1 rounded border border-border bg-bg-elevated px-2 py-0.5 text-xs outline-none focus:border-accent"
         />
       ) : (
-        <button
-          onClick={() => setEditing(true)}
-          className="flex-1 truncate text-left hover:text-fg"
+        <span
+          className="flex-1 cursor-grab truncate select-none"
           title={item.text}
         >
           {item.text || <span className="italic text-fg-muted">empty</span>}
-        </button>
+        </span>
       )}
-      <button
-        onClick={() => {
-          if (confirm('Delete this note?')) onDelete();
-        }}
-        className="shrink-0 rounded p-1 text-fg-muted/50 hover:bg-bg-elevated hover:text-danger"
-        aria-label="Delete note"
-        title="Delete"
-      >
-        ✕
-      </button>
+      <ContextMenu open={ctx.open} x={ctx.x} y={ctx.y} items={menuItems} onClose={ctx.close} />
     </li>
   );
 }
-

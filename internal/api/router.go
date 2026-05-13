@@ -120,7 +120,13 @@ func (s *Server) Routes(webHandler http.Handler) http.Handler {
 			r.Delete("/notes/cards/{id}", s.deleteNotesCard)
 			r.Post("/notes/cards/{id}/items", s.createNotesItem)
 			r.Put("/notes/items/{id}", s.updateNotesItem)
+			r.Patch("/notes/items/{id}/move", s.moveNotesItem)
 			r.Delete("/notes/items/{id}", s.deleteNotesItem)
+			r.Post("/notes/boards", s.createNotesBoard)
+			r.Put("/notes/boards/{id}", s.updateNotesBoard)
+			r.Patch("/notes/boards/{id}/position", s.patchNotesBoardPosition)
+			r.Delete("/notes/boards/{id}", s.deleteNotesBoard)
+			r.Post("/notes/cards/swap-slots", s.swapNotesCardSlots)
 
 			r.Get("/stats/sources", s.listStatsSources)
 			r.Post("/stats/sources", s.createStatsSource)

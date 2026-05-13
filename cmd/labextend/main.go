@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,6 +19,7 @@ import (
 	"github.com/Bartis-Dev/LabExtend/internal/healthcheck"
 	"github.com/Bartis-Dev/LabExtend/internal/ddns"
 	"github.com/Bartis-Dev/LabExtend/internal/docs"
+	"github.com/Bartis-Dev/LabExtend/internal/listenmux"
 	"github.com/Bartis-Dev/LabExtend/internal/modules"
 	"github.com/Bartis-Dev/LabExtend/internal/notes"
 	"github.com/Bartis-Dev/LabExtend/internal/servercrypto"
@@ -124,11 +126,19 @@ func main() {
 	webHandler := spaHandler(http.FS(web.FS()))
 	handler := srv.Routes(webHandler)
 
-	// LabExtend serves HTTPS only. The cert is read fresh on every
-	// handshake via tlsStore.GetCertificate, so uploads/regenerates from
-	// the UI take effect on the next connection without restart.
+	// Single TCP port hosts both protocols: a connection-byte sniffer
+	// routes TLS handshakes to the real HTTPS server and plain-HTTP
+	// requests to a small 308-redirect server. Users typing
+	// http://host:10000 land on https://host:10000 automatically.
+	rawListener, err := net.Listen("tcp", cfg.Listen)
+	if err != nil {
+		slog.Error("listen", "addr", cfg.Listen, "err", err)
+		os.Exit(1)
+	}
+	tlsLn, plainLn, runMux := listenmux.Split(rawListener)
+	go runMux()
+
 	httpsSrv := &http.Server{
-		Addr:              cfg.Listen,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		TLSConfig: &tls.Config{
@@ -143,9 +153,21 @@ func main() {
 			"data_dir", cfg.DataDir,
 			"session_timeout", cfg.SessionTimeout,
 		)
-		if err := httpsSrv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := httpsSrv.Serve(tls.NewListener(tlsLn, httpsSrv.TLSConfig)); err != nil &&
+			!errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
 			slog.Error("https server error", "err", err)
 			os.Exit(1)
+		}
+	}()
+
+	redirectSrv := &http.Server{
+		Handler:           http.HandlerFunc(redirectToHTTPS),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	go func() {
+		if err := redirectSrv.Serve(plainLn); err != nil &&
+			!errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
+			slog.Warn("http redirect server error", "err", err)
 		}
 	}()
 
@@ -154,6 +176,26 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = httpsSrv.Shutdown(shutdownCtx)
+	_ = redirectSrv.Shutdown(shutdownCtx)
+	_ = rawListener.Close()
+}
+
+// redirectToHTTPS responds to any plain-HTTP request with a 308 redirect
+// to the same path on https://. The Host header (which the browser sets
+// from the URL the user typed) is preserved verbatim so the redirect
+// lands on the same hostname and port the user originally used.
+func redirectToHTTPS(w http.ResponseWriter, r *http.Request) {
+	host := r.Host
+	if host == "" {
+		host = r.URL.Host
+	}
+	target := "https://" + host + r.URL.RequestURI()
+	w.Header().Set("Location", target)
+	// Don't cache long — the user might change config soon.
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusPermanentRedirect)
+	// Tiny body for non-browser clients that don't follow redirects.
+	_, _ = w.Write([]byte("Redirecting to " + target + "\n"))
 }
 
 func spaHandler(fsys http.FileSystem) http.Handler {

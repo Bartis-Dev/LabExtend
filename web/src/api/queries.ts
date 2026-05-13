@@ -5,10 +5,13 @@ import type {
   CategoryInput,
   DocPage,
   DocPageInput,
+  NotesBoard,
+  NotesBoardInput,
   NotesCard,
   NotesCardInput,
   NotesItem,
   NotesItemInput,
+  NotesState,
   StatsPointsResponse,
   StatsSource,
   StatsSourceInput,
@@ -545,7 +548,7 @@ export const notesKey = ['notes'] as const;
 export function useNotes(enabled: boolean = true) {
   return useQuery({
     queryKey: notesKey,
-    queryFn: () => api.get<NotesCard[]>('/api/notes'),
+    queryFn: () => api.get<NotesState>('/api/notes'),
     enabled,
   });
 }
@@ -612,6 +615,59 @@ export function useDeleteNotesItem() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => api.delete<void>(`/api/notes/items/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: notesKey }),
+  });
+}
+
+export function useMoveNotesItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: number; card_id: number; position: number }) =>
+      api.patch<void>(`/api/notes/items/${args.id}/move`, {
+        card_id: args.card_id,
+        position: args.position,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: notesKey }),
+  });
+}
+
+export function useCreateNotesBoard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: NotesBoardInput) => api.post<NotesBoard>('/api/notes/boards', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: notesKey }),
+  });
+}
+
+export function useUpdateNotesBoard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { id: number; input: NotesBoardInput }) =>
+      api.put<NotesBoard>(`/api/notes/boards/${args.id}`, args.input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: notesKey }),
+  });
+}
+
+export function usePatchNotesBoardPosition() {
+  return useMutation({
+    mutationFn: (args: { id: number; x: number; y: number }) =>
+      api.patch<void>(`/api/notes/boards/${args.id}/position`, { x: args.x, y: args.y }),
+  });
+}
+
+export function useDeleteNotesBoard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.delete<void>(`/api/notes/boards/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: notesKey }),
+  });
+}
+
+export function useSwapNotesCardSlots() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { a: number; b: number }) =>
+      api.post<void>('/api/notes/cards/swap-slots', args),
     onSuccess: () => qc.invalidateQueries({ queryKey: notesKey }),
   });
 }

@@ -101,7 +101,7 @@ function FloatingFavCard() {
   };
   const favs = useMemo<FlatFav[]>(() => {
     const out: FlatFav[] = [];
-    for (const c of notes.data ?? []) {
+    for (const c of notes.data?.cards ?? []) {
       for (const it of c.items) {
         if (it.is_favorite) {
           out.push({
@@ -116,7 +116,7 @@ function FloatingFavCard() {
       }
     }
     return out;
-  }, [notes.data]);
+  }, [notes.data?.cards]);
 
   const node = (
     <div
