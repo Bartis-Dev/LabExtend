@@ -102,6 +102,7 @@ func (s *Server) Routes(webHandler http.Handler) http.Handler {
 			r.Get("/ddns/auto-update", s.listAutoUpdates)
 
 			r.Get("/wol", s.listWoL)
+			r.Get("/wol/status", s.listWoLStatus)
 			r.Post("/wol", s.createWoL)
 			r.Put("/wol/{id}", s.updateWoL)
 			r.Delete("/wol/{id}", s.deleteWoL)
@@ -125,6 +126,7 @@ func (s *Server) Routes(webHandler http.Handler) http.Handler {
 			r.Post("/notes/boards", s.createNotesBoard)
 			r.Put("/notes/boards/{id}", s.updateNotesBoard)
 			r.Patch("/notes/boards/{id}/position", s.patchNotesBoardPosition)
+			r.Post("/notes/boards/{id}/append-card", s.appendNotesBoardCard)
 			r.Delete("/notes/boards/{id}", s.deleteNotesBoard)
 			r.Post("/notes/cards/swap-slots", s.swapNotesCardSlots)
 

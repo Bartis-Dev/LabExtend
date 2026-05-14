@@ -1,57 +1,28 @@
-// Knowledge-base shape for Command Lab.
-//
-// A Shell groups Commands and FilePaths. Each Command has a `template`
-// string with `{key}` placeholders that are filled from the builder
-// form: flags are gathered into `{flags}`, named args go to their own
-// `{argkey}` slots.
+// Documentation-style data model for Command Lab. Categories live in
+// the sidebar; each one renders a sequence of topic Sections, each with
+// a short description and one or more example commands plus optional
+// tips and important file paths.
 
-export type FlagType = 'bool' | 'string' | 'number' | 'enum';
-
-export type Flag = {
-  key: string;
-  flag: string;          // CLI form, e.g. "-r" or "--recursive"
-  description: string;
-  type: FlagType;
-  default?: string | number | boolean;
-  options?: string[];    // for enum
-  placeholder?: string;
+export type Example = {
+  command: string;
+  note?: string;
 };
 
-export type Argument = {
-  key: string;
-  name: string;          // label shown in the form
-  description: string;
-  required?: boolean;
-  placeholder?: string;
-  // Optional custom input renderer. Default is a plain text input.
-  // 'permissions' renders a u/g/o × r/w/x checkbox grid that compiles
-  // to an octal mode string (e.g. "755") — handy for chmod.
-  kind?: 'text' | 'permissions';
-};
-
-export type Command = {
-  id: string;            // stable id within shell
-  name: string;          // displayed name, e.g. "chown"
-  description: string;
-  category: string;
-  template: string;      // e.g. "chown {flags} {owner}:{group} {path}"
-  args?: Argument[];
-  flags?: Flag[];
-  examples?: string[];
-  notes?: string;
-};
-
-export type FilePath = {
-  path: string;
-  description: string;
-  category: string;
-};
-
-export type Shell = {
+export type Section = {
   id: string;
-  label: string;
-  description: string;
-  icon: string;          // lucide name
-  commands: Command[];
-  paths: FilePath[];
+  title: string;
+  description?: string;
+  examples?: Example[];
+  paths?: { path: string; description: string }[];
+  tip?: string;
+  warning?: string;
+};
+
+export type Category = {
+  id: string;       // unique slug across the whole catalogue
+  shell: string;    // grouping label in the sidebar (e.g. "Linux")
+  label: string;    // category title (e.g. "Permissions")
+  icon: string;     // lucide icon name
+  description?: string;
+  sections: Section[];
 };

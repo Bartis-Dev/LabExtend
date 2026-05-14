@@ -5,6 +5,7 @@ import {
   useDeleteWoLTarget,
   useUpdateWoLTarget,
   useWakeWoLTarget,
+  useWoLStatus,
   useWoLTargets,
 } from '@/api/queries';
 import type { WoLTarget, WoLTargetInput } from '@/api/types';
@@ -12,9 +13,14 @@ import { ModuleIcon } from '@/components/ModuleIcon';
 
 export default function WoL() {
   const targets = useWoLTargets();
+  const status = useWoLStatus();
   const [editing, setEditing] = useState<WoLTarget | 'new' | null>(null);
 
   const data = targets.data ?? [];
+  const statusFor = (id: number): 'up' | 'down' | 'unknown' => {
+    const v = status.data?.[String(id)];
+    return v ?? 'unknown';
+  };
 
   return (
     <div className="mx-auto max-w-4xl p-6">
@@ -32,7 +38,8 @@ export default function WoL() {
         The magic packet is sent via UDP from the LabExtend container. If the
         container runs in bridge networking, the packet may not reach your LAN —
         use <code className="font-mono">--network host</code> or expose UDP
-        broadcast explicitly.
+        broadcast explicitly. Set a <em>ping host</em> below to see whether each
+        machine is currently online.
       </div>
 
       {targets.isPending ? (
@@ -47,7 +54,12 @@ export default function WoL() {
       ) : (
         <div className="rounded-lg border border-border bg-bg-card/40 divide-y divide-border">
           {data.map((t) => (
-            <TargetRow key={t.id} target={t} onEdit={() => setEditing(t)} />
+            <TargetRow
+              key={t.id}
+              target={t}
+              status={statusFor(t.id)}
+              onEdit={() => setEditing(t)}
+            />
           ))}
         </div>
       )}
@@ -63,7 +75,33 @@ export default function WoL() {
   );
 }
 
-function TargetRow({ target, onEdit }: { target: WoLTarget; onEdit: () => void }) {
+function StatusDot({ status }: { status: 'up' | 'down' | 'unknown' }) {
+  const cls =
+    status === 'up'
+      ? 'bg-success shadow-[0_0_8px_var(--success)]'
+      : status === 'down'
+        ? 'bg-danger'
+        : 'bg-fg-muted/30';
+  const label =
+    status === 'up' ? 'Online' : status === 'down' ? 'Offline' : 'Ping not configured';
+  return (
+    <span
+      className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${cls}`}
+      title={label}
+      aria-label={label}
+    />
+  );
+}
+
+function TargetRow({
+  target,
+  status,
+  onEdit,
+}: {
+  target: WoLTarget;
+  status: 'up' | 'down' | 'unknown';
+  onEdit: () => void;
+}) {
   const wake = useWakeWoLTarget();
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -83,10 +121,16 @@ function TargetRow({ target, onEdit }: { target: WoLTarget; onEdit: () => void }
   return (
     <div className="flex items-center gap-4 px-4 py-3">
       <ModuleIcon name="power" className="h-5 w-5 text-fg-muted" />
+      <StatusDot status={status} />
       <div className="min-w-0 flex-1">
         <div className="truncate font-medium">{target.name}</div>
         <div className="truncate font-mono text-xs text-fg-muted">
           {formatMac(target.mac)} · {target.broadcast_addr}:{target.port}
+          {target.ping_host && (
+            <span className="ml-2 text-fg-muted/70">
+              ping {target.ping_host}:{target.ping_port}
+            </span>
+          )}
         </div>
         {target.last_error && (
           <div className="mt-1 text-xs text-danger">last error: {target.last_error}</div>
@@ -133,9 +177,10 @@ function Editor({
   const [mac, setMac] = useState(target?.mac ? formatMac(target.mac) : '');
   const [broadcast, setBroadcast] = useState(target?.broadcast_addr ?? '255.255.255.255');
   const [port, setPort] = useState(String(target?.port ?? 9));
+  const [pingHost, setPingHost] = useState(target?.ping_host ?? '');
+  const [pingPort, setPingPort] = useState(String(target?.ping_port || 22));
   const [err, setErr] = useState<string | null>(null);
 
-  // Close on Escape.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -152,6 +197,8 @@ function Editor({
       mac,
       broadcast_addr: broadcast.trim() || '255.255.255.255',
       port: Number(port) || 9,
+      ping_host: pingHost.trim(),
+      ping_port: Number(pingPort) || 22,
     };
     try {
       if (mode === 'create') {
@@ -219,7 +266,7 @@ function Editor({
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs text-fg-muted">Port</span>
+            <span className="mb-1 block text-xs text-fg-muted">UDP Port</span>
             <input
               type="number"
               value={port}
@@ -231,6 +278,41 @@ function Editor({
             />
           </label>
         </div>
+
+        <div className="rounded border border-border bg-bg-elevated/30 p-3">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-fg-muted">
+            Online check (optional)
+          </div>
+          <p className="mb-2 text-[11px] text-fg-muted">
+            LabExtend tries a TCP connect every 10s to display online/offline.
+            Use the device&apos;s actual IP/hostname (not the broadcast). Default
+            port 22 (SSH). Leave host empty to disable.
+          </p>
+          <div className="grid grid-cols-[1fr_120px] gap-3">
+            <label className="block">
+              <span className="mb-1 block text-xs text-fg-muted">Ping host</span>
+              <input
+                value={pingHost}
+                onChange={(e) => setPingHost(e.target.value)}
+                placeholder="192.168.1.42 or my-pc.lan"
+                className="w-full rounded border border-border bg-bg-card px-3 py-2 font-mono outline-none focus:border-accent"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-fg-muted">TCP Port</span>
+              <input
+                type="number"
+                value={pingPort}
+                onChange={(e) => setPingPort(e.target.value)}
+                min={1}
+                max={65535}
+                placeholder="22"
+                className="w-full rounded border border-border bg-bg-card px-3 py-2 outline-none focus:border-accent"
+              />
+            </label>
+          </div>
+        </div>
+
         <p className="text-xs text-fg-muted">
           Use your subnet broadcast (e.g. <code>192.168.1.255</code>) instead of
           255.255.255.255 if your router drops the global broadcast.
@@ -275,8 +357,6 @@ function Editor({
   );
 }
 
-// Format a stored canonical MAC ("aabbccddeeff") to the colon form for
-// display. If the input already contains separators, return it as-is.
 function formatMac(mac: string): string {
   if (mac.includes(':') || mac.includes('-')) return mac.toUpperCase();
   const clean = mac.replace(/[^0-9a-fA-F]/g, '');

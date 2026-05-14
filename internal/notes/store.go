@@ -13,18 +13,19 @@ import (
 )
 
 type Card struct {
-	ID        int64   `json:"id"`
-	Name      string  `json:"name"`
-	X         float64 `json:"x"`
-	Y         float64 `json:"y"`
-	W         int     `json:"w"`
-	H         int     `json:"h"`
-	Color     string  `json:"color"`
-	BoardID   *int64  `json:"board_id"`
-	SlotIndex int     `json:"slot_index"`
-	CreatedAt int64   `json:"created_at"`
-	UpdatedAt int64   `json:"updated_at"`
-	Items     []Item  `json:"items"`
+	ID         int64   `json:"id"`
+	Name       string  `json:"name"`
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	W          int     `json:"w"`
+	H          int     `json:"h"`
+	Color      string  `json:"color"`
+	TitleColor string  `json:"title_color"`
+	BoardID    *int64  `json:"board_id"`
+	SlotIndex  int     `json:"slot_index"`
+	CreatedAt  int64   `json:"created_at"`
+	UpdatedAt  int64   `json:"updated_at"`
+	Items      []Item  `json:"items"`
 }
 
 type Item struct {
@@ -38,25 +39,27 @@ type Item struct {
 }
 
 type Board struct {
-	ID        int64   `json:"id"`
-	Name      string  `json:"name"`
-	X         float64 `json:"x"`
-	Y         float64 `json:"y"`
-	Cols      int     `json:"cols"`
-	Color     string  `json:"color"`
-	CreatedAt int64   `json:"created_at"`
-	UpdatedAt int64   `json:"updated_at"`
+	ID         int64   `json:"id"`
+	Name       string  `json:"name"`
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	Cols       int     `json:"cols"`
+	Color      string  `json:"color"`
+	TitleColor string  `json:"title_color"`
+	CreatedAt  int64   `json:"created_at"`
+	UpdatedAt  int64   `json:"updated_at"`
 }
 
 type CardInput struct {
-	Name      string  `json:"name"`
-	X         float64 `json:"x"`
-	Y         float64 `json:"y"`
-	W         int     `json:"w"`
-	H         int     `json:"h"`
-	Color     string  `json:"color"`
-	BoardID   *int64  `json:"board_id"`
-	SlotIndex int     `json:"slot_index"`
+	Name       string  `json:"name"`
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	W          int     `json:"w"`
+	H          int     `json:"h"`
+	Color      string  `json:"color"`
+	TitleColor string  `json:"title_color"`
+	BoardID    *int64  `json:"board_id"`
+	SlotIndex  int     `json:"slot_index"`
 }
 
 type ItemInput struct {
@@ -66,11 +69,12 @@ type ItemInput struct {
 }
 
 type BoardInput struct {
-	Name  string  `json:"name"`
-	X     float64 `json:"x"`
-	Y     float64 `json:"y"`
-	Cols  int     `json:"cols"`
-	Color string  `json:"color"`
+	Name       string  `json:"name"`
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	Cols       int     `json:"cols"`
+	Color      string  `json:"color"`
+	TitleColor string  `json:"title_color"`
 }
 
 // State is the full Notes graph returned by ListAll.
@@ -92,7 +96,7 @@ func (s *Store) ListAll() (State, error) {
 	st := State{Cards: []Card{}, Boards: []Board{}}
 
 	cardRows, err := s.db.Query(
-		`SELECT id, name, x_real, y_real, w, h, color, board_id, slot_index, created_at, updated_at
+		`SELECT id, name, x_real, y_real, w, h, color, title_color, board_id, slot_index, created_at, updated_at
 		 FROM notes_cards ORDER BY id`,
 	)
 	if err != nil {
@@ -100,7 +104,7 @@ func (s *Store) ListAll() (State, error) {
 	}
 	for cardRows.Next() {
 		var c Card
-		if err := cardRows.Scan(&c.ID, &c.Name, &c.X, &c.Y, &c.W, &c.H, &c.Color,
+		if err := cardRows.Scan(&c.ID, &c.Name, &c.X, &c.Y, &c.W, &c.H, &c.Color, &c.TitleColor,
 			&c.BoardID, &c.SlotIndex, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			cardRows.Close()
 			return st, err
@@ -135,7 +139,7 @@ func (s *Store) ListAll() (State, error) {
 	itemRows.Close()
 
 	boardRows, err := s.db.Query(
-		`SELECT id, name, x_real, y_real, cols, color, created_at, updated_at FROM notes_boards ORDER BY id`,
+		`SELECT id, name, x_real, y_real, cols, color, title_color, created_at, updated_at FROM notes_boards ORDER BY id`,
 	)
 	if err != nil {
 		return st, err
@@ -143,7 +147,7 @@ func (s *Store) ListAll() (State, error) {
 	defer boardRows.Close()
 	for boardRows.Next() {
 		var b Board
-		if err := boardRows.Scan(&b.ID, &b.Name, &b.X, &b.Y, &b.Cols, &b.Color, &b.CreatedAt, &b.UpdatedAt); err != nil {
+		if err := boardRows.Scan(&b.ID, &b.Name, &b.X, &b.Y, &b.Cols, &b.Color, &b.TitleColor, &b.CreatedAt, &b.UpdatedAt); err != nil {
 			return st, err
 		}
 		st.Boards = append(st.Boards, b)
@@ -165,9 +169,9 @@ func (s *Store) CreateCard(in CardInput) (Card, error) {
 		in.Color = "#475569"
 	}
 	res, err := s.db.Exec(
-		`INSERT INTO notes_cards (name, x_real, y_real, w, h, color, board_id, slot_index, created_at, updated_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		in.Name, in.X, in.Y, in.W, in.H, in.Color, in.BoardID, in.SlotIndex, now, now,
+		`INSERT INTO notes_cards (name, x_real, y_real, w, h, color, title_color, board_id, slot_index, created_at, updated_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		in.Name, in.X, in.Y, in.W, in.H, in.Color, in.TitleColor, in.BoardID, in.SlotIndex, now, now,
 	)
 	if err != nil {
 		return Card{}, err
@@ -179,8 +183,8 @@ func (s *Store) CreateCard(in CardInput) (Card, error) {
 func (s *Store) UpdateCard(id int64, in CardInput) (Card, error) {
 	now := time.Now().Unix()
 	res, err := s.db.Exec(
-		`UPDATE notes_cards SET name=?, x_real=?, y_real=?, w=?, h=?, color=?, updated_at=? WHERE id=?`,
-		in.Name, in.X, in.Y, in.W, in.H, in.Color, now, id,
+		`UPDATE notes_cards SET name=?, x_real=?, y_real=?, w=?, h=?, color=?, title_color=?, updated_at=? WHERE id=?`,
+		in.Name, in.X, in.Y, in.W, in.H, in.Color, in.TitleColor, now, id,
 	)
 	if err != nil {
 		return Card{}, err
@@ -252,10 +256,10 @@ func (s *Store) DeleteCard(id int64) error {
 func (s *Store) getCard(id int64) (Card, error) {
 	var c Card
 	row := s.db.QueryRow(
-		`SELECT id, name, x_real, y_real, w, h, color, board_id, slot_index, created_at, updated_at FROM notes_cards WHERE id=?`,
+		`SELECT id, name, x_real, y_real, w, h, color, title_color, board_id, slot_index, created_at, updated_at FROM notes_cards WHERE id=?`,
 		id,
 	)
-	if err := row.Scan(&c.ID, &c.Name, &c.X, &c.Y, &c.W, &c.H, &c.Color,
+	if err := row.Scan(&c.ID, &c.Name, &c.X, &c.Y, &c.W, &c.H, &c.Color, &c.TitleColor,
 		&c.BoardID, &c.SlotIndex, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return c, ErrNotFound
@@ -485,16 +489,16 @@ func (s *Store) getItem(id int64) (Item, error) {
 // --- Boards --------------------------------------------------------------
 
 func (s *Store) CreateBoard(in BoardInput) (Board, error) {
-	if in.Cols < 2 || in.Cols > 5 {
-		in.Cols = 3
+	if in.Cols < 2 || in.Cols > 10 {
+		in.Cols = 2
 	}
 	if in.Color == "" {
 		in.Color = "#475569"
 	}
 	now := time.Now().Unix()
 	res, err := s.db.Exec(
-		`INSERT INTO notes_boards (name, x_real, y_real, cols, color, created_at, updated_at) VALUES (?,?,?,?,?,?,?)`,
-		in.Name, in.X, in.Y, in.Cols, in.Color, now, now,
+		`INSERT INTO notes_boards (name, x_real, y_real, cols, color, title_color, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)`,
+		in.Name, in.X, in.Y, in.Cols, in.Color, in.TitleColor, now, now,
 	)
 	if err != nil {
 		return Board{}, err
@@ -504,13 +508,13 @@ func (s *Store) CreateBoard(in BoardInput) (Board, error) {
 }
 
 func (s *Store) UpdateBoard(id int64, in BoardInput) (Board, error) {
-	if in.Cols < 2 || in.Cols > 5 {
-		in.Cols = 3
+	if in.Cols < 2 || in.Cols > 10 {
+		in.Cols = 2
 	}
 	now := time.Now().Unix()
 	res, err := s.db.Exec(
-		`UPDATE notes_boards SET name=?, x_real=?, y_real=?, cols=?, color=?, updated_at=? WHERE id=?`,
-		in.Name, in.X, in.Y, in.Cols, in.Color, now, id,
+		`UPDATE notes_boards SET name=?, x_real=?, y_real=?, cols=?, color=?, title_color=?, updated_at=? WHERE id=?`,
+		in.Name, in.X, in.Y, in.Cols, in.Color, in.TitleColor, now, id,
 	)
 	if err != nil {
 		return Board{}, err
@@ -520,6 +524,81 @@ func (s *Store) UpdateBoard(id int64, in BoardInput) (Board, error) {
 		return Board{}, ErrNotFound
 	}
 	return s.getBoard(id)
+}
+
+// AppendCardToBoard creates a fresh card slotted at the end of the
+// given board, bumping the board's cols to match. Returns the new card
+// (with its assigned slot_index) and the updated board, or an error if
+// the board is already at the 10-card cap.
+func (s *Store) AppendCardToBoard(boardID int64) (Card, Board, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Card{}, Board{}, err
+	}
+	defer tx.Rollback()
+
+	var b Board
+	if err := tx.QueryRow(
+		`SELECT id, name, x_real, y_real, cols, color, title_color, created_at, updated_at FROM notes_boards WHERE id=?`,
+		boardID,
+	).Scan(&b.ID, &b.Name, &b.X, &b.Y, &b.Cols, &b.Color, &b.TitleColor, &b.CreatedAt, &b.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Card{}, Board{}, ErrNotFound
+		}
+		return Card{}, Board{}, err
+	}
+	var count int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM notes_cards WHERE board_id=?`, boardID).Scan(&count); err != nil {
+		return Card{}, Board{}, err
+	}
+	if count >= 10 {
+		return Card{}, Board{}, fmt.Errorf("board already has 10 cards")
+	}
+	newSlot := count
+	now := time.Now().Unix()
+	res, err := tx.Exec(
+		`INSERT INTO notes_cards (name, x_real, y_real, w, h, color, title_color, board_id, slot_index, created_at, updated_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		"", 0.0, 0.0, 280, 120, b.Color, b.TitleColor, boardID, newSlot, now, now,
+	)
+	if err != nil {
+		return Card{}, Board{}, err
+	}
+	cardID, _ := res.LastInsertId()
+	newCols := newSlot + 1
+	if newCols > b.Cols {
+		if _, err := tx.Exec(
+			`UPDATE notes_boards SET cols=?, updated_at=? WHERE id=?`,
+			newCols, now, boardID,
+		); err != nil {
+			return Card{}, Board{}, err
+		}
+		b.Cols = newCols
+		b.UpdatedAt = now
+	}
+	if err := tx.Commit(); err != nil {
+		return Card{}, Board{}, err
+	}
+	card, err := s.getCard(cardID)
+	if err != nil {
+		return Card{}, Board{}, err
+	}
+	return card, b, nil
+}
+
+func (s *Store) getBoard(id int64) (Board, error) {
+	var b Board
+	row := s.db.QueryRow(
+		`SELECT id, name, x_real, y_real, cols, color, title_color, created_at, updated_at FROM notes_boards WHERE id=?`,
+		id,
+	)
+	if err := row.Scan(&b.ID, &b.Name, &b.X, &b.Y, &b.Cols, &b.Color, &b.TitleColor, &b.CreatedAt, &b.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return b, ErrNotFound
+		}
+		return b, err
+	}
+	return b, nil
 }
 
 // PatchBoardPosition is the lightweight endpoint used while dragging a
@@ -551,17 +630,3 @@ func (s *Store) DeleteBoard(id int64) error {
 	return nil
 }
 
-func (s *Store) getBoard(id int64) (Board, error) {
-	var b Board
-	row := s.db.QueryRow(
-		`SELECT id, name, x_real, y_real, cols, color, created_at, updated_at FROM notes_boards WHERE id=?`,
-		id,
-	)
-	if err := row.Scan(&b.ID, &b.Name, &b.X, &b.Y, &b.Cols, &b.Color, &b.CreatedAt, &b.UpdatedAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return b, ErrNotFound
-		}
-		return b, err
-	}
-	return b, nil
-}

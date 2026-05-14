@@ -81,6 +81,17 @@ func (s *Server) deleteWoL(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// listWoLStatus returns a per-target up/down map. Frontend polls this
+// every ~10s to drive the status dot. Targets with no ping_host are
+// omitted (their status is "unknown" — render with no dot).
+func (s *Server) listWoLStatus(w http.ResponseWriter, _ *http.Request) {
+	if s.WoLPinger == nil {
+		writeJSON(w, http.StatusOK, map[int64]string{})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.WoLPinger.Statuses())
+}
+
 func (s *Server) wakeWoL(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {

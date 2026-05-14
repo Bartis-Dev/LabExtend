@@ -103,10 +103,10 @@ export default function App() {
           <Route path="/ddns" element={<ModuleRoute slug="ddns"><DDNS /></ModuleRoute>} />
           <Route
             path="/command-lab"
-            element={<Navigate to="/command-lab/linux" replace />}
+            element={<ModuleRoute slug="command-lab"><CommandLab /></ModuleRoute>}
           />
           <Route
-            path="/command-lab/:shell"
+            path="/command-lab/:categoryId"
             element={<ModuleRoute slug="command-lab"><CommandLab /></ModuleRoute>}
           />
           <Route path="/wol" element={<ModuleRoute slug="wol"><WoL /></ModuleRoute>} />

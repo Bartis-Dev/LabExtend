@@ -34,14 +34,43 @@ export default function DDNS() {
   const [providersOpen, setProvidersOpen] = useState(false);
   const [addCardOpen, setAddCardOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<DDNSCard | null>(null);
+  const [onlyDDNS, setOnlyDDNS] = useState(false);
 
   const providersData = providers.data ?? [];
   const cardsData = cards.data ?? [];
+  const totalDDNSRecords = (autos.data ?? []).length;
 
   return (
     <div className="mx-auto max-w-7xl p-6">
-      <header className="mb-6 flex items-center gap-3">
-        <h1 className="flex-1 text-2xl font-bold">DDNS</h1>
+      <header className="mb-6 flex flex-wrap items-center gap-3">
+        <h1 className="text-3xl font-bold">DDNS</h1>
+        <span className="text-sm text-fg-muted">
+          {cardsData.length} zone{cardsData.length === 1 ? '' : 's'}
+          {totalDDNSRecords > 0 && (
+            <>
+              {' · '}
+              <span className="text-accent">{totalDDNSRecords}</span> record
+              {totalDDNSRecords === 1 ? '' : 's'} on auto-update
+            </>
+          )}
+        </span>
+        <div className="flex-1" />
+        <label
+          className={
+            'flex cursor-pointer items-center gap-2 rounded border px-3 py-2 text-sm transition-colors ' +
+            (onlyDDNS
+              ? 'border-accent bg-accent/10 text-accent'
+              : 'border-border text-fg-muted hover:bg-bg-elevated')
+          }
+        >
+          <input
+            type="checkbox"
+            checked={onlyDDNS}
+            onChange={(e) => setOnlyDDNS(e.target.checked)}
+            className="accent-accent"
+          />
+          DDNS records only
+        </label>
         <button
           onClick={() => setProvidersOpen(true)}
           className="rounded border border-border px-3 py-2 text-sm hover:bg-bg-elevated"
@@ -75,12 +104,13 @@ export default function DDNS() {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
           {cardsData.map((c) => (
             <ZoneCard
               key={c.id}
               card={c}
               autoUpdates={(autos.data ?? []).filter((a) => a.card_id === c.id)}
+              onlyDDNS={onlyDDNS}
               onEdit={() => setEditingCard(c)}
             />
           ))}
@@ -424,13 +454,52 @@ function EditCardModal({ card, onClose }: { card: DDNSCard; onClose: () => void 
 
 // --- Zone card -----------------------------------------------------------
 
+// Strip the zone suffix from a record name so the table stays scannable.
+// "labextend.example.com" in zone "example.com" → "labextend".
+// "example.com" in zone "example.com" → "@" (Cloudflare's apex shorthand).
+function stripZone(recordName: string, zoneName: string): string {
+  if (!zoneName) return recordName;
+  if (recordName === zoneName) return '@';
+  if (recordName.toLowerCase().endsWith('.' + zoneName.toLowerCase())) {
+    return recordName.slice(0, -zoneName.length - 1);
+  }
+  return recordName;
+}
+
+// Stable display order for record-type sections.
+const TYPE_ORDER = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV'];
+
+// Per-type accent colours for the badges. Reused tailwind-ish shades.
+function typeBadgeStyle(t: string): { bg: string; fg: string } {
+  switch (t) {
+    case 'A':
+      return { bg: 'rgba(21,128,61,0.18)', fg: 'rgb(74,222,128)' }; // green
+    case 'AAAA':
+      return { bg: 'rgba(29,78,216,0.18)', fg: 'rgb(96,165,250)' }; // blue
+    case 'CNAME':
+      return { bg: 'rgba(124,58,237,0.18)', fg: 'rgb(192,132,252)' }; // violet
+    case 'MX':
+      return { bg: 'rgba(180,83,9,0.20)', fg: 'rgb(251,191,36)' }; // amber
+    case 'TXT':
+      return { bg: 'rgba(15,118,110,0.18)', fg: 'rgb(94,234,212)' }; // teal
+    case 'NS':
+      return { bg: 'rgba(162,28,175,0.18)', fg: 'rgb(232,121,249)' }; // fuchsia
+    case 'SRV':
+      return { bg: 'rgba(185,28,28,0.18)', fg: 'rgb(248,113,113)' }; // red
+    default:
+      return { bg: 'rgba(100,100,100,0.18)', fg: 'rgb(180,180,180)' };
+  }
+}
+
 function ZoneCard({
   card,
   autoUpdates,
+  onlyDDNS,
   onEdit,
 }: {
   card: DDNSCard;
   autoUpdates: DDNSAutoUpdate[];
+  onlyDDNS: boolean;
   onEdit: () => void;
 }) {
   const recs = useCardRecords(card.id);
@@ -447,122 +516,117 @@ function ZoneCard({
     return m;
   }, [autoUpdates]);
 
-  const filtered = useMemo(
-    () => (recs.data ?? []).filter((r) => card.show_types.includes(r.type)),
-    [recs.data, card.show_types],
-  );
+  const filtered = useMemo(() => {
+    let list = (recs.data ?? []).filter((r) => card.show_types.includes(r.type));
+    if (onlyDDNS) list = list.filter((r) => r.id != null && autoMap.has(r.id));
+    return list;
+  }, [recs.data, card.show_types, onlyDDNS, autoMap]);
+
+  // Group records by type for the sectioned display.
+  const grouped = useMemo(() => {
+    const out: Record<string, DDNSRecord[]> = {};
+    for (const r of filtered) (out[r.type] ??= []).push(r);
+    for (const k in out) out[k].sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+  }, [filtered]);
+
+  const typeKeys = TYPE_ORDER.filter((t) => grouped[t]?.length);
+  const ddnsCount = autoUpdates.length;
 
   return (
-    <div className="flex flex-col rounded-lg border border-border bg-bg-card/40">
-      <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-        <ModuleIcon name="globe" className="h-4 w-4 text-fg-muted" />
+    <div className="flex flex-col rounded-xl border border-border bg-bg-card/60 shadow-sm">
+      <div className="flex items-center gap-3 rounded-t-xl border-b border-border bg-bg-elevated/30 px-5 py-4">
+        <ModuleIcon name="globe" className="h-6 w-6 text-fg-muted" />
         <div className="flex-1 min-w-0">
-          <div className="truncate font-medium">{card.name}</div>
-          <div className="truncate text-xs text-fg-muted">{card.show_types.join(' · ')}</div>
+          <div className="truncate text-lg font-semibold">{card.name}</div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-fg-muted">
+            <span>showing</span>
+            {card.show_types.map((t) => {
+              const s = typeBadgeStyle(t);
+              return (
+                <span
+                  key={t}
+                  className="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase"
+                  style={{ background: s.bg, color: s.fg }}
+                >
+                  {t}
+                </span>
+              );
+            })}
+            {ddnsCount > 0 && (
+              <span className="ml-2 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-accent">
+                {ddnsCount} on auto-update
+              </span>
+            )}
+          </div>
         </div>
         <button
           onClick={() => setCreating(true)}
-          className="rounded border border-border px-2 py-1 text-xs hover:bg-bg-elevated"
+          className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
         >
           + Record
         </button>
         <button
           onClick={onEdit}
-          className="rounded border border-border px-2 py-1 text-xs hover:bg-bg-elevated"
+          className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-bg-elevated"
         >
           Edit
         </button>
       </div>
 
-      {recs.isPending && <div className="p-4 text-sm text-fg-muted">Loading records…</div>}
-      {recs.error && (
-        <div className="p-4 text-sm text-danger">{(recs.error as Error).message}</div>
-      )}
-      {!recs.isPending && filtered.length === 0 && (
-        <div className="p-4 text-sm text-fg-muted">
-          No records of the selected types. Click &ldquo;+ Record&rdquo; to add one.
-        </div>
-      )}
-      <ul className="divide-y divide-border">
-        {filtered.map((r) => {
-          const auto = autoMap.get(r.id!);
-          const canAuto = r.type === 'A' || r.type === 'AAAA';
-          return (
-            <li key={r.id} className="flex items-start gap-3 px-4 py-3 text-sm">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="rounded bg-bg-elevated px-1.5 py-0.5 font-mono text-[10px] uppercase text-fg-muted">
-                    {r.type}
-                  </span>
-                  <span className="truncate font-mono">{r.name}</span>
-                  {r.proxied && (
-                    <span className="rounded bg-accent/20 px-1.5 py-0.5 text-[10px] text-accent">
-                      proxied
-                    </span>
-                  )}
-                </div>
-                <div className="mt-0.5 truncate font-mono text-xs text-fg-muted">
-                  → {r.content}
-                </div>
-                {auto && (
-                  <div className="mt-1 text-[11px] text-fg-muted">
-                    {auto.last_error
-                      ? <span className="text-danger">{auto.last_error}</span>
-                      : auto.last_synced_ip
-                        ? `synced ${auto.last_synced_ip} at ${formatTime(auto.last_synced_at)}`
-                        : 'waiting for first check…'}
-                  </div>
-                )}
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
-                {canAuto && (
-                  <button
-                    onClick={() => {
-                      toggle.mutate({
-                        record_remote_id: r.id!,
-                        record_name: r.name,
-                        record_type: r.type as 'A' | 'AAAA',
-                        enabled: !auto,
-                      });
-                    }}
-                    className={
-                      'rounded px-2 py-1 text-[11px] transition-colors ' +
-                      (auto
-                        ? 'border border-accent bg-accent/20 text-accent'
-                        : 'border border-border text-fg-muted hover:bg-bg-elevated')
-                    }
-                    title={auto ? 'Auto-update enabled' : 'Enable auto-update'}
-                  >
-                    auto
-                  </button>
-                )}
-                <button
-                  onClick={() => setEditingRec(r)}
-                  className="rounded border border-border px-2 py-1 text-[11px] hover:bg-bg-elevated"
-                >
-                  edit
-                </button>
-                <button
-                  onClick={() => {
-                    if (!confirm(`Delete ${r.type} record ${r.name}?`)) return;
-                    del.mutate(r.id!);
-                  }}
-                  className="rounded border border-danger/40 px-2 py-1 text-[11px] text-danger hover:bg-danger/10"
-                >
-                  del
-                </button>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+      <div className="flex flex-col gap-4 p-4">
+        {recs.isPending && <div className="text-sm text-fg-muted">Loading records…</div>}
+        {recs.error && (
+          <div className="rounded border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+            {(recs.error as Error).message}
+          </div>
+        )}
+        {!recs.isPending && filtered.length === 0 && (
+          <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-fg-muted">
+            {onlyDDNS
+              ? 'No records on auto-update in this zone.'
+              : 'No records of the selected types. Click "+ Record" to add one.'}
+          </div>
+        )}
+        {typeKeys.map((t) => (
+          <RecordTypeSection
+            key={t}
+            type={t}
+            zoneName={card.name}
+            records={grouped[t]}
+            autoMap={autoMap}
+            onToggleAuto={(r, enabled) =>
+              toggle.mutate({
+                record_remote_id: r.id!,
+                record_name: r.name,
+                record_type: r.type as 'A' | 'AAAA',
+                enabled,
+              })
+            }
+            onEdit={(r) => setEditingRec(r)}
+            onDelete={(r) => {
+              if (!confirm(`Delete ${r.type} record ${stripZone(r.name, card.name)}?`)) return;
+              del.mutate(r.id!);
+            }}
+          />
+        ))}
+      </div>
 
       {creating && (
         <RecordEditor
           mode="create"
+          zoneName={card.name}
           onClose={() => setCreating(false)}
-          onSave={async (rec) => {
-            await create.mutateAsync(rec);
+          onSave={async (rec, autoUpdate) => {
+            const created = await create.mutateAsync(rec);
+            if (autoUpdate && created?.id && (rec.type === 'A' || rec.type === 'AAAA')) {
+              await toggle.mutateAsync({
+                record_remote_id: created.id,
+                record_name: rec.name,
+                record_type: rec.type,
+                enabled: true,
+              });
+            }
             setCreating(false);
           }}
         />
@@ -570,10 +634,23 @@ function ZoneCard({
       {editingRec && (
         <RecordEditor
           mode="edit"
+          zoneName={card.name}
           initial={editingRec}
+          initialAutoUpdate={!!editingRec.id && autoMap.has(editingRec.id)}
           onClose={() => setEditingRec(null)}
-          onSave={async (rec) => {
+          onSave={async (rec, autoUpdate) => {
             await update.mutateAsync({ recordId: editingRec.id!, input: rec });
+            if (rec.type === 'A' || rec.type === 'AAAA') {
+              const currentlyOn = !!editingRec.id && autoMap.has(editingRec.id);
+              if (autoUpdate !== currentlyOn) {
+                await toggle.mutateAsync({
+                  record_remote_id: editingRec.id!,
+                  record_name: rec.name,
+                  record_type: rec.type,
+                  enabled: autoUpdate,
+                });
+              }
+            }
             setEditingRec(null);
           }}
         />
@@ -582,39 +659,175 @@ function ZoneCard({
   );
 }
 
+function RecordTypeSection({
+  type,
+  zoneName,
+  records,
+  autoMap,
+  onToggleAuto,
+  onEdit,
+  onDelete,
+}: {
+  type: string;
+  zoneName: string;
+  records: DDNSRecord[];
+  autoMap: Map<string, DDNSAutoUpdate>;
+  onToggleAuto: (r: DDNSRecord, enabled: boolean) => void;
+  onEdit: (r: DDNSRecord) => void;
+  onDelete: (r: DDNSRecord) => void;
+}) {
+  const style = typeBadgeStyle(type);
+  return (
+    <section>
+      <div className="mb-2 flex items-baseline gap-2">
+        <span
+          className="rounded px-2 py-0.5 font-mono text-[11px] font-bold uppercase"
+          style={{ background: style.bg, color: style.fg }}
+        >
+          {type}
+        </span>
+        <span className="text-[11px] uppercase tracking-wider text-fg-muted">
+          {records.length} record{records.length === 1 ? '' : 's'}
+        </span>
+      </div>
+      <ul className="flex flex-col gap-2">
+        {records.map((r) => {
+          const auto = r.id ? autoMap.get(r.id) : undefined;
+          const canAuto = r.type === 'A' || r.type === 'AAAA';
+          const sub = stripZone(r.name, zoneName);
+          return (
+            <li
+              key={r.id}
+              className="flex items-center gap-3 rounded-lg border border-border bg-bg-card/40 px-4 py-3 text-sm transition-colors hover:border-border-strong"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate font-mono text-base font-medium">{sub}</span>
+                  {r.proxied && (
+                    <span className="rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-bold uppercase text-accent">
+                      proxied
+                    </span>
+                  )}
+                  {auto && (
+                    <span className="rounded bg-accent/20 px-1.5 py-0.5 text-[10px] font-bold uppercase text-accent">
+                      DDNS
+                    </span>
+                  )}
+                </div>
+                <div className="mt-0.5 break-all font-mono text-xs text-fg-muted">
+                  → {r.content}
+                </div>
+                {auto && (
+                  <div className="mt-1 text-[11px]">
+                    {auto.last_error ? (
+                      <span className="text-danger">{auto.last_error}</span>
+                    ) : auto.last_synced_ip ? (
+                      <span className="text-fg-muted">
+                        synced <span className="font-mono">{auto.last_synced_ip}</span> at{' '}
+                        {formatTime(auto.last_synced_at)}
+                      </span>
+                    ) : (
+                      <span className="text-fg-muted">waiting for first check…</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {canAuto && (
+                  <button
+                    onClick={() => onToggleAuto(r, !auto)}
+                    className={
+                      'rounded-md px-3 py-1.5 text-xs font-medium transition-colors ' +
+                      (auto
+                        ? 'border border-accent bg-accent/20 text-accent'
+                        : 'border border-border text-fg-muted hover:bg-bg-elevated')
+                    }
+                    title={auto ? 'Auto-update enabled' : 'Enable auto-update'}
+                  >
+                    {auto ? 'DDNS on' : 'DDNS off'}
+                  </button>
+                )}
+                <button
+                  onClick={() => onEdit(r)}
+                  className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-bg-elevated"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => onDelete(r)}
+                  className="rounded-md border border-danger/40 px-3 py-1.5 text-xs text-danger hover:bg-danger/10"
+                >
+                  Delete
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 // --- Record editor --------------------------------------------------------
 
 function RecordEditor({
   mode,
+  zoneName,
   initial,
+  initialAutoUpdate,
   onClose,
   onSave,
 }: {
   mode: 'create' | 'edit';
+  zoneName: string;
   initial?: DDNSRecord;
+  initialAutoUpdate?: boolean;
   onClose: () => void;
-  onSave: (rec: DDNSRecord) => Promise<void>;
+  onSave: (rec: DDNSRecord, autoUpdate: boolean) => Promise<void>;
 }) {
   const [type, setType] = useState<string>(initial?.type ?? 'A');
-  const [name, setName] = useState(initial?.name ?? '');
+  // Display the subdomain part only ("@" or "labextend") and reassemble
+  // the FQDN on submit. For convenience the user can paste a full FQDN
+  // and we'll strip the zone suffix automatically.
+  const [name, setName] = useState(stripZone(initial?.name ?? '@', zoneName));
   const [content, setContent] = useState(initial?.content ?? '');
   const [ttl, setTtl] = useState<number>(initial?.ttl ?? 1);
   const [proxied, setProxied] = useState(initial?.proxied ?? false);
+  const [autoUpdate, setAutoUpdate] = useState<boolean>(initialAutoUpdate ?? false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const canProxy = type === 'A' || type === 'AAAA' || type === 'CNAME';
+  const canAutoUpdate = type === 'A' || type === 'AAAA';
+
+  // When the user changes type away from A/AAAA, auto-update is
+  // meaningless — silently clear it.
+  useEffect(() => {
+    if (!canAutoUpdate && autoUpdate) setAutoUpdate(false);
+  }, [canAutoUpdate, autoUpdate]);
+
+  const fqdn = (() => {
+    const sub = name.trim();
+    if (!sub || sub === '@') return zoneName;
+    if (sub.toLowerCase().endsWith('.' + zoneName.toLowerCase()) || sub.toLowerCase() === zoneName.toLowerCase()) {
+      return sub;
+    }
+    return `${sub}.${zoneName}`;
+  })();
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr(null);
-    if (!name || !content) {
+    if (!fqdn || !content) {
       setErr('Name and content are required.');
       return;
     }
     setBusy(true);
     try {
-      await onSave({ type, name, content, ttl, proxied: canProxy ? proxied : false });
+      await onSave(
+        { type, name: fqdn, content, ttl, proxied: canProxy ? proxied : false },
+        canAutoUpdate ? autoUpdate : false,
+      );
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'failed');
     } finally {
@@ -658,14 +871,23 @@ function RecordEditor({
           </label>
         </div>
         <label className="block">
-          <span className="mb-1 block text-xs text-fg-muted">Name</span>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="@ or sub.example.com"
-            required
-            className="w-full rounded border border-border bg-bg-elevated px-3 py-2 font-mono outline-none focus:border-accent"
-          />
+          <span className="mb-1 block text-xs text-fg-muted">Subdomain</span>
+          <div className="flex items-stretch overflow-hidden rounded border border-border bg-bg-elevated focus-within:border-accent">
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="@ or labextend"
+              required
+              className="flex-1 bg-transparent px-3 py-2 font-mono outline-none"
+            />
+            <span className="flex items-center border-l border-border bg-bg-card px-3 font-mono text-sm text-fg-muted">
+              .{zoneName}
+            </span>
+          </div>
+          <div className="mt-1 truncate text-[11px] text-fg-muted">
+            Will be saved as <span className="font-mono">{fqdn || '—'}</span>. Use{' '}
+            <code className="font-mono">@</code> for the zone apex.
+          </div>
         </label>
         <label className="block">
           <span className="mb-1 block text-xs text-fg-muted">
@@ -688,8 +910,37 @@ function RecordEditor({
         </label>
         {canProxy && (
           <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={proxied} onChange={(e) => setProxied(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={proxied}
+              onChange={(e) => setProxied(e.target.checked)}
+              className="accent-accent"
+            />
             Proxied through Cloudflare
+          </label>
+        )}
+        {canAutoUpdate && (
+          <label
+            className={
+              'flex items-start gap-2 rounded border px-3 py-2 text-sm transition-colors ' +
+              (autoUpdate
+                ? 'border-accent bg-accent/10'
+                : 'border-border bg-bg-elevated/30')
+            }
+          >
+            <input
+              type="checkbox"
+              checked={autoUpdate}
+              onChange={(e) => setAutoUpdate(e.target.checked)}
+              className="mt-0.5 accent-accent"
+            />
+            <span>
+              <span className="font-medium">Auto-update with my public IP</span>
+              <span className="mt-0.5 block text-xs text-fg-muted">
+                LabExtend checks the public {type === 'AAAA' ? 'IPv6' : 'IPv4'} of this server every
+                few minutes and patches this record when it changes.
+              </span>
+            </span>
           </label>
         )}
         {err && (

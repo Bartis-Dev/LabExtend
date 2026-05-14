@@ -21,6 +21,8 @@ type Target struct {
 	MAC           string  `json:"mac"`
 	BroadcastAddr string  `json:"broadcast_addr"`
 	Port          int     `json:"port"`
+	PingHost      string  `json:"ping_host"`
+	PingPort      int     `json:"ping_port"`
 	LastSentAt    *int64  `json:"last_sent_at"`
 	LastError     *string `json:"last_error"`
 	CreatedAt     int64   `json:"created_at"`
@@ -32,6 +34,8 @@ type TargetInput struct {
 	MAC           string `json:"mac"`
 	BroadcastAddr string `json:"broadcast_addr"`
 	Port          int    `json:"port"`
+	PingHost      string `json:"ping_host"`
+	PingPort      int    `json:"ping_port"`
 }
 
 var ErrNotFound = errors.New("wol target not found")
@@ -40,11 +44,12 @@ type Store struct{ db *sql.DB }
 
 func New(db *sql.DB) *Store { return &Store{db: db} }
 
-const selectCols = `id, name, mac, broadcast_addr, port, last_sent_at, last_error, created_at, updated_at`
+const selectCols = `id, name, mac, broadcast_addr, port, ping_host, ping_port, last_sent_at, last_error, created_at, updated_at`
 
 func scan(scanner interface{ Scan(...any) error }) (Target, error) {
 	var t Target
 	err := scanner.Scan(&t.ID, &t.Name, &t.MAC, &t.BroadcastAddr, &t.Port,
+		&t.PingHost, &t.PingPort,
 		&t.LastSentAt, &t.LastError, &t.CreatedAt, &t.UpdatedAt)
 	return t, err
 }
@@ -78,9 +83,9 @@ func (s *Store) Get(id int64) (Target, error) {
 func (s *Store) Create(in TargetInput) (Target, error) {
 	now := time.Now().Unix()
 	res, err := s.db.Exec(
-		`INSERT INTO wol_targets (name, mac, broadcast_addr, port, created_at, updated_at)
-		 VALUES (?,?,?,?,?,?)`,
-		in.Name, in.MAC, in.BroadcastAddr, in.Port, now, now,
+		`INSERT INTO wol_targets (name, mac, broadcast_addr, port, ping_host, ping_port, created_at, updated_at)
+		 VALUES (?,?,?,?,?,?,?,?)`,
+		in.Name, in.MAC, in.BroadcastAddr, in.Port, in.PingHost, in.PingPort, now, now,
 	)
 	if err != nil {
 		return Target{}, err
@@ -92,8 +97,8 @@ func (s *Store) Create(in TargetInput) (Target, error) {
 func (s *Store) Update(id int64, in TargetInput) (Target, error) {
 	now := time.Now().Unix()
 	res, err := s.db.Exec(
-		`UPDATE wol_targets SET name=?, mac=?, broadcast_addr=?, port=?, updated_at=? WHERE id=?`,
-		in.Name, in.MAC, in.BroadcastAddr, in.Port, now, id,
+		`UPDATE wol_targets SET name=?, mac=?, broadcast_addr=?, port=?, ping_host=?, ping_port=?, updated_at=? WHERE id=?`,
+		in.Name, in.MAC, in.BroadcastAddr, in.Port, in.PingHost, in.PingPort, now, id,
 	)
 	if err != nil {
 		return Target{}, err
@@ -170,6 +175,19 @@ func ValidateInput(in *TargetInput) string {
 	}
 	if in.Port < 1 || in.Port > 65535 {
 		return "port must be 1..65535"
+	}
+	in.PingHost = strings.TrimSpace(in.PingHost)
+	if in.PingHost != "" {
+		if in.PingPort == 0 {
+			in.PingPort = 22
+		}
+		if in.PingPort < 1 || in.PingPort > 65535 {
+			return "ping_port must be 1..65535"
+		}
+	} else {
+		// Normalise: an empty host means "no ping configured" — port is
+		// irrelevant in that case.
+		in.PingPort = 0
 	}
 	return ""
 }

@@ -34,6 +34,7 @@ import type {
   Settings,
   Theme,
   ThemeInput,
+  WoLStatusMap,
   WoLTarget,
   WoLTargetInput,
 } from './types';
@@ -505,6 +506,14 @@ export function useWakeWoLTarget() {
   });
 }
 
+export function useWoLStatus() {
+  return useQuery({
+    queryKey: ['wol', 'status'] as const,
+    queryFn: () => api.get<WoLStatusMap>('/api/wol/status'),
+    refetchInterval: 10_000,
+  });
+}
+
 // --- Docs -----------------------------------------------------------------
 
 export const docsKey = ['docs'] as const;
@@ -668,6 +677,17 @@ export function useSwapNotesCardSlots() {
   return useMutation({
     mutationFn: (args: { a: number; b: number }) =>
       api.post<void>('/api/notes/cards/swap-slots', args),
+    onSuccess: () => qc.invalidateQueries({ queryKey: notesKey }),
+  });
+}
+
+export function useAppendNotesBoardCard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (boardId: number) =>
+      api.post<{ card: NotesCard; board: NotesBoard }>(
+        `/api/notes/boards/${boardId}/append-card`,
+      ),
     onSuccess: () => qc.invalidateQueries({ queryKey: notesKey }),
   });
 }

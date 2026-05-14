@@ -1,13 +1,15 @@
-import type { Shell } from './types';
+import type { Category } from './types';
 import { cmd } from './cmd';
 import { docker } from './docker';
 import { linux } from './linux';
 import { powershell } from './powershell';
 
-export { type Shell, type Command, type Flag, type Argument, type FilePath } from './types';
+export type { Category, Section, Example } from './types';
 
-export const SHELLS: Shell[] = [linux, powershell, cmd, docker];
+// Flat ordered list — sidebar grouping happens in the page component
+// (groupBy `shell`).
+export const CATEGORIES: Category[] = [...linux, ...powershell, ...cmd, ...docker];
 
-export function getShell(id: string): Shell | undefined {
-  return SHELLS.find((s) => s.id === id);
+export function getCategory(id: string): Category | undefined {
+  return CATEGORIES.find((c) => c.id === id);
 }

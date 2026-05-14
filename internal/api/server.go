@@ -30,6 +30,7 @@ type Server struct {
 	DDNS       *ddns.Store
 	DDNSWorker *ddns.Worker
 	WoL        *wol.Store
+	WoLPinger  *wol.Pinger
 	Docs       *docs.Store
 	Notes        *notes.Store
 	Stats        *stats.Store

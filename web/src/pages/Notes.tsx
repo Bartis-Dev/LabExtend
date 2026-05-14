@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ContextMenu, type ContextMenuItem, useContextMenu } from '@/components/ContextMenu';
 import {
+  useAppendNotesBoardCard,
   useCreateNotesBoard,
   useCreateNotesCard,
   useCreateNotesItem,
@@ -232,13 +233,7 @@ export default function NotesPage() {
   const canvasMenuItems: ContextMenuItem[] = menuWorld
     ? [
         { label: 'Add note here', onClick: () => addCardAt(menuWorld.wx, menuWorld.wy) },
-        { separator: true },
-        ...([2, 3, 4, 5] as const).map(
-          (n): ContextMenuItem => ({
-            label: `Create canvas with ${n} cards`,
-            onClick: () => createCanvasBoard(n, menuWorld.wx, menuWorld.wy),
-          }),
-        ),
+        { label: 'Create canvas', onClick: () => createCanvasBoard(2, menuWorld.wx, menuWorld.wy) },
       ]
     : [];
 
@@ -480,12 +475,16 @@ function BoardView({
   const update = useUpdateNotesBoard();
   const del = useDeleteNotesBoard();
   const swap = useSwapNotesCardSlots();
+  const append = useAppendNotesBoardCard();
   const updateCard = useUpdateNotesCard();
   const delCard = useDeleteNotesCard();
   const ctx = useContextMenu();
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(board.name);
+  const [colorsOpen, setColorsOpen] = useState(false);
   const cardListRef = useRef<HTMLDivElement>(null);
+  const titleColor = board.title_color || board.color;
+  const atMax = cards.length >= 10;
 
   useEffect(() => setName(board.name), [board.name]);
 
@@ -579,6 +578,13 @@ function BoardView({
 
   const menuItems: ContextMenuItem[] = [
     { label: 'Rename board', onClick: () => setRenaming(true) },
+    { label: 'Colors…', onClick: () => setColorsOpen(true) },
+    {
+      label: atMax ? 'Add card (max 10 reached)' : 'Add card to canvas',
+      onClick: () => {
+        if (!atMax) append.mutate(board.id);
+      },
+    },
     { separator: true },
     {
       label: 'Delete board (with all cards)',
@@ -613,7 +619,7 @@ function BoardView({
       <div
         onMouseDown={onHeaderMouseDown}
         className="flex h-9 cursor-grab items-center gap-2 rounded-t-xl px-3 active:cursor-grabbing"
-        style={{ background: `${board.color}33` }}
+        style={{ background: `${titleColor}33` }}
       >
         {renaming ? (
           <input
@@ -635,10 +641,22 @@ function BoardView({
           <span className="flex-1 truncate text-sm font-semibold">
             {board.name || <span className="italic text-fg-muted">canvas</span>}
             <span className="ml-2 text-[10px] uppercase tracking-wider text-fg-muted/70">
-              {board.cols} cards
+              {cards.length} / 10
             </span>
           </span>
         )}
+        <button
+          type="button"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => {
+            if (!atMax) append.mutate(board.id);
+          }}
+          disabled={atMax || append.isPending}
+          title={atMax ? 'Maximum of 10 cards reached' : 'Add card to canvas'}
+          className="grid h-6 w-6 place-items-center rounded border border-border bg-bg-card text-sm font-bold text-fg-muted hover:bg-bg-elevated hover:text-fg disabled:opacity-30"
+        >
+          +
+        </button>
       </div>
 
       <div
@@ -682,6 +700,28 @@ function BoardView({
       </div>
 
       <ContextMenu open={ctx.open} x={ctx.x} y={ctx.y} items={menuItems} onClose={ctx.close} />
+      {colorsOpen && (
+        <ColorsModal
+          title={`Colors for ${board.name || 'canvas'}`}
+          border={board.color}
+          titleBg={board.title_color}
+          onClose={() => setColorsOpen(false)}
+          onSave={(border, title) => {
+            update.mutate({
+              id: board.id,
+              input: {
+                name: board.name,
+                x: board.x,
+                y: board.y,
+                cols: board.cols,
+                color: border,
+                title_color: title,
+              },
+            });
+            setColorsOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -717,6 +757,7 @@ function CardView({
     w: number;
     h: number;
     color: string;
+    title_color?: string;
     board_id?: number | null;
     slot_index?: number;
   }) => void;
@@ -731,6 +772,8 @@ function CardView({
 
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(card.name);
+  const [colorsOpen, setColorsOpen] = useState(false);
+  const titleColor = card.title_color || card.color;
   useEffect(() => setName(card.name), [card.name]);
 
   // ---- Drag handling — free vs in-board switch --------------------------
@@ -780,9 +823,25 @@ function CardView({
       w: card.w,
       h: card.h,
       color: card.color,
+      title_color: card.title_color,
       board_id: card.board_id,
       slot_index: card.slot_index,
     });
+  };
+
+  const saveColors = (border: string, title: string) => {
+    onUpdate({
+      name: card.name,
+      x: card.x,
+      y: card.y,
+      w: card.w,
+      h: card.h,
+      color: border,
+      title_color: title,
+      board_id: card.board_id,
+      slot_index: card.slot_index,
+    });
+    setColorsOpen(false);
   };
 
   const [addingItem, setAddingItem] = useState(false);
@@ -820,6 +879,7 @@ function CardView({
           w: card.w,
           h: measured,
           color: card.color,
+          title_color: card.title_color,
           board_id: card.board_id,
           slot_index: card.slot_index,
         });
@@ -837,6 +897,7 @@ function CardView({
   const menuItems: ContextMenuItem[] = [
     { label: 'Rename', onClick: () => setRenaming(true) },
     { label: 'Add note', onClick: () => setAddingItem(true) },
+    { label: 'Colors…', onClick: () => setColorsOpen(true) },
     { separator: true },
     {
       label: 'Delete card',
@@ -877,7 +938,7 @@ function CardView({
       <div
         onMouseDown={onHeaderMouseDown}
         className="flex cursor-grab items-center gap-2 rounded-t-lg px-3 py-2 active:cursor-grabbing"
-        style={{ background: `${card.color}33` }}
+        style={{ background: `${titleColor}33` }}
         title="Drag the title bar to move • right-click for actions"
       >
         {renaming ? (
@@ -905,11 +966,10 @@ function CardView({
 
       <ul
         className={
-          'divide-y divide-border px-1 transition-colors ' +
+          'flex flex-col gap-1 px-2 py-2 transition-colors ' +
           (dropAtEnd ? 'bg-accent/5' : '')
         }
         onDragOver={(e) => {
-          // Allow dropping in the empty space of the card.
           if (!hasItemDrag(e)) return;
           e.preventDefault();
           if (e.target === e.currentTarget) {
@@ -926,9 +986,6 @@ function CardView({
           setDropAtEnd(false);
           const itemID = Number(e.dataTransfer.getData(ITEM_DRAG_MIME));
           if (!itemID) return;
-          // Append to end: position = current count (the item count after
-          // removing the source if it was in this card is handled
-          // server-side by MoveItem).
           moveItem.mutate({ id: itemID, card_id: card.id, position: card.items.length });
         }}
       >
@@ -949,7 +1006,7 @@ function CardView({
           />
         ))}
         {addingItem && (
-          <li className="flex items-center gap-1 px-2 py-1.5">
+          <li className="rounded-md border border-accent bg-bg-elevated px-2 py-1.5">
             <input
               value={newItemText}
               onChange={(e) => setNewItemText(e.target.value)}
@@ -963,22 +1020,31 @@ function CardView({
               }}
               placeholder="Note text…"
               autoFocus
-              className="flex-1 rounded border border-border bg-bg-elevated px-2 py-1 text-xs outline-none focus:border-accent"
+              className="w-full bg-transparent text-xs outline-none"
             />
           </li>
         )}
       </ul>
 
-      <div className="px-2 pb-2 pt-1">
+      <div className="px-2 pb-2 pt-0.5">
         <button
           onClick={() => setAddingItem(true)}
-          className="w-full rounded border border-dashed border-border px-2 py-1 text-xs text-fg-muted hover:border-accent hover:text-fg"
+          className="w-full rounded-md border border-accent/40 bg-accent/10 px-2 py-1.5 text-xs font-medium text-accent transition-colors hover:bg-accent/20"
         >
           + Add note
         </button>
       </div>
 
       <ContextMenu open={ctx.open} x={ctx.x} y={ctx.y} items={menuItems} onClose={ctx.close} />
+      {colorsOpen && (
+        <ColorsModal
+          title={`Colors for ${card.name || 'card'}`}
+          border={card.color}
+          titleBg={card.title_color}
+          onClose={() => setColorsOpen(false)}
+          onSave={saveColors}
+        />
+      )}
     </div>
   );
 }
@@ -1065,9 +1131,9 @@ function ItemRow({
       }}
       onContextMenu={(e) => ctx.onContextMenu(e)}
       className={
-        'flex items-center gap-1 px-2 py-1 text-xs transition-all ' +
+        'flex items-center gap-1 rounded-md border border-border bg-bg-elevated/60 px-2 py-1.5 text-xs transition-all hover:border-border-strong hover:bg-bg-elevated ' +
         (isDragging ? 'opacity-40 ' : '') +
-        (dragOverHere ? 'border-t-2 border-accent ' : '')
+        (dragOverHere ? '!border-accent shadow-[inset_0_2px_0_var(--accent)] ' : '')
       }
     >
       <button
@@ -1109,5 +1175,175 @@ function ItemRow({
       )}
       <ContextMenu open={ctx.open} x={ctx.x} y={ctx.y} items={menuItems} onClose={ctx.close} />
     </li>
+  );
+}
+
+// ---- Colors modal -----------------------------------------------------
+
+const COLOR_PRESETS = [
+  '#475569', // slate
+  '#0f766e', // teal
+  '#1d4ed8', // blue
+  '#7c3aed', // violet
+  '#a21caf', // fuchsia
+  '#b91c1c', // red
+  '#b45309', // amber
+  '#15803d', // forest
+];
+
+function ColorsModal({
+  title,
+  border,
+  titleBg,
+  onClose,
+  onSave,
+}: {
+  title: string;
+  border: string;
+  titleBg: string;
+  onClose: () => void;
+  onSave: (border: string, titleColor: string) => void;
+}) {
+  const [b, setB] = useState(border || '#475569');
+  // Empty title means "fall back to border" — keep that semantics: the
+  // user can clear via the "Same as border" toggle.
+  const [t, setT] = useState(titleBg || '');
+  const titleEffective = t || b;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[1000] grid place-items-center bg-black/60 p-6">
+      <div
+        className="w-full max-w-md rounded-lg border border-border bg-bg-card p-5"
+        onMouseDown={(e) => e.stopPropagation()}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-bold">{title}</h2>
+          <button
+            onClick={onClose}
+            className="rounded p-1 text-fg-muted hover:bg-bg-elevated hover:text-fg"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="mb-4 rounded border border-border bg-bg-elevated/30 p-3">
+          <div
+            className="mb-2 rounded px-3 py-2 text-sm font-semibold"
+            style={{ background: `${titleEffective}33`, color: 'var(--fg)' }}
+          >
+            Title bar preview
+          </div>
+          <div
+            className="rounded border-2 px-3 py-2 text-xs text-fg-muted"
+            style={{ borderColor: b }}
+          >
+            Border preview — surrounds the whole card.
+          </div>
+        </div>
+
+        <Section
+          label="Border color"
+          value={b}
+          onChange={setB}
+        />
+
+        <div className="mt-4">
+          <Section
+            label={
+              <span className="flex items-center gap-2">
+                Title bar color
+                <button
+                  type="button"
+                  onClick={() => setT('')}
+                  className={
+                    'rounded border px-1.5 py-0.5 text-[10px] ' +
+                    (t === ''
+                      ? 'border-accent text-accent'
+                      : 'border-border text-fg-muted hover:text-fg')
+                  }
+                  title="Use the same color as the border"
+                >
+                  same as border
+                </button>
+              </span>
+            }
+            value={t || b}
+            onChange={setT}
+          />
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="rounded border border-border px-4 py-2 text-sm hover:bg-bg-elevated"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onSave(b, t)}
+            className="rounded bg-accent px-4 py-2 text-sm text-white hover:bg-accent-hover"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Section({
+  label,
+  value,
+  onChange,
+}: {
+  label: React.ReactNode;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-fg-muted">
+        {label}
+      </div>
+      <div className="grid grid-cols-8 gap-1.5">
+        {COLOR_PRESETS.map((c) => {
+          const active = c.toLowerCase() === value.toLowerCase();
+          return (
+            <button
+              key={c}
+              type="button"
+              onClick={() => onChange(c)}
+              style={{ background: c }}
+              className={
+                'h-7 w-full rounded transition-all ' +
+                (active ? 'scale-110 ring-2 ring-fg/40' : 'opacity-80 hover:opacity-100')
+              }
+              aria-label={`Color ${c}`}
+            />
+          );
+        })}
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <div
+          className="h-7 w-7 shrink-0 rounded border border-border"
+          style={{ background: value }}
+        />
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="flex-1 rounded border border-border bg-bg-elevated px-2 py-1 font-mono text-xs outline-none focus:border-accent"
+        />
+      </div>
+    </div>
   );
 }

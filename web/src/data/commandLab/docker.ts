@@ -1,140 +1,103 @@
-import type { Shell } from './types';
+import type { Category } from './types';
 
-export const docker: Shell = {
-  id: 'docker',
-  label: 'Docker',
-  description: 'Common docker and docker compose commands.',
-  icon: 'container',
-  commands: [
-    {
-      id: 'run',
-      name: 'docker run',
-      category: 'Containers',
-      description: 'Run a command in a new container.',
-      template: 'docker run {flags} {image} {command}',
-      args: [
-        { key: 'image', name: 'Image', description: 'Image name and optional tag.', required: true, placeholder: 'nginx:alpine' },
-        { key: 'command', name: 'Command', description: 'Optional command to run.', placeholder: '' },
-      ],
-      flags: [
-        { key: 'detach', flag: '-d', description: 'Run in background.', type: 'bool' },
-        { key: 'interactive', flag: '-it', description: 'Interactive TTY (combine flag).', type: 'bool' },
-        { key: 'rm', flag: '--rm', description: 'Remove container when it exits.', type: 'bool' },
-        { key: 'name', flag: '--name', description: 'Container name.', type: 'string', placeholder: 'my-app' },
-        { key: 'port', flag: '-p', description: 'Publish port (HOST:CONTAINER).', type: 'string', placeholder: '8080:80' },
-        { key: 'env', flag: '-e', description: 'Environment variable.', type: 'string', placeholder: 'KEY=value' },
-        { key: 'volume', flag: '-v', description: 'Bind mount (HOST:CONTAINER).', type: 'string', placeholder: '/data:/data' },
-        { key: 'network', flag: '--network', description: 'Network to attach.', type: 'string', placeholder: 'bridge' },
-        { key: 'restart', flag: '--restart', description: 'Restart policy.', type: 'enum', options: ['no', 'on-failure', 'unless-stopped', 'always'] },
-        { key: 'user', flag: '--user', description: 'UID:GID inside container.', type: 'string', placeholder: '1000:1000' },
-      ],
-      examples: [
-        'docker run -d --name web -p 8080:80 nginx:alpine',
-        'docker run --rm -it ubuntu:24.04 bash',
-      ],
-    },
-    {
-      id: 'compose-up',
-      name: 'docker compose up',
-      category: 'Compose',
-      description: 'Create and start services defined in a compose file.',
-      template: 'docker compose {flags} up {upflags} {service}',
-      args: [
-        { key: 'service', name: 'Service', description: 'Optional service name.', placeholder: '' },
-      ],
-      flags: [
-        { key: 'file', flag: '-f', description: 'Compose file path.', type: 'string', placeholder: 'docker-compose.yml' },
-        { key: 'project', flag: '-p', description: 'Project name override.', type: 'string', placeholder: 'my-stack' },
-      ],
-      examples: [
-        'docker compose up -d',
-        'docker compose -f stack.yml up -d',
-      ],
-      notes: 'Add upflags like -d and --build separately. (This builder shows the main `compose` flags; chain `-d --build` manually after "up".)',
-    },
-    {
-      id: 'exec',
-      name: 'docker exec',
-      category: 'Containers',
-      description: 'Run a command inside a running container.',
-      template: 'docker exec {flags} {container} {command}',
-      args: [
-        { key: 'container', name: 'Container', description: 'Name or ID.', required: true, placeholder: 'web' },
-        { key: 'command', name: 'Command', description: 'Command to run.', required: true, placeholder: 'sh' },
-      ],
-      flags: [
-        { key: 'interactive', flag: '-it', description: 'Interactive TTY.', type: 'bool' },
-        { key: 'user', flag: '--user', description: 'UID inside container.', type: 'string', placeholder: 'root' },
-        { key: 'workdir', flag: '--workdir', description: 'Working directory.', type: 'string', placeholder: '/app' },
-      ],
-      examples: ['docker exec -it web sh', 'docker exec --user root web apt update'],
-    },
-    {
-      id: 'logs',
-      name: 'docker logs',
-      category: 'Containers',
-      description: 'Fetch container logs.',
-      template: 'docker logs {flags} {container}',
-      args: [
-        { key: 'container', name: 'Container', description: 'Name or ID.', required: true, placeholder: 'web' },
-      ],
-      flags: [
-        { key: 'follow', flag: '-f', description: 'Follow log output.', type: 'bool' },
-        { key: 'tail', flag: '--tail', description: 'Number of lines from the end.', type: 'number', placeholder: '100' },
-        { key: 'since', flag: '--since', description: 'Show logs since timestamp/duration.', type: 'string', placeholder: '1h' },
-        { key: 'timestamps', flag: '-t', description: 'Show timestamps.', type: 'bool' },
-      ],
-      examples: ['docker logs -f --tail 200 web'],
-    },
-    {
-      id: 'ps',
-      name: 'docker ps',
-      category: 'Containers',
-      description: 'List containers.',
-      template: 'docker ps {flags}',
-      flags: [
-        { key: 'all', flag: '-a', description: 'Show all (including stopped).', type: 'bool' },
-        { key: 'quiet', flag: '-q', description: 'Only display IDs.', type: 'bool' },
-        { key: 'filter', flag: '--filter', description: 'Filter (e.g. status=exited).', type: 'string', placeholder: 'status=exited' },
-      ],
-      examples: ['docker ps -a', 'docker ps -q --filter status=exited'],
-    },
-    {
-      id: 'network-create',
-      name: 'docker network create',
-      category: 'Networks',
-      description: 'Create a docker network.',
-      template: 'docker network create {flags} {name}',
-      args: [
-        { key: 'name', name: 'Name', description: 'Network name.', required: true, placeholder: 'app-net' },
-      ],
-      flags: [
-        { key: 'driver', flag: '--driver', description: 'Driver.', type: 'enum', options: ['bridge', 'overlay', 'host', 'macvlan'] },
-        { key: 'subnet', flag: '--subnet', description: 'CIDR for the bridge subnet.', type: 'string', placeholder: '172.20.0.0/24' },
-      ],
-      examples: ['docker network create --driver bridge app-net'],
-    },
-    {
-      id: 'system-prune',
-      name: 'docker system prune',
-      category: 'Cleanup',
-      description: 'Remove unused data (stopped containers, dangling images, networks).',
-      template: 'docker system prune {flags}',
-      flags: [
-        { key: 'force', flag: '-f', description: 'Don\'t prompt for confirmation.', type: 'bool' },
-        { key: 'volumes', flag: '--volumes', description: 'Also prune anonymous volumes. ⚠️', type: 'bool' },
-        { key: 'all', flag: '-a', description: 'Remove all unused images, not just dangling.', type: 'bool' },
-      ],
-      examples: ['docker system prune -af'],
-      notes: '⚠️ With --volumes, anonymous volumes are deleted; named volumes are kept. Always double-check before running on shared hosts.',
-    },
-  ],
-  paths: [
-    { path: '/var/lib/docker', description: 'Docker root data directory (overlay layers, volumes).', category: 'Daemon' },
-    { path: '/etc/docker/daemon.json', description: 'Docker daemon configuration.', category: 'Daemon' },
-    { path: '~/.docker/config.json', description: 'Per-user Docker config (registry auth, plugins).', category: 'Client' },
-    { path: 'docker-compose.yml', description: 'Compose service definitions.', category: 'Compose' },
-    { path: '.dockerignore', description: 'Patterns to exclude from build context.', category: 'Build' },
-    { path: 'Dockerfile', description: 'Image build recipe.', category: 'Build' },
-  ],
-};
+export const docker: Category[] = [
+  {
+    id: 'docker-containers',
+    shell: 'Docker',
+    label: 'Containers',
+    icon: 'container',
+    description: 'Day-to-day container operations: run, exec, logs, prune.',
+    sections: [
+      {
+        id: 'run',
+        title: 'docker run',
+        examples: [
+          { command: 'docker run -d --name web -p 8080:80 nginx:alpine', note: '-d detached, -p HOST:CONTAINER, --name pins a label.' },
+          { command: 'docker run --rm -it ubuntu:24.04 bash', note: '--rm cleans up on exit, -it interactive TTY, bash drops you into a shell.' },
+          { command: 'docker run -d --restart unless-stopped --name pihole -e TZ=Europe/Berlin -v pihole_data:/etc/pihole pihole/pihole', note: 'Realistic homelab service: env var, named volume, restart policy.' },
+        ],
+        tip: 'Volumes: `-v name:/path` for managed volumes (recommended), `-v /host/path:/container/path` for bind mounts.',
+      },
+      {
+        id: 'exec',
+        title: 'Inspect a running container',
+        examples: [
+          { command: 'docker ps', note: 'List running containers. -a includes stopped.' },
+          { command: 'docker exec -it web sh', note: 'Drop into a shell inside the container.' },
+          { command: 'docker logs -f --tail 200 web', note: 'Tail the last 200 lines and follow.' },
+          { command: 'docker inspect web', note: 'Full JSON dump: env, mounts, network, IP.' },
+          { command: 'docker stats', note: 'Live CPU/memory/network per container.' },
+        ],
+      },
+      {
+        id: 'cleanup',
+        title: 'Cleanup',
+        examples: [
+          { command: 'docker container prune', note: 'Remove all stopped containers.' },
+          { command: 'docker image prune -a', note: 'Remove all unused images (not just dangling).' },
+          { command: 'docker volume prune', note: 'Remove unused volumes — ⚠️ also removes anonymous volumes that might still hold data.' },
+          { command: 'docker system prune -a --volumes', note: 'Nuclear option. Reclaim everything not in use right now.' },
+        ],
+        warning: 'docker volume prune deletes anonymous volumes immediately. Named volumes are safe.',
+      },
+    ],
+  },
+  {
+    id: 'docker-compose',
+    shell: 'Docker',
+    label: 'Compose',
+    icon: 'layers',
+    description: 'Multi-container apps defined in docker-compose.yml. Modern Docker uses `docker compose` (built-in subcommand) — older systems still have `docker-compose` as a separate binary.',
+    sections: [
+      {
+        id: 'lifecycle',
+        title: 'Start / stop / rebuild',
+        examples: [
+          { command: 'docker compose up -d', note: 'Create + start in detached mode. Re-runs are idempotent.' },
+          { command: 'docker compose up -d --build', note: 'Rebuild images first. Use after editing a Dockerfile.' },
+          { command: 'docker compose down', note: 'Stop and remove containers + default network.' },
+          { command: 'docker compose down -v', note: '+ delete named volumes. Wipes data.' },
+          { command: 'docker compose restart web', note: 'Restart one service.' },
+        ],
+      },
+      {
+        id: 'logs',
+        title: 'Inspect',
+        examples: [
+          { command: 'docker compose logs -f', note: 'All services interleaved, tailing.' },
+          { command: 'docker compose logs -f --tail 100 web', note: 'Last 100 lines of one service, then follow.' },
+          { command: 'docker compose ps', note: 'List services + their states.' },
+          { command: 'docker compose config', note: 'Print the merged, validated compose config.' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'docker-networks',
+    shell: 'Docker',
+    label: 'Networks',
+    icon: 'network',
+    description: 'Containers on the same user-defined network can address each other by service name.',
+    sections: [
+      {
+        id: 'manage',
+        title: 'Create + inspect',
+        examples: [
+          { command: 'docker network ls' },
+          { command: 'docker network create app-net', note: 'Bridge driver by default — fine for most homelab setups.' },
+          { command: 'docker network inspect app-net', note: 'See which containers are attached + their IPs.' },
+          { command: 'docker run -d --network app-net --name db postgres:16', note: 'Attach a container at create time. Compose does this automatically.' },
+        ],
+      },
+      {
+        id: 'host-mode',
+        title: 'Host networking',
+        description: 'Container shares the host\'s network namespace. Required for things like LAN broadcast (Wake-on-LAN).',
+        examples: [
+          { command: 'docker run -d --network host --name labextend ghcr.io/bartis-dev/labextend:latest' },
+        ],
+        tip: 'Linux only. On Docker Desktop (Mac/Windows) host mode behaves differently — port mapping is the more portable choice when WoL isn\'t needed.',
+      },
+    ],
+  },
+];

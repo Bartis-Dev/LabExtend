@@ -1,6 +1,7 @@
 package db
 
 import (
+	"bytes"
 	"database/sql"
 	"embed"
 	"fmt"
@@ -8,6 +9,13 @@ import (
 	"sort"
 	"strings"
 )
+
+// noTxMarker, when present as the first line of a migration file, opts
+// the migration out of the default per-file transaction wrapping. The
+// migration body is then responsible for its own atomicity (and may
+// issue PRAGMA statements that require running outside a transaction,
+// e.g. PRAGMA foreign_keys=OFF for table-recreation recipes).
+var noTxMarker = []byte("-- @no-tx")
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
@@ -58,6 +66,23 @@ func Migrate(d *sql.DB) error {
 		sqlBytes, err := fs.ReadFile(migrationsFS, "migrations/"+name)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", name, err)
+		}
+		if bytes.HasPrefix(bytes.TrimSpace(sqlBytes), noTxMarker) {
+			if _, err := d.Exec(string(sqlBytes)); err != nil {
+				return fmt.Errorf("apply %s: %w", name, err)
+			}
+			// In no-tx mode the migration is responsible for inserting its
+			// own schema_migrations row inside whatever transactional
+			// boundary it set up. We only insert here as a safety net for
+			// migrations that forgot — INSERT OR IGNORE means re-runs of
+			// fresh DBs that already self-recorded won't double-fail.
+			if _, err := d.Exec(
+				`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, strftime('%s','now'))`,
+				name,
+			); err != nil {
+				return fmt.Errorf("record %s: %w", name, err)
+			}
+			continue
 		}
 		tx, err := d.Begin()
 		if err != nil {

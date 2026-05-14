@@ -208,8 +208,8 @@ func (s *Server) createNotesBoard(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	if in.Cols < 2 || in.Cols > 5 {
-		writeError(w, http.StatusBadRequest, "cols must be 2..5")
+	if in.Cols < 2 || in.Cols > 10 {
+		writeError(w, http.StatusBadRequest, "cols must be 2..10")
 		return
 	}
 	board, err := s.Notes.CreateBoard(in)
@@ -283,6 +283,24 @@ func (s *Server) patchNotesBoardPosition(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) appendNotesBoardCard(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	card, board, err := s.Notes.AppendCardToBoard(id)
+	if errors.Is(err, notes.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "board not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"card": card, "board": board})
 }
 
 func (s *Server) deleteNotesBoard(w http.ResponseWriter, r *http.Request) {

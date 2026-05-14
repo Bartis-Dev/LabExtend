@@ -123,6 +123,10 @@ func main() {
 	srv.DDNSWorker = ddnsWorker
 	go ddnsWorker.Run(ctx)
 
+	wolPinger := wol.NewPinger(wolStore, 10*time.Second, 1500*time.Millisecond)
+	srv.WoLPinger = wolPinger
+	go wolPinger.Run(ctx)
+
 	webHandler := spaHandler(http.FS(web.FS()))
 	handler := srv.Routes(webHandler)
 

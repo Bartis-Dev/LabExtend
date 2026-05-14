@@ -161,6 +161,7 @@ export type NotesCard = {
   w: number;
   h: number;
   color: string;
+  title_color: string;
   board_id: number | null;
   slot_index: number;
   created_at: number;
@@ -174,6 +175,7 @@ export type NotesBoard = {
   y: number;
   cols: number;
   color: string;
+  title_color: string;
   created_at: number;
   updated_at: number;
 };
@@ -184,6 +186,7 @@ export type NotesCardInput = {
   w: number;
   h: number;
   color: string;
+  title_color?: string;
   board_id?: number | null;
   slot_index?: number;
 };
@@ -198,6 +201,7 @@ export type NotesBoardInput = {
   y: number;
   cols: number;
   color: string;
+  title_color?: string;
 };
 export type NotesState = {
   cards: NotesCard[];
@@ -234,6 +238,8 @@ export type WoLTarget = {
   mac: string;
   broadcast_addr: string;
   port: number;
+  ping_host: string;
+  ping_port: number;
   last_sent_at: number | null;
   last_error: string | null;
   created_at: number;
@@ -244,7 +250,10 @@ export type WoLTargetInput = {
   mac: string;
   broadcast_addr: string;
   port: number;
+  ping_host: string;
+  ping_port: number;
 };
+export type WoLStatusMap = Record<string, 'up' | 'down'>;
 
 // DDNS
 export type DDNSProvider = {
