@@ -78,7 +78,7 @@ export default function WoL() {
 function StatusDot({ status }: { status: 'up' | 'down' | 'unknown' }) {
   const cls =
     status === 'up'
-      ? 'bg-success shadow-[0_0_8px_var(--success)]'
+      ? 'bg-success labx-status-up'
       : status === 'down'
         ? 'bg-danger'
         : 'bg-fg-muted/30';

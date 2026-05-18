@@ -13,7 +13,6 @@ import Dashboard from '@/pages/Dashboard';
 import Settings from '@/pages/Settings';
 
 const DDNS = lazy(() => import('@/pages/DDNS'));
-const CommandLab = lazy(() => import('@/pages/CommandLab'));
 const WoL = lazy(() => import('@/pages/WoL'));
 const SecretsPage = lazy(() => import('@/pages/Secrets'));
 const Docs = lazy(() => import('@/pages/Docs'));
@@ -101,14 +100,6 @@ export default function App() {
             }
           />
           <Route path="/ddns" element={<ModuleRoute slug="ddns"><DDNS /></ModuleRoute>} />
-          <Route
-            path="/command-lab"
-            element={<ModuleRoute slug="command-lab"><CommandLab /></ModuleRoute>}
-          />
-          <Route
-            path="/command-lab/:categoryId"
-            element={<ModuleRoute slug="command-lab"><CommandLab /></ModuleRoute>}
-          />
           <Route path="/wol" element={<ModuleRoute slug="wol"><WoL /></ModuleRoute>} />
           <Route
             path="/secrets"

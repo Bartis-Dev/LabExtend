@@ -3,6 +3,7 @@ import { useAuth } from '@/store/auth';
 import { useModules, useSettings } from '@/api/queries';
 import { useFavCard } from '@/store/favCard';
 import type { Module } from '@/api/types';
+import { Logo } from './Logo';
 import { ModuleIcon } from './ModuleIcon';
 import { LogOutIcon, SettingsIcon } from './icons';
 
@@ -32,21 +33,34 @@ export function Navbar() {
   };
 
   return (
-    <nav className="flex h-14 items-center justify-between border-b border-border bg-bg-card px-6">
-      <Link to="/" className="flex shrink-0 items-baseline gap-2 leading-none">
+    <nav className="flex h-14 items-center gap-4 border-b border-border bg-bg-card/95 px-5 backdrop-blur supports-[backdrop-filter]:bg-bg-card/75">
+      {/* Brand: logo + wordmark. Wordmark uses display mono and is
+          slightly de-emphasised when a custom dashboard name is set. */}
+      <Link
+        to="/"
+        className="group flex shrink-0 items-center gap-2.5 leading-none focus-visible:outline-none"
+        aria-label="LabExtend home"
+      >
+        <Logo className="h-6 w-6 text-fg transition-transform group-hover:scale-105" />
         {customName ? (
-          <>
-            <span className="font-bold tracking-wide">{customName}</span>
-            <span className="text-[10px] font-medium uppercase tracking-wider text-fg-muted/60">
+          <div className="flex flex-col leading-none">
+            <span className="font-mono text-sm font-semibold tracking-tight text-fg">
+              {customName}
+            </span>
+            <span className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.18em] text-fg-muted/60">
               LabExtend
             </span>
-          </>
+          </div>
         ) : (
-          <span className="font-bold tracking-wide">LabExtend</span>
+          <span className="font-mono text-sm font-semibold tracking-tight">
+            Lab<span className="text-accent">Extend</span>
+          </span>
         )}
       </Link>
 
-      <div className="flex flex-1 items-center justify-center gap-1 overflow-x-auto">
+      <div className="h-6 w-px shrink-0 bg-border" aria-hidden />
+
+      <div className="flex flex-1 items-center gap-0.5 overflow-x-auto">
         {visible.map((m) => {
           const to = moduleHref(m);
           return (
@@ -55,13 +69,13 @@ export function Navbar() {
               to={to}
               end={to === '/'}
               className={({ isActive }) =>
-                'relative flex items-center gap-2 rounded px-3 py-1.5 text-sm transition-colors ' +
+                'relative flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-[13px] font-medium ' +
                 (isActive
-                  ? 'text-fg after:absolute after:inset-x-2 after:-bottom-[15px] after:h-[2px] after:bg-accent'
-                  : 'text-fg-muted hover:text-fg')
+                  ? 'text-fg after:absolute after:inset-x-3 after:-bottom-[15px] after:h-[2px] after:rounded-full after:bg-accent after:shadow-[0_0_8px_var(--accent)]'
+                  : 'text-fg-muted hover:bg-bg-elevated hover:text-fg')
               }
             >
-              <ModuleIcon name={m.icon} className="h-4 w-4" />
+              <ModuleIcon name={m.icon} className="h-3.5 w-3.5" />
               <span>{m.name}</span>
             </NavLink>
           );
@@ -73,7 +87,7 @@ export function Navbar() {
           <button
             onClick={toggleFav}
             className={
-              'rounded p-2 hover:bg-bg-elevated ' +
+              'rounded-md p-2 hover:bg-bg-elevated ' +
               (favVisible ? 'text-warning' : 'text-fg-muted')
             }
             aria-label="Toggle favourites card"
@@ -84,14 +98,14 @@ export function Navbar() {
         )}
         <Link
           to="/settings"
-          className="rounded p-2 hover:bg-bg-elevated"
+          className="rounded-md p-2 text-fg-muted hover:bg-bg-elevated hover:text-fg"
           aria-label="Settings"
         >
           <SettingsIcon />
         </Link>
         <button
           onClick={handleLogout}
-          className="rounded p-2 hover:bg-bg-elevated"
+          className="rounded-md p-2 text-fg-muted hover:bg-bg-elevated hover:text-fg"
           aria-label="Logout"
         >
           <LogOutIcon />

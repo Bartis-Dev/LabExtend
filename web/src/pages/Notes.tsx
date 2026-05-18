@@ -640,9 +640,6 @@ function BoardView({
         ) : (
           <span className="flex-1 truncate text-sm font-semibold">
             {board.name || <span className="italic text-fg-muted">canvas</span>}
-            <span className="ml-2 text-[10px] uppercase tracking-wider text-fg-muted/70">
-              {cards.length} / 10
-            </span>
           </span>
         )}
         <button

@@ -34,7 +34,6 @@ export default function DDNS() {
   const [providersOpen, setProvidersOpen] = useState(false);
   const [addCardOpen, setAddCardOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<DDNSCard | null>(null);
-  const [onlyDDNS, setOnlyDDNS] = useState(false);
 
   const providersData = providers.data ?? [];
   const cardsData = cards.data ?? [];
@@ -55,22 +54,6 @@ export default function DDNS() {
           )}
         </span>
         <div className="flex-1" />
-        <label
-          className={
-            'flex cursor-pointer items-center gap-2 rounded border px-3 py-2 text-sm transition-colors ' +
-            (onlyDDNS
-              ? 'border-accent bg-accent/10 text-accent'
-              : 'border-border text-fg-muted hover:bg-bg-elevated')
-          }
-        >
-          <input
-            type="checkbox"
-            checked={onlyDDNS}
-            onChange={(e) => setOnlyDDNS(e.target.checked)}
-            className="accent-accent"
-          />
-          DDNS records only
-        </label>
         <button
           onClick={() => setProvidersOpen(true)}
           className="rounded border border-border px-3 py-2 text-sm hover:bg-bg-elevated"
@@ -110,7 +93,6 @@ export default function DDNS() {
               key={c.id}
               card={c}
               autoUpdates={(autos.data ?? []).filter((a) => a.card_id === c.id)}
-              onlyDDNS={onlyDDNS}
               onEdit={() => setEditingCard(c)}
             />
           ))}
@@ -367,87 +349,191 @@ function AddZoneModal({
 // --- Edit card modal ------------------------------------------------------
 
 function EditCardModal({ card, onClose }: { card: DDNSCard; onClose: () => void }) {
-  const update = useUpdateDDNSCard();
-  const del = useDeleteDDNSCard();
+  const recs = useCardRecords(card.id);
+  const autos = useAutoUpdates();
+  const create = useCreateCardRecord(card.id);
+  const update = useUpdateCardRecord(card.id);
+  const delRecord = useDeleteCardRecord(card.id);
+  const toggle = useToggleAutoUpdate(card.id);
+  const updateCard = useUpdateDDNSCard();
+  const delCard = useDeleteDDNSCard();
+
+  const [editingRec, setEditingRec] = useState<DDNSRecord | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(card.name);
-  const [types, setTypes] = useState<RecordType[]>(card.show_types as RecordType[]);
   const [err, setErr] = useState<string | null>(null);
 
-  const toggleType = (t: RecordType) =>
-    setTypes((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
+  const cardAutos = useMemo(
+    () => (autos.data ?? []).filter((a) => a.card_id === card.id),
+    [autos.data, card.id],
+  );
+  const autoMap = useMemo(() => {
+    const m = new Map<string, DDNSAutoUpdate>();
+    for (const a of cardAutos) m.set(a.record_remote_id, a);
+    return m;
+  }, [cardAutos]);
 
-  const save = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const grouped = useMemo(() => {
+    const out: Record<string, DDNSRecord[]> = {};
+    for (const r of recs.data ?? []) (out[r.type] ??= []).push(r);
+    for (const k in out) out[k].sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+  }, [recs.data]);
+  const typeKeys = TYPE_ORDER.filter((t) => grouped[t]?.length);
+
+  const commitRename = async () => {
+    setRenaming(false);
     setErr(null);
+    if (name === card.name) return;
     try {
-      await update.mutateAsync({
+      await updateCard.mutateAsync({
         id: card.id,
-        input: { name, show_types: types, layout: card.layout },
+        input: { name, show_types: card.show_types, layout: card.layout },
       });
-      onClose();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : 'failed');
+      setErr(e instanceof ApiError ? e.message : 'rename failed');
+      setName(card.name);
     }
   };
 
   return (
-    <Modal onClose={onClose} title={`Edit ${card.name}`}>
-      <form onSubmit={save} className="space-y-4">
-        <label className="block">
-          <span className="mb-1 block text-xs text-fg-muted">Display name</span>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            className="w-full rounded border border-border bg-bg-elevated px-3 py-2 outline-none focus:border-accent"
-          />
-        </label>
-        <div>
-          <span className="mb-1 block text-xs text-fg-muted">Show record types</span>
-          <div className="flex flex-wrap gap-2">
-            {RECORD_TYPES.map((t) => (
-              <label key={t} className="flex items-center gap-1.5 rounded border border-border bg-bg-elevated px-2 py-1 text-xs">
-                <input type="checkbox" checked={types.includes(t)} onChange={() => toggleType(t)} />
-                {t}
-              </label>
-            ))}
+    <Modal onClose={onClose} wide title={`Manage ${card.name}`}>
+      <div className="space-y-5">
+        {/* Header strip — rename + add + delete */}
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-bg-elevated/30 px-4 py-3">
+          <ModuleIcon name="globe" className="h-5 w-5 text-fg-muted" />
+          <div className="flex-1 min-w-0">
+            {renaming ? (
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename();
+                  if (e.key === 'Escape') {
+                    setName(card.name);
+                    setRenaming(false);
+                  }
+                }}
+                autoFocus
+                className="w-full rounded border border-border bg-bg-card px-2 py-1 text-sm outline-none focus:border-accent"
+              />
+            ) : (
+              <button
+                onClick={() => setRenaming(true)}
+                className="truncate text-left font-mono text-base font-medium hover:text-accent"
+                title="Click to rename"
+              >
+                {card.name}
+              </button>
+            )}
           </div>
+          <button
+            onClick={() => setCreating(true)}
+            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
+          >
+            + Record
+          </button>
+          <button
+            onClick={async () => {
+              if (!confirm(`Unpin zone "${card.name}"? Records stay on Cloudflare.`)) return;
+              await delCard.mutateAsync(card.id);
+              onClose();
+            }}
+            className="rounded-md border border-danger/40 px-3 py-2 text-sm text-danger hover:bg-danger/10"
+          >
+            Unpin zone
+          </button>
         </div>
+
         {err && (
           <div className="rounded border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
             {err}
           </div>
         )}
-        <div className="flex items-center justify-between pt-2">
-          <button
-            type="button"
-            onClick={async () => {
-              if (!confirm(`Unpin "${card.name}"?`)) return;
-              await del.mutateAsync(card.id);
-              onClose();
-            }}
-            className="rounded border border-danger/40 px-3 py-2 text-sm text-danger hover:bg-danger/10"
-          >
-            Unpin zone
-          </button>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded border border-border px-4 py-2 text-sm hover:bg-bg-elevated"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={update.isPending}
-              className="rounded bg-accent px-4 py-2 text-sm text-white hover:bg-accent-hover disabled:opacity-50"
-            >
-              Save
-            </button>
-          </div>
+
+        <div className="max-h-[60vh] space-y-5 overflow-y-auto pr-1">
+          {recs.isPending && <div className="text-sm text-fg-muted">Loading records…</div>}
+          {recs.error && (
+            <div className="rounded border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+              {(recs.error as Error).message}
+            </div>
+          )}
+          {!recs.isPending && (recs.data ?? []).length === 0 && (
+            <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-fg-muted">
+              No records in this zone. Click <span className="font-medium text-fg">+ Record</span>{' '}
+              above to add one.
+            </div>
+          )}
+          {typeKeys.map((t) => (
+            <RecordTypeSection
+              key={t}
+              type={t}
+              zoneName={card.name}
+              records={grouped[t]}
+              autoMap={autoMap}
+              onToggleAuto={(r, enabled) =>
+                toggle.mutate({
+                  record_remote_id: r.id!,
+                  record_name: r.name,
+                  record_type: r.type as 'A' | 'AAAA',
+                  enabled,
+                })
+              }
+              onEdit={(r) => setEditingRec(r)}
+              onDelete={(r) => {
+                if (!confirm(`Delete ${r.type} record ${stripZone(r.name, card.name)}?`)) return;
+                delRecord.mutate(r.id!);
+              }}
+            />
+          ))}
         </div>
-      </form>
+      </div>
+
+      {creating && (
+        <RecordEditor
+          mode="create"
+          zoneName={card.name}
+          onClose={() => setCreating(false)}
+          onSave={async (rec, autoUpdate) => {
+            const created = await create.mutateAsync(rec);
+            if (autoUpdate && created?.id && (rec.type === 'A' || rec.type === 'AAAA')) {
+              await toggle.mutateAsync({
+                record_remote_id: created.id,
+                record_name: rec.name,
+                record_type: rec.type,
+                enabled: true,
+              });
+            }
+            setCreating(false);
+          }}
+        />
+      )}
+      {editingRec && (
+        <RecordEditor
+          mode="edit"
+          zoneName={card.name}
+          initial={editingRec}
+          initialAutoUpdate={!!editingRec.id && autoMap.has(editingRec.id)}
+          onClose={() => setEditingRec(null)}
+          onSave={async (rec, autoUpdate) => {
+            await update.mutateAsync({ recordId: editingRec.id!, input: rec });
+            if (rec.type === 'A' || rec.type === 'AAAA') {
+              const currentlyOn = !!editingRec.id && autoMap.has(editingRec.id);
+              if (autoUpdate !== currentlyOn) {
+                await toggle.mutateAsync({
+                  record_remote_id: editingRec.id!,
+                  record_name: rec.name,
+                  record_type: rec.type,
+                  enabled: autoUpdate,
+                });
+              }
+            }
+            setEditingRec(null);
+          }}
+        />
+      )}
     </Modal>
   );
 }
@@ -494,21 +580,14 @@ function typeBadgeStyle(t: string): { bg: string; fg: string } {
 function ZoneCard({
   card,
   autoUpdates,
-  onlyDDNS,
   onEdit,
 }: {
   card: DDNSCard;
   autoUpdates: DDNSAutoUpdate[];
-  onlyDDNS: boolean;
   onEdit: () => void;
 }) {
   const recs = useCardRecords(card.id);
-  const create = useCreateCardRecord(card.id);
-  const update = useUpdateCardRecord(card.id);
-  const del = useDeleteCardRecord(card.id);
   const toggle = useToggleAutoUpdate(card.id);
-  const [editingRec, setEditingRec] = useState<DDNSRecord | null>(null);
-  const [creating, setCreating] = useState(false);
 
   const autoMap = useMemo(() => {
     const m = new Map<string, DDNSAutoUpdate>();
@@ -516,19 +595,21 @@ function ZoneCard({
     return m;
   }, [autoUpdates]);
 
-  const filtered = useMemo(() => {
-    let list = (recs.data ?? []).filter((r) => card.show_types.includes(r.type));
-    if (onlyDDNS) list = list.filter((r) => r.id != null && autoMap.has(r.id));
-    return list;
-  }, [recs.data, card.show_types, onlyDDNS, autoMap]);
+  // The card surfaces ONLY auto-update records — the live "is my DDNS
+  // doing its job?" view. Full record CRUD lives in the Edit modal.
+  const ddnsRecords = useMemo(
+    () => (recs.data ?? []).filter((r) => r.id != null && autoMap.has(r.id)),
+    [recs.data, autoMap],
+  );
 
-  // Group records by type for the sectioned display.
+  // Group DDNS records by type — typically A and AAAA only, but kept
+  // generic in case a future provider lets other types auto-update.
   const grouped = useMemo(() => {
     const out: Record<string, DDNSRecord[]> = {};
-    for (const r of filtered) (out[r.type] ??= []).push(r);
+    for (const r of ddnsRecords) (out[r.type] ??= []).push(r);
     for (const k in out) out[k].sort((a, b) => a.name.localeCompare(b.name));
     return out;
-  }, [filtered]);
+  }, [ddnsRecords]);
 
   const typeKeys = TYPE_ORDER.filter((t) => grouped[t]?.length);
   const ddnsCount = autoUpdates.length;
@@ -539,38 +620,17 @@ function ZoneCard({
         <ModuleIcon name="globe" className="h-6 w-6 text-fg-muted" />
         <div className="flex-1 min-w-0">
           <div className="truncate text-lg font-semibold">{card.name}</div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-fg-muted">
-            <span>showing</span>
-            {card.show_types.map((t) => {
-              const s = typeBadgeStyle(t);
-              return (
-                <span
-                  key={t}
-                  className="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase"
-                  style={{ background: s.bg, color: s.fg }}
-                >
-                  {t}
-                </span>
-              );
-            })}
-            {ddnsCount > 0 && (
-              <span className="ml-2 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-accent">
-                {ddnsCount} on auto-update
-              </span>
-            )}
+          <div className="mt-0.5 text-xs text-fg-muted">
+            {ddnsCount > 0
+              ? `${ddnsCount} record${ddnsCount === 1 ? '' : 's'} on auto-update`
+              : 'No records on auto-update yet'}
           </div>
         </div>
         <button
-          onClick={() => setCreating(true)}
-          className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
-        >
-          + Record
-        </button>
-        <button
           onClick={onEdit}
-          className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-bg-elevated"
+          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
         >
-          Edit
+          Manage records
         </button>
       </div>
 
@@ -581,11 +641,10 @@ function ZoneCard({
             {(recs.error as Error).message}
           </div>
         )}
-        {!recs.isPending && filtered.length === 0 && (
+        {!recs.isPending && ddnsRecords.length === 0 && !recs.error && (
           <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-fg-muted">
-            {onlyDDNS
-              ? 'No records on auto-update in this zone.'
-              : 'No records of the selected types. Click "+ Record" to add one.'}
+            No DDNS records yet. Click <span className="font-medium text-fg">Manage records</span> to
+            enable auto-update for a record.
           </div>
         )}
         {typeKeys.map((t) => (
@@ -595,6 +654,7 @@ function ZoneCard({
             zoneName={card.name}
             records={grouped[t]}
             autoMap={autoMap}
+            compact
             onToggleAuto={(r, enabled) =>
               toggle.mutate({
                 record_remote_id: r.id!,
@@ -603,58 +663,11 @@ function ZoneCard({
                 enabled,
               })
             }
-            onEdit={(r) => setEditingRec(r)}
-            onDelete={(r) => {
-              if (!confirm(`Delete ${r.type} record ${stripZone(r.name, card.name)}?`)) return;
-              del.mutate(r.id!);
-            }}
+            onEdit={onEdit}
+            onDelete={onEdit}
           />
         ))}
       </div>
-
-      {creating && (
-        <RecordEditor
-          mode="create"
-          zoneName={card.name}
-          onClose={() => setCreating(false)}
-          onSave={async (rec, autoUpdate) => {
-            const created = await create.mutateAsync(rec);
-            if (autoUpdate && created?.id && (rec.type === 'A' || rec.type === 'AAAA')) {
-              await toggle.mutateAsync({
-                record_remote_id: created.id,
-                record_name: rec.name,
-                record_type: rec.type,
-                enabled: true,
-              });
-            }
-            setCreating(false);
-          }}
-        />
-      )}
-      {editingRec && (
-        <RecordEditor
-          mode="edit"
-          zoneName={card.name}
-          initial={editingRec}
-          initialAutoUpdate={!!editingRec.id && autoMap.has(editingRec.id)}
-          onClose={() => setEditingRec(null)}
-          onSave={async (rec, autoUpdate) => {
-            await update.mutateAsync({ recordId: editingRec.id!, input: rec });
-            if (rec.type === 'A' || rec.type === 'AAAA') {
-              const currentlyOn = !!editingRec.id && autoMap.has(editingRec.id);
-              if (autoUpdate !== currentlyOn) {
-                await toggle.mutateAsync({
-                  record_remote_id: editingRec.id!,
-                  record_name: rec.name,
-                  record_type: rec.type,
-                  enabled: autoUpdate,
-                });
-              }
-            }
-            setEditingRec(null);
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -664,6 +677,7 @@ function RecordTypeSection({
   zoneName,
   records,
   autoMap,
+  compact,
   onToggleAuto,
   onEdit,
   onDelete,
@@ -672,6 +686,7 @@ function RecordTypeSection({
   zoneName: string;
   records: DDNSRecord[];
   autoMap: Map<string, DDNSAutoUpdate>;
+  compact?: boolean;
   onToggleAuto: (r: DDNSRecord, enabled: boolean) => void;
   onEdit: (r: DDNSRecord) => void;
   onDelete: (r: DDNSRecord) => void;
@@ -747,18 +762,22 @@ function RecordTypeSection({
                     {auto ? 'DDNS on' : 'DDNS off'}
                   </button>
                 )}
-                <button
-                  onClick={() => onEdit(r)}
-                  className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-bg-elevated"
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={() => onDelete(r)}
-                  className="rounded-md border border-danger/40 px-3 py-1.5 text-xs text-danger hover:bg-danger/10"
-                >
-                  Delete
-                </button>
+                {!compact && (
+                  <>
+                    <button
+                      onClick={() => onEdit(r)}
+                      className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-bg-elevated"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => onDelete(r)}
+                      className="rounded-md border border-danger/40 px-3 py-1.5 text-xs text-danger hover:bg-danger/10"
+                    >
+                      Delete
+                    </button>
+                  </>
+                )}
               </div>
             </li>
           );
