@@ -7,98 +7,101 @@ import (
 )
 
 // SampleHeartbeat collects current host metrics for a heartbeat message.
-// OS-specific collector state (CPU-delta etc) is held in h.host so that
-// rate-of-change fields work correctly across calls.
 func (h *Handler) SampleHeartbeat() *pb.Heartbeat {
 	return h.host.Sample()
 }
 
 // HandleCommand dispatches a single LeaderMessage.Command to the right
 // handler method and returns the matching CommandResult.
-//
-// Phase 3: returns Unimplemented for everything except the trivial cases.
-// Phases 6/7/9 fill in fs/cron/backup branches.
 func (h *Handler) HandleCommand(ctx context.Context, cmd *pb.Command) *pb.CommandResult {
-	_ = ctx
+	switch op := cmd.Op.(type) {
 
-	switch cmd.Op.(type) {
-
+	// ── filesystem ────────────────────────────────────────────────────────
 	case *pb.Command_ListPath:
-		return unimplemented("ListPath (phase 6)")
+		r, err := h.ListPath(ctx, op.ListPath)
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_ListPath{ListPath: r}})
 
 	case *pb.Command_Stat:
-		return unimplemented("Stat (phase 6)")
+		r, err := h.Stat(ctx, op.Stat)
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_Stat{Stat: r}})
 
 	case *pb.Command_ReadFile:
-		return unimplemented("ReadFile (phase 6)")
+		r, err := h.ReadFile(ctx, op.ReadFile)
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_ReadFile{ReadFile: r}})
 
 	case *pb.Command_WriteFile:
-		return unimplemented("WriteFile (phase 6)")
+		r, err := h.WriteFile(ctx, op.WriteFile)
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_WriteFile{WriteFile: r}})
 
 	case *pb.Command_Mkdir:
-		return unimplemented("Mkdir (phase 6)")
+		r, err := h.Mkdir(ctx, op.Mkdir)
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_Mkdir{Mkdir: r}})
 
 	case *pb.Command_Rename:
-		return unimplemented("Rename (phase 6)")
+		r, err := h.Rename(ctx, op.Rename)
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_Rename{Rename: r}})
 
 	case *pb.Command_Delete:
-		return unimplemented("Delete (phase 6)")
+		r, err := h.Delete(ctx, op.Delete)
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_Delete{Delete: r}})
 
 	case *pb.Command_Chown:
-		return unimplemented("Chown (phase 6)")
+		r, err := h.Chown(ctx, op.Chown)
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_Chown{Chown: r}})
 
 	case *pb.Command_LookupUser:
-		return unimplemented("LookupUser (phase 6)")
+		r, err := h.LookupUser(ctx, op.LookupUser)
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_LookupUser{LookupUser: r}})
 
+	// ── cron ──────────────────────────────────────────────────────────────
 	case *pb.Command_ListCron:
-		return unimplemented("ListCron (phase 7)")
+		r, err := h.ListCron(ctx)
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_ListCron{ListCron: r}})
 
 	case *pb.Command_ApplyCron:
-		return unimplemented("ApplyCron (phase 7)")
+		r, err := h.ApplyCron(ctx, op.ApplyCron)
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_ApplyCron{ApplyCron: r}})
 
+	// ── backup ────────────────────────────────────────────────────────────
 	case *pb.Command_RunBackup:
-		return unimplemented("RunBackup (phase 12)")
+		r, err := h.RunBackup(ctx, op.RunBackup)
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_RunBackup{RunBackup: r}})
 
 	case *pb.Command_CancelBackup:
-		return unimplemented("CancelBackup (phase 12)")
+		r, err := h.CancelBackup(ctx, op.CancelBackup)
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_CancelBackup{CancelBackup: r}})
 
+	// ── monitoring control ────────────────────────────────────────────────
 	case *pb.Command_EnableLogs:
-		req := cmd.GetEnableLogs()
-		h.monitor.SetLogsEnabled(req.GetContainerId(), true)
-		return &pb.CommandResult{
-			Ok:      true,
-			Payload: &pb.CommandResult_EnableLogs{EnableLogs: &pb.EnableLogsResp{}},
-		}
+		h.monitor.SetLogsEnabled(op.EnableLogs.GetContainerId(), true)
+		return &pb.CommandResult{Ok: true, Payload: &pb.CommandResult_EnableLogs{EnableLogs: &pb.EnableLogsResp{}}}
 
 	case *pb.Command_DisableLogs:
-		req := cmd.GetDisableLogs()
-		h.monitor.SetLogsEnabled(req.GetContainerId(), false)
-		return &pb.CommandResult{
-			Ok:      true,
-			Payload: &pb.CommandResult_DisableLogs{DisableLogs: &pb.DisableLogsResp{}},
-		}
+		h.monitor.SetLogsEnabled(op.DisableLogs.GetContainerId(), false)
+		return &pb.CommandResult{Ok: true, Payload: &pb.CommandResult_DisableLogs{DisableLogs: &pb.DisableLogsResp{}}}
 
 	case *pb.Command_Exec:
 		return execNotEnabled()
 
 	default:
-		return &pb.CommandResult{
-			Ok:    false,
-			Error: "unknown command op",
-		}
+		return &pb.CommandResult{Ok: false, Error: "unknown command op"}
 	}
 }
 
-func unimplemented(name string) *pb.CommandResult {
-	return &pb.CommandResult{
-		Ok:    false,
-		Error: name + ": not implemented yet",
+// wrap mutates the prebuilt CommandResult to set Ok/Error from a Go error.
+func wrap(err error, r *pb.CommandResult) *pb.CommandResult {
+	if err != nil {
+		r.Ok = false
+		r.Error = err.Error()
+	} else {
+		r.Ok = true
 	}
+	return r
 }
 
 func execNotEnabled() *pb.CommandResult {
 	return &pb.CommandResult{
 		Ok:    false,
-		Error: "Exec disabled (set BPM_ALLOW_EXEC=true and rebuild handler dispatch in phase 9)",
+		Error: "Exec disabled (set BPM_ALLOW_EXEC=true to enable)",
 	}
 }

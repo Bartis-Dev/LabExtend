@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import clsx from 'clsx';
 import {
-  LayoutDashboard, Server, Boxes, Bell, Webhook, FolderOpen, Clock, HardDrive, Database, LogOut
+  LayoutDashboard, Server, Boxes, Bell, Webhook, FolderOpen, Clock,
+  HardDrive, Database, LogOut, Users, ScrollText, UserCircle,
 } from 'lucide-react';
 import { api, setCSRFToken } from '@/lib/api';
 
@@ -14,10 +15,13 @@ const NAV = [
   { href: '/containers', label: 'Containers',icon: Boxes },
   { href: '/alerts',     label: 'Alerts',    icon: Bell },
   { href: '/webhooks',   label: 'Webhooks',  icon: Webhook },
-  { href: '/cronjobs',   label: 'Cron',      icon: Clock,    soon: true },
-  { href: '/s3',         label: 'S3',        icon: HardDrive, soon: true },
-  { href: '/backups',    label: 'Backups',   icon: Database, soon: true },
-  { href: '/files',      label: 'Files',     icon: FolderOpen, soon: true },
+  { href: '/files',      label: 'Files',     icon: FolderOpen },
+  { href: '/cronjobs',   label: 'Cron',      icon: Clock },
+  { href: '/s3',         label: 'S3',        icon: HardDrive },
+  { href: '/backups',    label: 'Backups',   icon: Database },
+  { href: '/users',      label: 'Users',     icon: Users },
+  { href: '/audit',      label: 'Audit',     icon: ScrollText },
+  { href: '/account',    label: 'Account',   icon: UserCircle },
 ];
 
 export function Sidebar({ userEmail }: { userEmail?: string }) {
@@ -48,7 +52,6 @@ export function Sidebar({ userEmail }: { userEmail?: string }) {
                 <Icon className="h-4 w-4" />
                 {item.label}
               </span>
-              {item.soon && <span className="text-[10px] text-zinc-400">soon</span>}
             </Link>
           );
         })}

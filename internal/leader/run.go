@@ -1,6 +1,6 @@
 // Package leader hosts the WebUI HTTP server, the gRPC server that agents
-// connect to, the SSE hub, and the backup scheduler. Everything orchestrating
-// across the cluster lives here.
+// connect to, the SSE hub, the alert engine, and the backup scheduler.
+// Everything orchestrating across the cluster lives here.
 package leader
 
 import (
@@ -12,13 +12,16 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/Bartis-Dev/LabExtend/internal/auth"
+	"github.com/Bartis-Dev/LabExtend/internal/backup"
 	"github.com/Bartis-Dev/LabExtend/internal/config"
 	"github.com/Bartis-Dev/LabExtend/internal/db"
 )
 
 // Run boots the leader: opens the DB, starts the gRPC server (for agents),
 // starts the HTTP server (for the WebUI + SSE), starts background loops for
-// metrics persistence + alert evaluation. Blocks until ctx is done.
+// metrics persistence + alert evaluation + backup scheduling. Blocks until
+// ctx is done.
 func Run(ctx context.Context, cfg *config.Config) error {
 	slog.Info("leader: starting", "data_dir", cfg.DataDir)
 
@@ -51,11 +54,30 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	bucketRetention := intEnv("BPM_METRIC_RETENTION_HOURS", 24)
 	logs := newLogStore(database, maxLogLines)
 	alerts := newAlertEngine(database, metrics, containers, registry, hub)
+	audit := newAuditLogger(database, cfg.DisableAudit)
+
+	totpMgr, err := auth.NewTOTPManager(database, cfg.TOTPIssuer, cfg.TOTPKey)
+	if err != nil {
+		return fmt.Errorf("totp manager: %w", err)
+	}
+
+	backupRunner := backup.NewRunner(
+		database,
+		newRegistryAdapter(registry),
+		newHubPublisher(hub),
+		cfg.SecretsKey,
+	)
+	backupScheduler := backup.NewScheduler(database, backupRunner)
 
 	// Background loops.
 	go metrics.RunPruneLoop(ctx, bucketRetention)
 	go logs.RunRetentionLoop(ctx, logRetention)
 	go alerts.Run(ctx)
+	go func() {
+		if err := backupScheduler.Run(ctx); err != nil {
+			slog.Warn("backup scheduler exited", "err", err)
+		}
+	}()
 
 	errs := make(chan error, 2)
 
@@ -74,6 +96,10 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			Containers: containers,
 			Logs:       logs,
 			Alerts:     alerts,
+			Audit:      audit,
+			TOTP:       totpMgr,
+			Scheduler:  backupScheduler,
+			SecretsKey: cfg.SecretsKey,
 		}
 		if err := startHTTPServer(ctx, cfg, deps); err != nil {
 			errs <- fmt.Errorf("http: %w", err)

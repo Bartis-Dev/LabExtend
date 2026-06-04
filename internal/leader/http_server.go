@@ -13,12 +13,12 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/Bartis-Dev/LabExtend/internal/auth"
+	"github.com/Bartis-Dev/LabExtend/internal/backup"
 	"github.com/Bartis-Dev/LabExtend/internal/config"
 	"github.com/Bartis-Dev/LabExtend/internal/frontend"
 )
 
-// leaderDeps bundles every shared piece an HTTP handler may need so we don't
-// pass 8 args through every helper.
+// leaderDeps bundles every shared piece an HTTP handler may need.
 type leaderDeps struct {
 	DB         *sql.DB
 	Registry   *AgentRegistry
@@ -27,6 +27,10 @@ type leaderDeps struct {
 	Containers *containerStore
 	Logs       *logStore
 	Alerts     *AlertEngine
+	Audit      *AuditLogger
+	TOTP       *auth.TOTPManager
+	Scheduler  *backup.Scheduler
+	SecretsKey string
 }
 
 func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) error {
@@ -37,7 +41,6 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 		cfg.SessionSecureCookie,
 	)
 
-	// Background: purge expired sessions every 10 min.
 	go func() {
 		t := time.NewTicker(10 * time.Minute)
 		defer t.Stop()
@@ -53,21 +56,24 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 		}
 	}()
 
-	authDeps := &AuthDeps{DB: deps.DB, Sessions: sessions}
+	authDeps := &AuthDeps{DB: deps.DB, Sessions: sessions, TOTP: deps.TOTP}
 	monDeps := &MonitoringDeps{
-		DB:         deps.DB,
-		Registry:   deps.Registry,
-		Metrics:    deps.Metrics,
-		Containers: deps.Containers,
-		Logs:       deps.Logs,
-		Alerts:     deps.Alerts,
+		DB: deps.DB, Registry: deps.Registry, Metrics: deps.Metrics,
+		Containers: deps.Containers, Logs: deps.Logs, Alerts: deps.Alerts,
 	}
+	filesDeps := &FilesDeps{DB: deps.DB, Registry: deps.Registry, Audit: deps.Audit}
+	cronDeps := &CronDeps{DB: deps.DB, Registry: deps.Registry, Audit: deps.Audit}
+	s3Deps := &S3Deps{DB: deps.DB, SecretsKey: deps.SecretsKey, Audit: deps.Audit}
+	backupDeps := &BackupDeps{DB: deps.DB, Scheduler: deps.Scheduler, Audit: deps.Audit}
+	usersDeps := &UsersDeps{DB: deps.DB, Audit: deps.Audit}
+	accountDeps := &AccountDeps{AuthDeps: authDeps, TOTP: deps.TOTP, Audit: deps.Audit}
+	auditDeps := &AuditDeps{DB: deps.DB}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
+	r.Use(middleware.Timeout(120 * time.Second))
 	r.Use(sessionMiddleware(sessions))
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -82,7 +88,7 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 	})
 
 	r.Route("/api", func(api chi.Router) {
-		// Public — no auth, no CSRF.
+		// ── public ────────────────────────────────────────────────────────
 		api.Get("/setup/status", authDeps.SetupStatus)
 		api.Post("/setup/initialize", authDeps.SetupInitialize)
 		api.Post("/auth/login", authDeps.Login)
@@ -90,7 +96,14 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 			writeJSON(w, http.StatusOK, map[string]any{"pong": true, "ts": time.Now().Unix()})
 		})
 
-		// Authenticated routes.
+		// 2FA verify: needs cookie + CSRF but NOT requireAuth (because the
+		// session IS 2FA-pending).
+		api.Group(func(g chi.Router) {
+			g.Use(csrfMiddleware)
+			g.Post("/auth/2fa/verify", authDeps.Verify2FA)
+		})
+
+		// ── authenticated (session + 2FA promoted) ────────────────────────
 		api.Group(func(authed chi.Router) {
 			authed.Use(requireAuth)
 			authed.Use(csrfMiddleware)
@@ -100,7 +113,7 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 
 			authed.Get("/events", deps.Hub.ServeHTTP)
 
-			// Monitoring.
+			// ── monitoring ────────────────────────────────────────────
 			authed.Get("/nodes", monDeps.ListNodes)
 			authed.Get("/nodes/{id}", monDeps.GetNode)
 			authed.Get("/nodes/{id}/history", monDeps.NodeHistory)
@@ -121,10 +134,66 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 			authed.Put("/webhooks/{id}", monDeps.UpdateWebhook)
 			authed.Delete("/webhooks/{id}", monDeps.DeleteWebhook)
 			authed.Post("/webhooks/{id}/test", monDeps.TestWebhook)
+
+			// ── files (per-node) ──────────────────────────────────────
+			authed.Get("/nodes/{id}/paths", filesDeps.ListPaths)
+			authed.Post("/nodes/{id}/paths", filesDeps.CreatePath)
+			authed.Delete("/nodes/{id}/paths/{pid}", filesDeps.DeletePath)
+			authed.Get("/nodes/{id}/files", filesDeps.ListFiles)
+			authed.Get("/nodes/{id}/files/stat", filesDeps.StatFile)
+			authed.Get("/nodes/{id}/files/read", filesDeps.ReadFile)
+			authed.Post("/nodes/{id}/files/write", filesDeps.WriteFile)
+			authed.Post("/nodes/{id}/files/mkdir", filesDeps.Mkdir)
+			authed.Post("/nodes/{id}/files/rename", filesDeps.Rename)
+			authed.Delete("/nodes/{id}/files", filesDeps.Delete)
+			authed.Post("/nodes/{id}/files/chown", filesDeps.Chown)
+			authed.Get("/nodes/{id}/files/lookup-user", filesDeps.LookupUser)
+
+			// ── cron ──────────────────────────────────────────────────
+			authed.Get("/cronjobs", cronDeps.List)
+			authed.Get("/nodes/{id}/cronjobs", cronDeps.List)
+			authed.Post("/cronjobs", cronDeps.Create)
+			authed.Put("/cronjobs/{id}", cronDeps.Update)
+			authed.Delete("/cronjobs/{id}", cronDeps.Delete)
+			authed.Post("/nodes/{id}/cronjobs/apply", cronDeps.Apply)
+
+			// ── S3 ────────────────────────────────────────────────────
+			authed.Get("/s3/endpoints", s3Deps.List)
+			authed.Post("/s3/endpoints", s3Deps.Create)
+			authed.Put("/s3/endpoints/{id}", s3Deps.Update)
+			authed.Delete("/s3/endpoints/{id}", s3Deps.Delete)
+			authed.Post("/s3/endpoints/{id}/test", s3Deps.Test)
+			authed.Get("/s3/endpoints/{id}/buckets", s3Deps.Buckets)
+			authed.Get("/s3/endpoints/{id}/buckets/{bucket}/objects", s3Deps.Objects)
+			authed.Post("/s3/endpoints/{id}/buckets/{bucket}/delete", s3Deps.DeleteObjects)
+
+			// ── backup ────────────────────────────────────────────────
+			authed.Get("/backups/plans", backupDeps.ListPlans)
+			authed.Post("/backups/plans", backupDeps.CreatePlan)
+			authed.Put("/backups/plans/{id}", backupDeps.UpdatePlan)
+			authed.Delete("/backups/plans/{id}", backupDeps.DeletePlan)
+			authed.Post("/backups/plans/{id}/trigger", backupDeps.TriggerPlan)
+			authed.Get("/backups/runs", backupDeps.ListRuns)
+
+			// ── account self-service (any logged-in user) ─────────────
+			authed.Get("/account/totp", accountDeps.TOTPStatus)
+			authed.Post("/account/totp/begin", accountDeps.TOTPBegin)
+			authed.Post("/account/totp/confirm", accountDeps.TOTPConfirm)
+			authed.Post("/account/totp/disable", accountDeps.TOTPDisable)
+			authed.Post("/account/password", accountDeps.ChangePassword)
+
+			// ── admin only: user mgmt + audit log ─────────────────────
+			authed.Group(func(admin chi.Router) {
+				admin.Use(requireAdmin(deps.DB))
+				admin.Get("/users", usersDeps.List)
+				admin.Post("/users", usersDeps.Create)
+				admin.Put("/users/{id}", usersDeps.Update)
+				admin.Delete("/users/{id}", usersDeps.Delete)
+				admin.Get("/audit", auditDeps.List)
+			})
 		})
 	})
 
-	// SPA fallback — everything not under /api is served by the embedded export.
 	r.Handle("/*", frontend.Handler())
 
 	srv := &http.Server{

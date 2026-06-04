@@ -18,18 +18,68 @@ import (
 type authCtxKey struct{}
 
 // userInfo is the JSON shape returned by /api/me and /api/auth/login.
+// Requires2FA=true is the only signal that means "your session is half-
+// authenticated; POST a TOTP code to /api/auth/2fa/verify before doing
+// anything else". When false, the session is fully authenticated.
 type userInfo struct {
 	ID          int64  `json:"id"`
 	Email       string `json:"email"`
 	DisplayName string `json:"display_name"`
 	IsAdmin     bool   `json:"is_admin"`
 	CSRFToken   string `json:"csrf_token"`
+	Requires2FA bool   `json:"requires_2fa,omitempty"`
 }
 
 // AuthDeps groups the pieces every auth/setup handler needs.
 type AuthDeps struct {
 	DB       *sql.DB
 	Sessions *auth.SessionStore
+	TOTP     *auth.TOTPManager
+}
+
+// Verify2FA accepts a TOTP / recovery code on a session that's currently
+// is_2fa_pending=1. On success, flips the flag so subsequent requests pass
+// requireAuth.
+func (d *AuthDeps) Verify2FA(w http.ResponseWriter, r *http.Request) {
+	sess, _ := r.Context().Value(authCtxKey{}).(*auth.Session)
+	if sess == nil {
+		writeErr(w, http.StatusUnauthorized, errors.New("no session"))
+		return
+	}
+	if !sess.Is2FAPending {
+		writeErr(w, http.StatusBadRequest, errors.New("session is not 2FA-pending"))
+		return
+	}
+	var body struct {
+		Code      string `json:"code"`
+		IsRecover bool   `json:"is_recovery"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if d.TOTP == nil {
+		writeErr(w, http.StatusInternalServerError, errors.New("totp manager not configured"))
+		return
+	}
+	var verr error
+	if body.IsRecover {
+		verr = d.TOTP.VerifyRecoveryCode(r.Context(), sess.UserID, body.Code)
+	} else {
+		verr = d.TOTP.Verify(r.Context(), sess.UserID, body.Code)
+	}
+	if verr != nil {
+		writeErr(w, http.StatusUnauthorized, errors.New("invalid 2fa code"))
+		return
+	}
+	if err := d.Sessions.PromoteFrom2FA(r.Context(), sess); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, userInfo{
+		ID:          sess.UserID,
+		CSRFToken:   sess.CSRFToken,
+	})
 }
 
 // ─── setup wizard ───────────────────────────────────────────────────────────
@@ -185,6 +235,7 @@ func (d *AuthDeps) Login(w http.ResponseWriter, r *http.Request) {
 		DisplayName: display,
 		IsAdmin:     isAdmin == 1,
 		CSRFToken:   sess.CSRFToken,
+		Requires2FA: sess.Is2FAPending,
 	})
 }
 

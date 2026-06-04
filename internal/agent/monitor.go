@@ -11,10 +11,14 @@ import (
 	pb "github.com/Bartis-Dev/LabExtend/internal/grpc/pb"
 )
 
+// eventEmitter is the callback the agent uses to push unsolicited events
+// (container reports, log batches, backup progress) onto the active gRPC
+// stream. Nil when no stream is currently connected.
+type eventEmitter func(*pb.AgentMessage) error
+
 // monitor orchestrates container + log shipping for the agent. Wired by
 // grpc_client.go: Start(ctx, send) is called once the agent's bidi stream is
-// established, Stop() is called when the stream closes (the goroutines then
-// exit and a new monitor is started after reconnect).
+// established, Stop() is called when the stream closes.
 type monitor struct {
 	cfg    *config.Config
 	docker *dockerClient
@@ -25,6 +29,7 @@ type monitor struct {
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+	emit   eventEmitter // set in Start, cleared in Stop
 }
 
 func newMonitor(cfg *config.Config) *monitor {
@@ -39,13 +44,16 @@ func newMonitor(cfg *config.Config) *monitor {
 }
 
 // Start spawns the goroutines. Idempotent — calling twice without Stop is a
-// no-op the second time.
+// no-op the second time. The send func is stored so other agent components
+// (e.g. the backup runner) can publish events too.
 func (m *monitor) Start(parent context.Context, send func(*pb.AgentMessage) error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.cancel != nil {
 		return
 	}
+
+	m.emit = send
 
 	ctx, cancel := context.WithCancel(parent)
 	m.cancel = cancel
@@ -75,6 +83,7 @@ func (m *monitor) Stop() {
 	m.mu.Lock()
 	cancel := m.cancel
 	m.cancel = nil
+	m.emit = nil
 	m.mu.Unlock()
 
 	if cancel == nil {
@@ -82,6 +91,14 @@ func (m *monitor) Stop() {
 	}
 	cancel()
 	m.wg.Wait()
+}
+
+// eventEmitter returns the current emit function (or nil if not connected).
+// Safe for concurrent calls.
+func (m *monitor) eventEmitter() eventEmitter {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.emit
 }
 
 // SetLogsEnabled forwards to the log collector.

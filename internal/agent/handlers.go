@@ -3,174 +3,323 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Bartis-Dev/LabExtend/internal/config"
+	pb "github.com/Bartis-Dev/LabExtend/internal/grpc/pb"
 )
 
 // Handler implements the host-side of every gRPC command. The leader sends a
 // Command envelope, the dispatcher in grpc_client.go calls the matching
 // method here, and the result is shipped back as CommandResult.
 //
-// Every method must enforce the managed-root constraint via resolvePath().
+// Every fs method enforces the managed-root constraint via resolvePath().
 type Handler struct {
 	cfg     *config.Config
 	host    *hostCollector
 	monitor *monitor
+	cronctl *cronManager
+
+	// User-lookup cache (60s TTL). LookupUser is hit during every directory
+	// listing — caching is the difference between snappy and unusable on
+	// hosts with NSS-backed /etc/passwd.
+	userMu    sync.Mutex
+	userCache map[uint32]userCacheEntry
 }
 
-// NewHandler returns a Handler bound to the running config.
+type userCacheEntry struct {
+	name      string
+	expiresAt time.Time
+}
+
 func NewHandler(cfg *config.Config) *Handler {
 	return &Handler{
-		cfg:     cfg,
-		host:    newHostCollector(),
-		monitor: newMonitor(cfg),
+		cfg:       cfg,
+		host:      newHostCollector(),
+		monitor:   newMonitor(cfg),
+		cronctl:   newCronManager(hostPrefix(cfg) + "/etc/cron.d/bpm"),
+		userCache: make(map[uint32]userCacheEntry),
 	}
 }
 
-// FileEntry is the agent-internal mirror of pb.FileEntry. Kept here to avoid
-// proto dependency in this skeleton; replaced by pb.FileEntry in phase 6.
-type FileEntry struct {
-	Name          string
-	IsDir         bool
-	Size          uint64
-	MtimeMs       int64
-	Mode          uint32
-	UID           uint32
-	GID           uint32
-	OwnerName     string
-	GroupName     string
-	SymlinkTarget string
+// hostPrefix returns the path inside the container that maps to the host's
+// "/". Inside docker-stack we mount `/:/host:rslave`, so a request for
+// "/srv/data" becomes "/host/srv/data" on disk. Override via BPM_HOST_PREFIX
+// (set to empty string when running natively on the host).
+func hostPrefix(cfg *config.Config) string {
+	if v := os.Getenv("BPM_HOST_PREFIX"); v != "" {
+		return v
+	}
+	if _, err := os.Stat("/host"); err == nil {
+		return "/host"
+	}
+	return ""
 }
 
 // ─── filesystem ─────────────────────────────────────────────────────────────
 
-// ListPath returns the directory entries under root/sub.
-// TODO(phase 6): implement with os.ReadDir + syscall.Stat to get UID/GID,
-// resolve owner via cached /etc/passwd lookups.
-func (h *Handler) ListPath(_ context.Context, root, sub string, showHidden bool) ([]FileEntry, error) {
-	_, err := resolvePath(root, sub)
+func (h *Handler) ListPath(ctx context.Context, req *pb.ListPathReq) (*pb.ListPathResp, error) {
+	final, err := h.resolvePath(req.Root, req.Sub)
 	if err != nil {
 		return nil, err
 	}
-	_ = showHidden
-	return nil, errors.New("ListPath: TODO(phase 6)")
+	entries, err := os.ReadDir(final)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*pb.FileEntry, 0, len(entries))
+	for _, de := range entries {
+		if !req.ShowHidden && strings.HasPrefix(de.Name(), ".") {
+			continue
+		}
+		info, err := de.Info()
+		if err != nil {
+			continue
+		}
+		out = append(out, h.toFileEntry(filepath.Join(final, de.Name()), de.Name(), info))
+	}
+	return &pb.ListPathResp{Entries: out}, nil
 }
 
-// Stat returns metadata for a single entry.
-// TODO(phase 6).
-func (h *Handler) Stat(_ context.Context, path string) (*FileEntry, error) {
-	_ = path
-	return nil, errors.New("Stat: TODO(phase 6)")
+func (h *Handler) Stat(_ context.Context, req *pb.StatReq) (*pb.StatResp, error) {
+	final, err := h.resolveAbs(req.Path)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Lstat(final)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.StatResp{Entry: h.toFileEntry(final, info.Name(), info)}, nil
 }
 
-// ReadFile reads up to maxBytes from path, returning truncated=true if the
-// file exceeded the cap.
-// TODO(phase 6).
-func (h *Handler) ReadFile(_ context.Context, path string, maxBytes uint32) (data []byte, truncated bool, err error) {
-	_, _ = path, maxBytes
-	return nil, false, errors.New("ReadFile: TODO(phase 6)")
+func (h *Handler) ReadFile(_ context.Context, req *pb.ReadFileReq) (*pb.ReadFileResp, error) {
+	final, err := h.resolveAbs(req.Path)
+	if err != nil {
+		return nil, err
+	}
+	maxBytes := req.MaxBytes
+	if maxBytes == 0 {
+		maxBytes = uint32(h.cfg.FSMaxInlineBytes)
+	}
+	f, err := os.Open(final)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	buf := make([]byte, maxBytes+1)
+	n, _ := f.Read(buf)
+	truncated := uint32(n) > maxBytes
+	if truncated {
+		n = int(maxBytes)
+	}
+	return &pb.ReadFileResp{Data: buf[:n], Truncated: truncated}, nil
 }
 
-// WriteFile writes data to path with the given mode; applies default owner
-// from the managed path config when applyDefaultOwner is true.
-// TODO(phase 6).
-func (h *Handler) WriteFile(_ context.Context, path string, data []byte, mode uint32, applyDefaultOwner bool) (uint64, error) {
-	_, _, _, _ = path, data, mode, applyDefaultOwner
-	return 0, errors.New("WriteFile: TODO(phase 6)")
+func (h *Handler) WriteFile(_ context.Context, req *pb.WriteFileReq) (*pb.WriteFileResp, error) {
+	final, err := h.resolveAbs(req.Path)
+	if err != nil {
+		return nil, err
+	}
+	mode := os.FileMode(req.Mode)
+	if mode == 0 {
+		mode = 0o644
+	}
+	tmp := final + ".bpm-tmp"
+	if err := os.WriteFile(tmp, req.Data, mode); err != nil {
+		return nil, err
+	}
+	if err := os.Rename(tmp, final); err != nil {
+		_ = os.Remove(tmp)
+		return nil, err
+	}
+	return &pb.WriteFileResp{BytesWritten: uint64(len(req.Data))}, nil
 }
 
-// Mkdir creates a directory (optionally with parents).
-// TODO(phase 6).
-func (h *Handler) Mkdir(_ context.Context, path string, mode uint32, applyDefaultOwner, parents bool) error {
-	_, _, _, _ = path, mode, applyDefaultOwner, parents
-	return errors.New("Mkdir: TODO(phase 6)")
+func (h *Handler) Mkdir(_ context.Context, req *pb.MkdirReq) (*pb.MkdirResp, error) {
+	final, err := h.resolveAbs(req.Path)
+	if err != nil {
+		return nil, err
+	}
+	mode := os.FileMode(req.Mode)
+	if mode == 0 {
+		mode = 0o755
+	}
+	if req.Parents {
+		if err := os.MkdirAll(final, mode); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := os.Mkdir(final, mode); err != nil {
+			return nil, err
+		}
+	}
+	return &pb.MkdirResp{}, nil
 }
 
-// Rename moves from→to within the same managed root.
-// TODO(phase 6): caller must verify both stay under the same root.
-func (h *Handler) Rename(_ context.Context, from, to string) error {
-	_, _ = from, to
-	return errors.New("Rename: TODO(phase 6)")
+func (h *Handler) Rename(_ context.Context, req *pb.RenameReq) (*pb.RenameResp, error) {
+	from, err := h.resolveAbs(req.From)
+	if err != nil {
+		return nil, err
+	}
+	to, err := h.resolveAbs(req.To)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Rename(from, to); err != nil {
+		return nil, err
+	}
+	return &pb.RenameResp{}, nil
 }
 
-// Delete removes a file or (recursively) a directory.
-// TODO(phase 6).
-func (h *Handler) Delete(_ context.Context, path string, recursive bool) error {
-	_, _ = path, recursive
-	return errors.New("Delete: TODO(phase 6)")
+func (h *Handler) Delete(_ context.Context, req *pb.DeleteReq) (*pb.DeleteResp, error) {
+	final, err := h.resolveAbs(req.Path)
+	if err != nil {
+		return nil, err
+	}
+	if req.Recursive {
+		if err := os.RemoveAll(final); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := os.Remove(final); err != nil {
+			return nil, err
+		}
+	}
+	return &pb.DeleteResp{}, nil
 }
 
-// Chown sets ownership; uses filepath.WalkDir + os.Lchown for recursive.
-// Returns the number of entries actually changed.
-// TODO(phase 6).
-func (h *Handler) Chown(_ context.Context, path string, uid, gid uint32, recursive bool) (uint64, error) {
-	_, _, _, _ = path, uid, gid, recursive
-	return 0, errors.New("Chown: TODO(phase 6)")
+func (h *Handler) Chown(_ context.Context, req *pb.ChownReq) (*pb.ChownResp, error) {
+	final, err := h.resolveAbs(req.Path)
+	if err != nil {
+		return nil, err
+	}
+	var count uint64
+	if !req.Recursive {
+		if err := os.Lchown(final, int(req.Uid), int(req.Gid)); err != nil {
+			return nil, err
+		}
+		count = 1
+	} else {
+		err := filepath.WalkDir(final, func(p string, _ os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if e := os.Lchown(p, int(req.Uid), int(req.Gid)); e == nil {
+				count++
+			}
+			return nil
+		})
+		if err != nil {
+			return &pb.ChownResp{ChangedCount: count}, err
+		}
+	}
+	return &pb.ChownResp{ChangedCount: count}, nil
 }
 
-// LookupUser resolves a username to {uid, gid, home}.
-// TODO(phase 6): use os/user.Lookup; cache results for 60s.
-func (h *Handler) LookupUser(_ context.Context, name string) (uid, gid uint32, home string, err error) {
-	_ = name
-	return 0, 0, "", errors.New("LookupUser: TODO(phase 6)")
+func (h *Handler) LookupUser(_ context.Context, req *pb.LookupUserReq) (*pb.LookupUserResp, error) {
+	u, err := user.Lookup(req.Name)
+	if err != nil {
+		return nil, err
+	}
+	uid, _ := strconv.ParseUint(u.Uid, 10, 32)
+	gid, _ := strconv.ParseUint(u.Gid, 10, 32)
+	return &pb.LookupUserResp{
+		Name: u.Username,
+		Uid:  uint32(uid),
+		Gid:  uint32(gid),
+		Home: u.HomeDir,
+	}, nil
 }
 
 // ─── cron ───────────────────────────────────────────────────────────────────
 
-// ApplyCron renders all enabled entries to /etc/cron.d/bpm atomically.
-// TODO(phase 7): delegated to internal/cronctl.
-func (h *Handler) ApplyCron(_ context.Context, entries any) (uint32, error) {
-	_ = entries
-	return 0, errors.New("ApplyCron: TODO(phase 7)")
+func (h *Handler) ApplyCron(_ context.Context, req *pb.ApplyCronReq) (*pb.ApplyCronResp, error) {
+	n, err := h.cronctl.Apply(req.Entries)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ApplyCronResp{Installed: n}, nil
 }
 
-// ListCron parses /etc/cron.d/bpm back into entries. May not exactly match
-// DB if external edits happened.
-// TODO(phase 7).
-func (h *Handler) ListCron(_ context.Context) (any, error) {
-	return nil, errors.New("ListCron: TODO(phase 7)")
+func (h *Handler) ListCron(_ context.Context) (*pb.ListCronResp, error) {
+	entries, err := h.cronctl.List()
+	if err != nil {
+		return nil, err
+	}
+	return &pb.ListCronResp{Entries: entries}, nil
 }
 
-// ─── backup ─────────────────────────────────────────────────────────────────
+// ─── path resolution ────────────────────────────────────────────────────────
 
-// RunBackup is the meat of phase 9: walk sources → tar+gzip → io.Pipe →
-// S3 multipart upload, with progress events sent back on the channel.
-// TODO(phase 9): full implementation in internal/backup/runner.go,
-// delegated from this handler.
-func (h *Handler) RunBackup(_ context.Context, req any) (any, error) {
-	_ = req
-	return nil, errors.New("RunBackup: TODO(phase 9)")
-}
-
-// CancelBackup propagates ctx cancellation to the in-flight RunBackup.
-// TODO(phase 9).
-func (h *Handler) CancelBackup(_ context.Context, runID string) error {
-	_ = runID
-	return errors.New("CancelBackup: TODO(phase 9)")
-}
-
-// ─── path resolution (used by every fs op) ──────────────────────────────────
-
-// resolvePath joins root and sub, cleans, and verifies the result stays under
-// root. Returns the absolute path to use on the host, or an error if the
-// caller is trying to escape.
-//
-// TODO(phase 6): also EvalSymlinks and verify the resolved path stays
-// inside root (defense against symlink-escape).
-func resolvePath(root, sub string) (string, error) {
+// resolvePath joins root and sub, cleans, ensures the result stays under root,
+// then prefixes with the host bind-mount path if configured. Caller passes
+// HOST paths (e.g. "/srv/data"); the returned absolute path is what we open
+// on disk (e.g. "/host/srv/data").
+func (h *Handler) resolvePath(root, sub string) (string, error) {
 	if root == "" {
 		return "", errors.New("empty root")
 	}
 	root = filepath.Clean(root)
 	final := filepath.Clean(filepath.Join(root, sub))
-
-	// On the host this runs from inside a container that has '/' bind-mounted
-	// at /host:rslave; the caller is responsible for prefixing /host if
-	// needed. For now, just enforce the prefix check.
-	if !strings.HasPrefix(final, root+string(filepath.Separator)) && final != root {
-		return "", errors.New("path escapes managed root")
+	if final != root && !strings.HasPrefix(final, root+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes managed root: %s vs %s", final, root)
 	}
-	return final, nil
+	return hostPrefix(h.cfg) + final, nil
+}
+
+// resolveAbs is the same as resolvePath but for a single absolute path. The
+// leader must have already verified the path is under a managed root — this
+// function only adds the host-prefix.
+func (h *Handler) resolveAbs(p string) (string, error) {
+	if p == "" || !filepath.IsAbs(p) {
+		return "", errors.New("absolute path required")
+	}
+	return hostPrefix(h.cfg) + filepath.Clean(p), nil
+}
+
+// toFileEntry builds a pb.FileEntry from os.FileInfo. The uid/gid extraction
+// is OS-specific (statUIDGID lives in fsstat_linux.go / fsstat_other.go).
+func (h *Handler) toFileEntry(absPath, name string, info os.FileInfo) *pb.FileEntry {
+	e := &pb.FileEntry{
+		Name:    name,
+		IsDir:   info.IsDir(),
+		Size:    uint64(info.Size()),
+		MtimeMs: info.ModTime().UnixMilli(),
+		Mode:    uint32(info.Mode().Perm()),
+	}
+	if uid, gid, ok := statUIDGID(info); ok {
+		e.Uid = uid
+		e.Gid = gid
+		e.OwnerName = h.cachedUserName(uid)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		if target, err := os.Readlink(absPath); err == nil {
+			e.SymlinkTarget = target
+		}
+	}
+	return e
+}
+
+// cachedUserName caches uid → username with 60s TTL.
+func (h *Handler) cachedUserName(uid uint32) string {
+	h.userMu.Lock()
+	defer h.userMu.Unlock()
+	if e, ok := h.userCache[uid]; ok && time.Now().Before(e.expiresAt) {
+		return e.name
+	}
+	name := strconv.FormatUint(uint64(uid), 10)
+	if u, err := user.LookupId(name); err == nil {
+		name = u.Username
+	}
+	h.userCache[uid] = userCacheEntry{name: name, expiresAt: time.Now().Add(60 * time.Second)}
+	return name
 }

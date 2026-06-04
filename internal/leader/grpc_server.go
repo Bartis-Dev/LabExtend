@@ -336,10 +336,19 @@ func startGRPCServer(ctx context.Context, cfg *config.Config, reg *AgentRegistry
 	slog.Info("grpc: listening", "addr", cfg.GRPCAddr)
 
 	authInt := newAuthInterceptor(cfg.AgentToken)
-	srv := grpc.NewServer(
+	opts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(authInt.unary),
 		grpc.StreamInterceptor(authInt.stream),
-	)
+	}
+	if cfg.GRPCTLSCert != "" && cfg.GRPCTLSKey != "" {
+		tlsCreds, err := loadServerTLS(cfg.GRPCTLSCert, cfg.GRPCTLSKey, cfg.GRPCTLSClientCA)
+		if err != nil {
+			return fmt.Errorf("load tls: %w", err)
+		}
+		opts = append(opts, grpc.Creds(tlsCreds))
+		slog.Info("grpc: mTLS enabled", "client_ca", cfg.GRPCTLSClientCA != "")
+	}
+	srv := grpc.NewServer(opts...)
 	pb.RegisterManagerAgentServer(srv, &ManagerAgentServer{
 		registry:   reg,
 		db:         database,

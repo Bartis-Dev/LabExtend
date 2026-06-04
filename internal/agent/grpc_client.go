@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/Bartis-Dev/LabExtend/internal/config"
@@ -80,9 +79,13 @@ func (c *Client) Run(ctx context.Context) error {
 func (c *Client) connectAndServe(parentCtx context.Context) error {
 	slog.Info("agent: connecting", "addr", c.cfg.LeaderAddr, "agent_id", c.cfg.AgentHostID)
 
+	creds, err := buildClientTLS(c.cfg)
+	if err != nil {
+		return fmt.Errorf("tls setup: %w", err)
+	}
 	conn, err := grpc.NewClient(
 		c.cfg.LeaderAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
 	)
 	if err != nil {

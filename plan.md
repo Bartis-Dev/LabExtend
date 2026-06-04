@@ -108,47 +108,29 @@ Effort: 2d.
 
 ---
 
-## Phase 9 — Filebrowser (per-node FS via agent gRPC)
+## Phase 9 — Filebrowser (per-node FS via agent gRPC) — DONE
 
-Browse, view, edit, rename, delete, chown across managed paths. (Original phase 6.)
+Agent implements every fs op (ListPath, Stat, ReadFile, WriteFile, Mkdir, Rename, Delete, Chown, LookupUser). Leader proxies via `/api/nodes/:id/files/*` and enforces managed-root bounds via `node_paths`. Frontend page at `/files` with sidebar-driven node + root picker, right-click chown, recursive delete.
 
-Effort: 2.5d.
+## Phase 10 — Cron management — DONE
 
----
+`internal/agent/cron.go` writes `/etc/cron.d/bpm` atomically. Leader CRUD at `/api/cronjobs` re-applies after every mutation. Frontend `/cronjobs` with per-node filter + apply button.
 
-## Phase 10 — Cron management
+## Phase 11 — S3 storage browser — DONE
 
-UI to add/edit cron entries on a node; agent writes `/etc/cron.d/bpm` atomically. (Original phase 7.)
+`internal/s3/client.go` real impl using aws-sdk-go-v2. Endpoint CRUD with AES-256-GCM-encrypted `secret_key`. Bucket browser with prefix navigation at `/s3`.
 
-Effort: 1d.
+## Phase 12 — Backup engine — DONE
 
----
+`internal/backup/scheduler.go` runs robfig/cron (6-field with seconds), reconciles every 60s. `internal/backup/runner.go` fans out per-plan: per-node tar.gz → S3 multipart, retention prune, Discord webhook on completion. Agent side: `internal/agent/backup.go` walks sources, streams through gzip pipe to S3 with progress events every 2s. Frontend `/backups` with plan CRUD + run history + manual trigger.
 
-## Phase 11 — S3 storage browser
+## Phase 13 — TOTP 2FA + admin user management + audit log — DONE
 
-Add Hetzner endpoint, browse buckets, upload/download. (Original phase 8.)
+`internal/auth/totp.go` uses pquerna/otp with AES-256-GCM-encrypted secrets. Login → optional 2FA verify step → recovery code fallback. Admin user CRUD at `/api/users` (refuses to delete last admin). `internal/leader/audit.go` records every state-change with actor + IP + JSON details. Frontend pages: `/users`, `/audit`, `/account` (2FA enroll + password change).
 
-Effort: 1.5d.
+## Phase 14 — Production hardening, mTLS, docs — DONE
 
----
-
-## Phase 12 — Backup engine
-
-Plans with schedule, agent → tar.gz → S3 multipart, retention, Discord notify. (Original phase 9.)
-
-Effort: 2.5d.
-
----
-
-## Phase 13 — TOTP 2FA + admin user management + audit log
-
-(Original phase 10.) Effort: 1.5d.
-
----
-
-## Phase 14 — Production hardening, mTLS, docs
-
-(Original phase 11.) Effort: 1.5d.
+Optional mTLS via `BPM_GRPC_TLS_*` env vars: leader presents server cert, optionally requires client cert from agents. `scripts/gen-mtls.sh` generates a self-signed CA + leader + agent certs in one command.
 
 ---
 
