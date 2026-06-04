@@ -1,0 +1,350 @@
+syntax = "proto3";
+
+package bpm.v1;
+
+option go_package = "github.com/Bartis-Dev/LabExtend/internal/grpc/pb;pb";
+
+// ManagerAgent is the single gRPC service exposed by the leader. Agents open
+// the bidirectional Channel stream on startup and keep it open for the
+// lifetime of the process. Large byte payloads (file download/upload) use
+// dedicated streaming RPCs so they don't block the control channel.
+service ManagerAgent {
+  rpc Channel(stream AgentMessage) returns (stream LeaderMessage);
+
+  rpc DownloadFile(DownloadRequest) returns (stream FileChunk);
+  rpc UploadFile(stream UploadChunk) returns (UploadResult);
+}
+
+// ─── envelopes ──────────────────────────────────────────────────────────────
+
+message AgentMessage {
+  string request_id = 1;
+  oneof kind {
+    Hello         hello     = 10;
+    Heartbeat     heartbeat = 11;
+    CommandResult result    = 12;
+    Event         event     = 13;
+  }
+}
+
+message LeaderMessage {
+  string request_id = 1;
+  oneof kind {
+    Welcome welcome = 10;
+    Ping    ping    = 11;
+    Command command = 12;
+  }
+}
+
+// ─── handshake / health ─────────────────────────────────────────────────────
+
+message Hello {
+  string hostname              = 1;
+  string version               = 2;
+  string os                    = 3;
+  string arch                  = 4;
+  map<string, string> labels   = 5;
+  repeated string capabilities = 6;
+}
+
+message Welcome {
+  string assigned_id    = 1;
+  int64  server_time_ms = 2;
+}
+
+// Heartbeat is sent every BPM_HEARTBEAT_INTERVAL (default 5s) so the dashboard
+// updates feel "live". All cumulative counters are absolute-since-boot —
+// rate-of-change is computed leader-side from two consecutive samples.
+message Heartbeat {
+  int64  uptime_seconds   = 1;
+  double load_avg_1m      = 2;
+  uint64 mem_used_bytes   = 3;
+  uint64 mem_total_bytes  = 4;
+  uint64 disk_used_bytes  = 5;
+  uint64 disk_total_bytes = 6;
+  double cpu_percent      = 7;  // 0..100 over the sample interval
+  uint32 cpu_cores        = 8;
+  uint64 net_rx_bytes     = 9;  // cumulative since boot, sum across non-loopback ifaces
+  uint64 net_tx_bytes     = 10;
+  uint64 disk_read_bytes  = 11; // cumulative since boot
+  uint64 disk_write_bytes = 12;
+}
+
+message Ping { int64 ts_ms = 1; }
+
+// ─── commands (leader → agent) ──────────────────────────────────────────────
+
+message Command {
+  oneof op {
+    ListPathReq     list_path     = 1;
+    StatReq         stat          = 2;
+    ReadFileReq     read_file     = 3;
+    WriteFileReq    write_file    = 4;
+    MkdirReq        mkdir         = 5;
+    RenameReq       rename        = 6;
+    DeleteReq       delete        = 7;
+    ChownReq        chown         = 8;
+    LookupUserReq   lookup_user   = 9;
+
+    ListCronReq     list_cron     = 20;
+    ApplyCronReq    apply_cron    = 21;
+
+    RunBackupReq    run_backup    = 30;
+    CancelBackupReq cancel_backup = 31;
+
+    // Monitoring control (rarely used; agents stream proactively).
+    EnableLogsReq   enable_logs   = 50;
+    DisableLogsReq  disable_logs  = 51;
+
+    ExecReq         exec          = 90;
+  }
+}
+
+message CommandResult {
+  bool   ok    = 1;
+  string error = 2;
+  oneof payload {
+    ListPathResp     list_path     = 10;
+    StatResp         stat          = 11;
+    ReadFileResp     read_file     = 12;
+    WriteFileResp    write_file    = 13;
+    MkdirResp        mkdir         = 14;
+    RenameResp       rename        = 15;
+    DeleteResp       delete        = 16;
+    ChownResp        chown         = 17;
+    LookupUserResp   lookup_user   = 18;
+
+    ListCronResp     list_cron     = 30;
+    ApplyCronResp    apply_cron    = 31;
+
+    RunBackupResp    run_backup    = 40;
+    CancelBackupResp cancel_backup = 41;
+
+    EnableLogsResp   enable_logs   = 60;
+    DisableLogsResp  disable_logs  = 61;
+
+    ExecResp         exec          = 90;
+  }
+}
+
+// ─── async events (agent → leader, unsolicited) ─────────────────────────────
+
+message Event {
+  oneof kind {
+    BackupProgress  backup_progress  = 1;
+    BackupLogLine   backup_log       = 2;
+    CronChanged     cron_changed     = 3;
+    ContainerReport container_report = 4;  // every ~5s
+    LogBatch        log_batch        = 5;  // every ~1-2s when logs available
+  }
+}
+
+message BackupProgress {
+  string run_id          = 1;
+  uint64 bytes_processed = 2;
+  uint64 files_done      = 3;
+  string current_path    = 4;
+}
+
+message BackupLogLine {
+  string run_id = 1;
+  string level  = 2;
+  string msg    = 3;
+}
+
+message CronChanged { string source = 1; }
+
+// ─── container monitoring ───────────────────────────────────────────────────
+
+message ContainerSnapshot {
+  string container_id       = 1;
+  string name               = 2;
+  string image              = 3;
+  string state              = 4;   // running | exited | restarting | paused | dead | created
+  string health             = 5;   // healthy | unhealthy | starting | "" (no healthcheck)
+  int64  started_at_ms      = 6;
+  int64  finished_at_ms     = 7;
+  uint32 restart_count      = 8;   // since the container was created (Docker's counter)
+  uint32 recent_restarts    = 9;   // within the last 60s (agent-tracked)
+  bool   crashed_loop       = 10;  // >=3 restarts in 60s
+  int32  exit_code          = 11;  // last exit code, -1 if never exited
+
+  double cpu_percent        = 20;
+  uint64 mem_used_bytes     = 21;
+  uint64 mem_limit_bytes    = 22;
+  uint64 net_rx_bytes       = 23;
+  uint64 net_tx_bytes       = 24;
+  uint64 block_read_bytes   = 25;
+  uint64 block_write_bytes  = 26;
+
+  map<string,string> labels = 30;
+}
+
+message ContainerReport {
+  int64 sampled_at_ms                  = 1;
+  repeated ContainerSnapshot containers = 2;
+}
+
+// LogLine is one demuxed line from a container's stdout/stderr.
+message LogLine {
+  string container_id = 1;
+  string stream       = 2; // "stdout" or "stderr"
+  int64  ts_ms        = 3;
+  string line         = 4;
+}
+
+message LogBatch {
+  repeated LogLine lines = 1;
+}
+
+// EnableLogs/DisableLogs are control commands to toggle log shipping per
+// container. By default the agent ships logs for every container it sees.
+message EnableLogsReq  { string container_id = 1; }
+message EnableLogsResp {}
+message DisableLogsReq { string container_id = 1; }
+message DisableLogsResp {}
+
+// ─── filesystem ─────────────────────────────────────────────────────────────
+
+message ListPathReq {
+  string root        = 1;
+  string sub         = 2;
+  bool   show_hidden = 3;
+}
+
+message FileEntry {
+  string name           = 1;
+  bool   is_dir         = 2;
+  uint64 size           = 3;
+  int64  mtime_ms       = 4;
+  uint32 mode           = 5;
+  uint32 uid            = 6;
+  uint32 gid            = 7;
+  string owner_name     = 8;
+  string group_name     = 9;
+  string symlink_target = 10;
+}
+
+message ListPathResp { repeated FileEntry entries = 1; }
+
+message StatReq  { string path = 1; }
+message StatResp { FileEntry entry = 1; }
+
+message ReadFileReq  { string path = 1; uint32 max_bytes = 2; }
+message ReadFileResp { bytes data = 1; bool truncated = 2; }
+
+message WriteFileReq {
+  string path                = 1;
+  bytes  data                = 2;
+  uint32 mode                = 3;
+  bool   apply_default_owner = 4;
+}
+message WriteFileResp { uint64 bytes_written = 1; }
+
+message MkdirReq {
+  string path                = 1;
+  uint32 mode                = 2;
+  bool   apply_default_owner = 3;
+  bool   parents             = 4;
+}
+message MkdirResp {}
+
+message RenameReq  { string from = 1; string to = 2; }
+message RenameResp {}
+
+message DeleteReq  { string path = 1; bool recursive = 2; }
+message DeleteResp {}
+
+message ChownReq {
+  string path      = 1;
+  uint32 uid       = 2;
+  uint32 gid       = 3;
+  bool   recursive = 4;
+}
+message ChownResp { uint64 changed_count = 1; }
+
+message LookupUserReq  { string name = 1; }
+message LookupUserResp {
+  string name = 1;
+  uint32 uid  = 2;
+  uint32 gid  = 3;
+  string home = 4;
+}
+
+// ─── cron ───────────────────────────────────────────────────────────────────
+
+message CronEntry {
+  string id       = 1;
+  string schedule = 2;
+  string command  = 3;
+  string user     = 4;
+  string comment  = 5;
+  bool   enabled  = 6;
+}
+
+message ListCronReq  {}
+message ListCronResp { repeated CronEntry entries = 1; }
+message ApplyCronReq { repeated CronEntry entries = 1; }
+message ApplyCronResp { uint32 installed = 1; }
+
+// ─── backup ─────────────────────────────────────────────────────────────────
+
+message RunBackupReq {
+  string plan_id          = 1;
+  string run_id           = 2;
+  repeated string sources = 3;
+  string s3_endpoint      = 4;
+  string s3_region        = 5;
+  string s3_bucket        = 6;
+  string s3_key           = 7;
+  string s3_access_key    = 8;
+  string s3_secret_key    = 9;
+  bool   s3_path_style    = 10;
+  string compression      = 11;
+  uint32 level            = 12;
+}
+
+message RunBackupResp {
+  string s3_key         = 1;
+  uint64 bytes_uploaded = 2;
+  uint32 file_count     = 3;
+  string sha256         = 4;
+  int64  duration_ms    = 5;
+}
+
+message CancelBackupReq  { string run_id = 1; }
+message CancelBackupResp {}
+
+// ─── chunked file IO ────────────────────────────────────────────────────────
+
+message DownloadRequest { string path = 1; uint32 chunk_size = 2; }
+message FileChunk       { bytes data = 1; bool last = 2; }
+
+message UploadChunk {
+  oneof kind {
+    UploadStart start = 1;
+    bytes       data  = 2;
+  }
+}
+
+message UploadStart {
+  string path                = 1;
+  uint32 mode                = 2;
+  bool   apply_default_owner = 3;
+  bool   overwrite           = 4;
+}
+
+message UploadResult { uint64 bytes_written = 1; }
+
+// ─── generic exec ───────────────────────────────────────────────────────────
+
+message ExecReq {
+  string cmd              = 1;
+  repeated string args    = 2;
+  uint32 timeout_seconds  = 3;
+}
+message ExecResp {
+  int32 exit_code = 1;
+  bytes stdout    = 2;
+  bytes stderr    = 3;
+}

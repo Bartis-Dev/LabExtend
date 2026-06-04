@@ -1,0 +1,46 @@
+# Go
+/bin/
+/dist/
+*.test
+*.out
+coverage.txt
+vendor/
+
+# Build outputs / embedded SPA
+# Keep a placeholder index.html so `go build` succeeds on a fresh checkout
+# before npm has produced the real export.
+/internal/frontend/dist/*
+!/internal/frontend/dist/index.html
+/internal/frontend/out/
+
+# Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.turbo/
+frontend/next-env.d.ts
+
+# Runtime data (local dev)
+/_dev-data/
+*.db
+*.db-shm
+*.db-wal
+
+# Generated env / secrets
+.env
+.env.*
+!.env.example
+!config.example.env
+.env.generated
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Logs
+*.log
+
+# Generated proto stubs — keep them committed; uncomment if you decide otherwise.
+# internal/grpc/pb/*.go

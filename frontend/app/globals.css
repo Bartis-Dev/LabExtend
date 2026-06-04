@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark light;
+  }
+  body {
+    @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900;
+  }
+  .input {
+    @apply h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm shadow-sm
+           outline-none transition focus:border-accent focus:ring-1 focus:ring-accent
+           dark:border-zinc-700 dark:bg-zinc-900 dark:focus:border-accent;
+  }
+  .btn {
+    @apply inline-flex h-9 select-none items-center justify-center gap-1.5 rounded-md
+           px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-accent-fg hover:bg-blue-600;
+  }
+  .btn-ghost {
+    @apply btn text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800;
+  }
+  .btn-danger {
+    @apply btn bg-red-500 text-white hover:bg-red-600;
+  }
+  .badge {
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium;
+  }
+  .badge-green {
+    @apply badge bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300;
+  }
+  .badge-amber {
+    @apply badge bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300;
+  }
+  .badge-red {
+    @apply badge bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300;
+  }
+  .badge-zinc {
+    @apply badge bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300;
+  }
+}
+
+/* Subtle scrollbar in the log viewer */
+.scroll-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: rgb(115 115 115 / 0.4);
+  border-radius: 6px;
+}

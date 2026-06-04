@@ -1,0 +1,10 @@
+# Don't ship node_modules / build artifacts into the docker build context
+frontend/node_modules
+frontend/.next
+frontend/out
+internal/frontend/dist
+_dev-data
+.env
+.env.local
+.git
+**/*.log
