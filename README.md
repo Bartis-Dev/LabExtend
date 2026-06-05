@@ -76,7 +76,7 @@ Prereqs: Go 1.23+, Node 22+, **protoc** + protoc-gen-go + protoc-gen-go-grpc (or
 bash scripts/gen-proto.sh
 
 # 2. Frontend deps + first build
-cd frontend && npm install --legacy-peer-deps && npm run build && cd ..
+cd frontend && npm install --legacy-peer-deps && npm run build:embed && cd ..
 
 # 3. Run the leader
 LEADER=true \

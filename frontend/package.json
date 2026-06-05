@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build && rm -rf ../internal/frontend/dist/* && cp -r out/. ../internal/frontend/dist/",
+    "build": "next build",
+    "build:embed": "next build && mkdir -p ../internal/frontend/dist && rm -rf ../internal/frontend/dist/* && cp -r out/. ../internal/frontend/dist/",
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit"

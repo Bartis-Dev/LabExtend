@@ -3,7 +3,7 @@
 # ─── stage 1: regenerate proto stubs ────────────────────────────────────────
 # Done in Docker so the build doesn't depend on the developer's local
 # protoc installation. Outputs go into /src/internal/grpc/pb.
-FROM golang:1.23-alpine AS protogen
+FROM golang:1.24-alpine AS protogen
 RUN apk add --no-cache git protoc protobuf-dev \
  && go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2 \
  && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
@@ -27,7 +27,7 @@ COPY frontend/ ./
 RUN npm run build || (mkdir -p out && echo '<!doctype html><title>bpm placeholder</title>' > out/index.html)
 
 # ─── stage 3: build Go binary ───────────────────────────────────────────────
-FROM golang:1.23-alpine AS gobuild
+FROM golang:1.24-alpine AS gobuild
 RUN apk add --no-cache git ca-certificates
 WORKDIR /src
 
