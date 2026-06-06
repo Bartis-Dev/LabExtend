@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -23,6 +24,7 @@ type UsersDeps struct {
 type UserView struct {
 	ID          int64  `json:"id"`
 	Email       string `json:"email"`
+	Username    string `json:"username,omitempty"`
 	DisplayName string `json:"display_name"`
 	IsAdmin     bool   `json:"is_admin"`
 	IsActive    bool   `json:"is_active"`
@@ -34,7 +36,7 @@ type UserView struct {
 
 func (d *UsersDeps) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := d.DB.QueryContext(r.Context(), `
-		SELECT u.id, u.email, u.display_name, u.is_admin, u.is_active,
+		SELECT u.id, u.email, COALESCE(u.username,''), u.display_name, u.is_admin, u.is_active,
 		       u.created_at, u.updated_at, COALESCE(u.last_login_at, 0),
 		       COALESCE((SELECT enabled FROM totp_secrets WHERE user_id = u.id), 0)
 		FROM users u ORDER BY u.created_at
@@ -48,7 +50,7 @@ func (d *UsersDeps) List(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var v UserView
 		var admin, active, totp int
-		if err := rows.Scan(&v.ID, &v.Email, &v.DisplayName, &admin, &active,
+		if err := rows.Scan(&v.ID, &v.Email, &v.Username, &v.DisplayName, &admin, &active,
 			&v.CreatedAt, &v.UpdatedAt, &v.LastLoginAt, &totp); err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
@@ -63,6 +65,7 @@ func (d *UsersDeps) List(w http.ResponseWriter, r *http.Request) {
 
 type createUserReq struct {
 	Email       string `json:"email"`
+	Username    string `json:"username"`
 	Password    string `json:"password"`
 	DisplayName string `json:"display_name"`
 	IsAdmin     bool   `json:"is_admin"`
@@ -84,22 +87,27 @@ func (d *UsersDeps) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().Unix()
+	var usernameArg any
+	if u := strings.TrimSpace(req.Username); u != "" {
+		usernameArg = u
+	}
 	res, err := d.DB.ExecContext(r.Context(), `
-		INSERT INTO users (email, display_name, password_hash, is_admin, is_active, created_at, updated_at)
-		VALUES (?, ?, ?, ?, 1, ?, ?)
-	`, req.Email, req.DisplayName, hash, boolI(req.IsAdmin), now, now)
+		INSERT INTO users (email, username, display_name, password_hash, is_admin, is_active, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+	`, req.Email, usernameArg, req.DisplayName, hash, boolI(req.IsAdmin), now, now)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
 	id, _ := res.LastInsertId()
 	d.Audit.Log(r.Context(), r, "user.create", "user", strconv.FormatInt(id, 10),
-		map[string]any{"email": req.Email, "is_admin": req.IsAdmin})
+		map[string]any{"email": req.Email, "username": req.Username, "is_admin": req.IsAdmin})
 	writeJSON(w, http.StatusOK, map[string]any{"id": id})
 }
 
 type updateUserReq struct {
 	DisplayName *string `json:"display_name"`
+	Username    *string `json:"username"`
 	IsAdmin     *bool   `json:"is_admin"`
 	IsActive    *bool   `json:"is_active"`
 	NewPassword string  `json:"new_password"`
@@ -117,6 +125,17 @@ func (d *UsersDeps) Update(w http.ResponseWriter, r *http.Request) {
 	if req.DisplayName != nil {
 		_, _ = d.DB.ExecContext(r.Context(),
 			`UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?`, *req.DisplayName, now, id)
+	}
+	if req.Username != nil {
+		var arg any
+		if u := strings.TrimSpace(*req.Username); u != "" {
+			arg = u
+		}
+		if _, err := d.DB.ExecContext(r.Context(),
+			`UPDATE users SET username = ?, updated_at = ? WHERE id = ?`, arg, now, id); err != nil {
+			writeErr(w, http.StatusBadRequest, err) // most likely UNIQUE violation
+			return
+		}
 	}
 	if req.IsAdmin != nil {
 		_, _ = d.DB.ExecContext(r.Context(),

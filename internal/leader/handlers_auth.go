@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Bartis-Dev/LabExtend/internal/auth"
@@ -24,6 +25,7 @@ type authCtxKey struct{}
 type userInfo struct {
 	ID          int64  `json:"id"`
 	Email       string `json:"email"`
+	Username    string `json:"username,omitempty"`
 	DisplayName string `json:"display_name"`
 	IsAdmin     bool   `json:"is_admin"`
 	CSRFToken   string `json:"csrf_token"`
@@ -96,6 +98,7 @@ func (d *AuthDeps) SetupStatus(w http.ResponseWriter, r *http.Request) {
 
 type setupInitReq struct {
 	Email       string `json:"email"`
+	Username    string `json:"username"`
 	Password    string `json:"password"`
 	DisplayName string `json:"display_name"`
 }
@@ -134,11 +137,15 @@ func (d *AuthDeps) SetupInitialize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().Unix()
+	var usernameArg any
+	if u := strings.TrimSpace(req.Username); u != "" {
+		usernameArg = u
+	}
 	res, err := d.DB.ExecContext(r.Context(), `
 		INSERT INTO users
-			(email, display_name, password_hash, is_admin, is_active, created_at, updated_at)
-		VALUES (?, ?, ?, 1, 1, ?, ?)
-	`, req.Email, req.DisplayName, hash, now, now)
+			(email, username, display_name, password_hash, is_admin, is_active, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 1, 1, ?, ?)
+	`, req.Email, usernameArg, req.DisplayName, hash, now, now)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, fmt.Errorf("create user: %w", err))
 		return
@@ -164,6 +171,7 @@ func (d *AuthDeps) SetupInitialize(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, userInfo{
 		ID:          userID,
 		Email:       req.Email,
+		Username:    strings.TrimSpace(req.Username),
 		DisplayName: req.DisplayName,
 		IsAdmin:     true,
 		CSRFToken:   sess.CSRFToken,
@@ -173,33 +181,48 @@ func (d *AuthDeps) SetupInitialize(w http.ResponseWriter, r *http.Request) {
 // ─── login / logout / me ────────────────────────────────────────────────────
 
 type loginReq struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	// Identifier accepts either the user's email or their username.
+	// `Email` is the legacy field name (older clients posted this); both are
+	// merged into one lookup against email OR username.
+	Identifier string `json:"identifier"`
+	Email      string `json:"email"`
+	Password   string `json:"password"`
 }
 
 // Login validates credentials, creates a session, and returns the user info.
-// Returns 401 on invalid credentials; never reveals whether the email exists.
+// Returns 401 on invalid credentials; never reveals whether the identifier exists.
 func (d *AuthDeps) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	ident := strings.TrimSpace(req.Identifier)
+	if ident == "" {
+		ident = strings.TrimSpace(req.Email)
+	}
+	if ident == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("identifier required"))
+		return
+	}
 
 	var (
-		id         int64
-		email      string
-		display    string
-		hash       string
-		isAdmin    int
-		isActive   int
-		hasTOTP    int
+		id       int64
+		email    string
+		username sql.NullString
+		display  string
+		hash     string
+		isAdmin  int
+		isActive int
+		hasTOTP  int
 	)
 	err := d.DB.QueryRowContext(r.Context(), `
-		SELECT u.id, u.email, u.display_name, u.password_hash, u.is_admin, u.is_active,
+		SELECT u.id, u.email, u.username, u.display_name, u.password_hash, u.is_admin, u.is_active,
 		       COALESCE((SELECT enabled FROM totp_secrets WHERE user_id = u.id), 0)
-		FROM users u WHERE u.email = ?
-	`, req.Email).Scan(&id, &email, &display, &hash, &isAdmin, &isActive, &hasTOTP)
+		FROM users u
+		WHERE u.email = ? OR u.username = ?
+		LIMIT 1
+	`, ident, ident).Scan(&id, &email, &username, &display, &hash, &isAdmin, &isActive, &hasTOTP)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeErr(w, http.StatusUnauthorized, errors.New("invalid credentials"))
@@ -232,6 +255,7 @@ func (d *AuthDeps) Login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, userInfo{
 		ID:          id,
 		Email:       email,
+		Username:    username.String,
 		DisplayName: display,
 		IsAdmin:     isAdmin == 1,
 		CSRFToken:   sess.CSRFToken,
@@ -255,13 +279,14 @@ func (d *AuthDeps) Me(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		email   string
-		display string
-		isAdmin int
+		email    string
+		username sql.NullString
+		display  string
+		isAdmin  int
 	)
 	err := d.DB.QueryRowContext(r.Context(),
-		`SELECT email, display_name, is_admin FROM users WHERE id = ?`, sess.UserID,
-	).Scan(&email, &display, &isAdmin)
+		`SELECT email, username, display_name, is_admin FROM users WHERE id = ?`, sess.UserID,
+	).Scan(&email, &username, &display, &isAdmin)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -270,6 +295,7 @@ func (d *AuthDeps) Me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, userInfo{
 		ID:          sess.UserID,
 		Email:       email,
+		Username:    username.String,
 		DisplayName: display,
 		IsAdmin:     isAdmin == 1,
 		CSRFToken:   sess.CSRFToken,

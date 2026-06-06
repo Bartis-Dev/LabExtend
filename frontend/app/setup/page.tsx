@@ -8,6 +8,7 @@ import type { UserInfo } from '@/lib/types';
 export default function SetupPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -29,7 +30,7 @@ export default function SetupPage() {
     try {
       const me = await api<UserInfo>('/api/setup/initialize', {
         method: 'POST',
-        body: { email, password, display_name: displayName },
+        body: { email, username, password, display_name: displayName },
       });
       setCSRFToken(me.csrf_token);
       router.replace('/dashboard');
@@ -55,6 +56,17 @@ export default function SetupPage() {
             onChange={(e) => setEmail(e.target.value)}
             className="input mt-1"
             autoComplete="email"
+          />
+        </label>
+        <label className="block">
+          <span className="text-xs text-zinc-500">Username (optional, for shorter login)</span>
+          <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            className="input mt-1"
+            autoComplete="username"
+            placeholder="e.g. bartis"
           />
         </label>
         <label className="block">

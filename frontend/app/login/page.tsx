@@ -8,7 +8,7 @@ import type { UserInfo } from '@/lib/types';
 export default function LoginPage() {
   const router = useRouter();
   const [step, setStep] = useState<'creds' | '2fa'>('creds');
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [isRecovery, setIsRecovery] = useState(false);
@@ -21,7 +21,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const me = await api<UserInfo & { requires_2fa?: boolean }>('/api/auth/login', {
-        method: 'POST', body: { email, password },
+        method: 'POST', body: { identifier, password },
       });
       setCSRFToken(me.csrf_token);
       if (me.requires_2fa) {
@@ -62,8 +62,16 @@ export default function LoginPage() {
       {step === 'creds' ? (
         <form onSubmit={onCreds} className="mt-6 space-y-3">
           <label className="block">
-            <span className="text-xs text-zinc-500">Email</span>
-            <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="input mt-1" autoComplete="email" />
+            <span className="text-xs text-zinc-500">Email or username</span>
+            <input
+              type="text"
+              required
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              className="input mt-1"
+              autoComplete="username"
+              autoFocus
+            />
           </label>
           <label className="block">
             <span className="text-xs text-zinc-500">Password</span>

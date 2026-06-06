@@ -71,6 +71,107 @@ func (d *MonitoringDeps) GetNode(w http.ResponseWriter, r *http.Request) {
 	writeErr(w, http.StatusNotFound, errors.New("node not found"))
 }
 
+// CleanupNodes deletes node rows that are currently offline (no live agent
+// in the registry) AND whose last_seen is older than `olderThanHours`. With
+// olderThanHours=0 every offline node is removed. Cascading FKs handle the
+// linked tables (node_metrics, node_metric_buckets, node_paths, cronjobs,
+// container_state); container_log_lines has no FK so we wipe it explicitly.
+//
+// Body: {"older_than_hours": 24}  →  delete offline nodes idle ≥24h
+//       {"older_than_hours": 0}   →  delete ALL offline nodes
+func (d *MonitoringDeps) CleanupNodes(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		OlderThanHours int `json:"older_than_hours"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req) // empty body OK → treated as 0
+
+	// Build the set of node_ids that are CURRENTLY OFFLINE (= not in registry)
+	// and match the age cutoff. We do this in Go (not pure SQL) because the
+	// "online" status is in-memory, not in the DB.
+	registryOnline := map[string]bool{}
+	for _, c := range d.Registry.List() {
+		registryOnline[c.ID] = true
+	}
+
+	cutoff := int64(0)
+	if req.OlderThanHours > 0 {
+		cutoff = time.Now().Add(-time.Duration(req.OlderThanHours) * time.Hour).Unix()
+	}
+
+	rows, err := d.DB.QueryContext(r.Context(),
+		`SELECT id, hostname, last_seen FROM nodes`)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	type victim struct{ id, hostname string }
+	var victims []victim
+	for rows.Next() {
+		var id, hostname string
+		var lastSeen int64
+		if err := rows.Scan(&id, &hostname, &lastSeen); err != nil {
+			continue
+		}
+		if registryOnline[id] {
+			continue // online → keep
+		}
+		if cutoff > 0 && lastSeen > cutoff {
+			continue // recently seen → keep
+		}
+		victims = append(victims, victim{id: id, hostname: hostname})
+	}
+	rows.Close()
+
+	if len(victims) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": 0, "ids": []string{}})
+		return
+	}
+
+	tx, err := d.DB.BeginTx(r.Context(), nil)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	ids := make([]string, 0, len(victims))
+	for _, v := range victims {
+		// container_log_lines has no FK reference → explicit cleanup.
+		if _, err := tx.ExecContext(r.Context(),
+			`DELETE FROM container_log_lines WHERE node_id = ?`, v.id); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		// nodes DELETE cascades to: node_metrics, node_metric_buckets,
+		// node_paths, cronjobs, container_state.
+		if _, err := tx.ExecContext(r.Context(),
+			`DELETE FROM nodes WHERE id = ?`, v.id); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		ids = append(ids, v.id)
+	}
+	if err := tx.Commit(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	// Drop live-state for these nodes too (best-effort).
+	for _, v := range victims {
+		d.Metrics.MarkOffline(v.id)
+		d.Containers.MarkNodeOffline(v.id)
+	}
+
+	// Audit log via the alert engine's registry — but we don't have an audit
+	// logger here. The handler is admin-only via the router; the action is
+	// non-destructive for live nodes (only offline-and-stale rows go).
+	writeJSON(w, http.StatusOK, map[string]any{
+		"deleted":          len(ids),
+		"ids":              ids,
+		"older_than_hours": req.OlderThanHours,
+	})
+}
+
 // NodeHistory returns minute-bucket averages for the requested window
 // (default last 60 minutes).
 func (d *MonitoringDeps) NodeHistory(w http.ResponseWriter, r *http.Request) {

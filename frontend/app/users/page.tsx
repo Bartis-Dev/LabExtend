@@ -6,7 +6,7 @@ import { AuthShell } from '@/components/auth-shell';
 import { fmtAbsTime, fmtRelative } from '@/lib/format';
 
 interface UserView {
-  id: number; email: string; display_name: string;
+  id: number; email: string; username?: string; display_name: string;
   is_admin: boolean; is_active: boolean; has_totp: boolean;
   created_at: number; updated_at: number; last_login_at?: number;
 }
@@ -18,7 +18,7 @@ export default function UsersPage() {
 function Users() {
   const [users, setUsers] = useState<UserView[]>([]);
   const [creating, setCreating] = useState(false);
-  const [newUser, setNewUser] = useState({ email: '', password: '', display_name: '', is_admin: false });
+  const [newUser, setNewUser] = useState({ email: '', username: '', password: '', display_name: '', is_admin: false });
 
   const load = async () => {
     try { setUsers((await api<{ users: UserView[] }>('/api/users')).users ?? []); } catch { /* */ }
@@ -30,7 +30,7 @@ function Users() {
     try {
       await api('/api/users', { method: 'POST', body: newUser });
       setCreating(false);
-      setNewUser({ email: '', password: '', display_name: '', is_admin: false });
+      setNewUser({ email: '', username: '', password: '', display_name: '', is_admin: false });
       load();
     } catch (e: unknown) { alert((e as { body?: { error?: string } })?.body?.error ?? String(e)); }
   };
@@ -41,6 +41,14 @@ function Users() {
   const toggleActive = async (u: UserView) => {
     await api(`/api/users/${u.id}`, { method: 'PUT', body: { is_active: !u.is_active } });
     load();
+  };
+  const setUsername = async (u: UserView) => {
+    const v = prompt(`Username for ${u.email} (empty to clear):`, u.username ?? '');
+    if (v === null) return;
+    try {
+      await api(`/api/users/${u.id}`, { method: 'PUT', body: { username: v } });
+      load();
+    } catch (e: unknown) { alert((e as { body?: { error?: string } })?.body?.error ?? 'failed (username already taken?)'); }
   };
   const resetPassword = async (u: UserView) => {
     const p = prompt(`New password for ${u.email} (≥12 chars):`);
@@ -57,7 +65,7 @@ function Users() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-8">
+    <div className="mx-auto max-w-6xl px-6 py-8">
       <header className="mb-4 flex items-end justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Users</h1>
         <button onClick={() => setCreating(true)} className="btn-primary">New user</button>
@@ -68,6 +76,7 @@ function Users() {
           <thead className="border-b border-zinc-200 text-left text-[11px] uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
             <tr>
               <th className="px-4 py-2">Email</th>
+              <th className="px-4 py-2">Username</th>
               <th className="px-4 py-2">Name</th>
               <th className="px-4 py-2">Role</th>
               <th className="px-4 py-2">2FA</th>
@@ -80,12 +89,14 @@ function Users() {
             {users.map((u) => (
               <tr key={u.id} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
                 <td className="px-4 py-2 font-medium">{u.email}</td>
+                <td className="px-4 py-2 font-mono text-[12px] text-zinc-500">{u.username || '—'}</td>
                 <td className="px-4 py-2">{u.display_name}</td>
                 <td className="px-4 py-2"><span className={u.is_admin ? 'badge-green' : 'badge-zinc'}>{u.is_admin ? 'admin' : 'user'}</span></td>
                 <td className="px-4 py-2"><span className={u.has_totp ? 'badge-green' : 'badge-zinc'}>{u.has_totp ? 'on' : 'off'}</span></td>
                 <td className="px-4 py-2"><span className={u.is_active ? 'badge-green' : 'badge-red'}>{u.is_active ? 'active' : 'disabled'}</span></td>
                 <td className="px-4 py-2 text-zinc-500" title={u.last_login_at ? fmtAbsTime(u.last_login_at) : ''}>{u.last_login_at ? fmtRelative(u.last_login_at) : '—'}</td>
                 <td className="px-4 py-2 text-right">
+                  <button onClick={() => setUsername(u)} className="btn-ghost">username</button>
                   <button onClick={() => toggleAdmin(u)} className="btn-ghost">{u.is_admin ? 'demote' : 'promote'}</button>
                   <button onClick={() => toggleActive(u)} className="btn-ghost">{u.is_active ? 'disable' : 'enable'}</button>
                   <button onClick={() => resetPassword(u)} className="btn-ghost">reset pw</button>
@@ -105,6 +116,10 @@ function Users() {
               <label className="block">
                 <span className="text-xs text-zinc-500">Email</span>
                 <input className="input mt-1" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
+              </label>
+              <label className="block">
+                <span className="text-xs text-zinc-500">Username (optional, for shorter login)</span>
+                <input className="input mt-1" value={newUser.username} onChange={(e) => setNewUser({ ...newUser, username: e.target.value })} placeholder="e.g. bartis" />
               </label>
               <label className="block">
                 <span className="text-xs text-zinc-500">Display name</span>

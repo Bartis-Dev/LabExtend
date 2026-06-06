@@ -115,6 +115,7 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 
 			// ── monitoring ────────────────────────────────────────────
 			authed.Get("/nodes", monDeps.ListNodes)
+			authed.Post("/nodes/cleanup", monDeps.CleanupNodes)
 			authed.Get("/nodes/{id}", monDeps.GetNode)
 			authed.Get("/nodes/{id}/history", monDeps.NodeHistory)
 
