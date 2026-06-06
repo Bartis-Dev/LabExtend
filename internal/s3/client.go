@@ -86,6 +86,16 @@ func (c *Client) ListBuckets(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
+// HeadBucket is a cheap "does this bucket exist and can I access it" probe.
+// Used as a connectivity fallback when ListBuckets is forbidden (typical
+// for Hetzner Object Storage credentials that are scoped to one bucket).
+func (c *Client) HeadBucket(ctx context.Context, bucket string) error {
+	_, err := c.raw.HeadBucket(ctx, &awss3.HeadBucketInput{
+		Bucket: aws.String(bucket),
+	})
+	return err
+}
+
 // Object is one row returned by ListObjects.
 type Object struct {
 	Key          string    `json:"key"`

@@ -163,7 +163,16 @@ func (d *S3Deps) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": n})
 }
 
-// Test posts a ListBuckets to confirm credentials work.
+// Test verifies the endpoint credentials. Tries ListBuckets first; if that
+// fails (typical for Hetzner bucket-scoped credentials with AccessDenied)
+// AND a default_bucket is configured on the endpoint, falls back to a
+// HeadBucket on the default bucket as a connectivity probe.
+//
+// Returns one of:
+//
+//	{"ok": true, "bucket_count": N}                  — ListBuckets worked
+//	{"ok": true, "tested_bucket": "<name>"}          — fallback worked
+//	502 + {"error": "<aws message>"}                 — both failed
 func (d *S3Deps) Test(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	c, err := d.clientFor(r, id)
@@ -172,11 +181,28 @@ func (d *S3Deps) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	buckets, err := c.ListBuckets(r.Context())
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, err)
+	if err == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "bucket_count": len(buckets)})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "bucket_count": len(buckets)})
+	// ListBuckets failed — try the default bucket as a fallback probe.
+	var defaultBucket string
+	_ = d.DB.QueryRowContext(r.Context(),
+		`SELECT COALESCE(default_bucket,'') FROM s3_endpoints WHERE id = ?`, id).Scan(&defaultBucket)
+	if defaultBucket != "" {
+		if perr := c.HeadBucket(r.Context(), defaultBucket); perr == nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok": true, "tested_bucket": defaultBucket,
+			})
+			return
+		} else {
+			writeErr(w, http.StatusBadGateway, fmt.Errorf(
+				"ListBuckets: %v; HeadBucket(%q): %v", err, defaultBucket, perr))
+			return
+		}
+	}
+	writeErr(w, http.StatusBadGateway, fmt.Errorf(
+		"%w (and no default_bucket set on the endpoint to probe instead)", err))
 }
 
 // ─── bucket / object browsing ───────────────────────────────────────────────

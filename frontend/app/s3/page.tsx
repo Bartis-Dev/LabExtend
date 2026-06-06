@@ -6,6 +6,15 @@ import { AuthShell } from '@/components/auth-shell';
 import { fmtBytes, fmtAbsTime } from '@/lib/format';
 import { Folder, File as FileIcon, RefreshCw } from 'lucide-react';
 
+// Extract the leader's JSON error message from a caught API error. Falls
+// back to the raw exception string. Without this, you only see "API ... → 502"
+// which hides the actual AWS / Hetzner reply (AccessDenied, SignatureDoesNotMatch,
+// NoSuchBucket etc).
+function apiErr(e: unknown): string {
+  const err = e as { body?: { error?: string }; message?: string };
+  return err?.body?.error ?? err?.message ?? String(e);
+}
+
 interface S3Endpoint {
   id: string; name: string; endpoint: string; region: string;
   access_key: string; path_style: boolean; default_bucket: string;
@@ -42,7 +51,13 @@ function S3() {
     try {
       const r = await api<{ buckets: string[] }>(`/api/s3/endpoints/${encodeURIComponent(id)}/buckets`);
       setBuckets(r.buckets ?? []);
-    } catch (e) { alert('failed: ' + String(e)); }
+    } catch (e: unknown) {
+      // Hetzner credentials are typically bucket-scoped and have no
+      // ListAllMyBuckets permission → 403/AccessDenied. Leave the dropdown
+      // empty and let the user type a bucket name manually.
+      setBuckets([]);
+      alert('ListBuckets fehlgeschlagen — gib den Bucket-Namen manuell ein im Feld unten.\n\n' + apiErr(e));
+    }
   };
 
   const loadObjects = async (b: string, pref: string) => {
@@ -53,7 +68,7 @@ function S3() {
         `/api/s3/endpoints/${encodeURIComponent(selected)}/buckets/${encodeURIComponent(b)}/objects?prefix=${encodeURIComponent(pref)}`
       );
       setObjects(r.objects ?? []);
-    } catch (e) { alert('failed: ' + String(e)); }
+    } catch (e: unknown) { alert('failed: ' + apiErr(e)); }
   };
 
   const save = async (e: Partial<S3Endpoint & { secret_key: string }>) => {
@@ -74,9 +89,14 @@ function S3() {
   };
   const test = async (id: string) => {
     try {
-      const r = await api<{ bucket_count: number }>(`/api/s3/endpoints/${encodeURIComponent(id)}/test`, { method: 'POST' });
-      alert(`OK — ${r.bucket_count} buckets visible.`);
-    } catch (e) { alert('failed: ' + String(e)); }
+      const r = await api<{ ok: boolean; bucket_count?: number; tested_bucket?: string }>(
+        `/api/s3/endpoints/${encodeURIComponent(id)}/test`, { method: 'POST' });
+      if (r.tested_bucket) {
+        alert(`OK — bucket "${r.tested_bucket}" reachable (ListBuckets not permitted by these credentials — that's normal for Hetzner).`);
+      } else {
+        alert(`OK — ${r.bucket_count ?? 0} bucket(s) visible.`);
+      }
+    } catch (e: unknown) { alert('failed: ' + apiErr(e)); }
   };
 
   return (
@@ -122,11 +142,15 @@ function S3() {
 
       {selected && (
         <div className="card overflow-hidden p-0">
-          <div className="flex items-center gap-2 border-b border-zinc-200 px-4 py-2 text-xs dark:border-zinc-800">
-            <select className="input h-7 w-40 text-xs" value={bucket} onChange={(e) => loadObjects(e.target.value, '')}>
-              <option value="">— bucket —</option>
-              {buckets.map((b) => <option key={b} value={b}>{b}</option>)}
-            </select>
+          <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 px-4 py-2 text-xs dark:border-zinc-800">
+            {buckets.length > 0 ? (
+              <select className="input h-7 w-44 text-xs" value={bucket} onChange={(e) => loadObjects(e.target.value, '')}>
+                <option value="">— bucket —</option>
+                {buckets.map((b) => <option key={b} value={b}>{b}</option>)}
+              </select>
+            ) : (
+              <ManualBucketInput onSubmit={(b) => loadObjects(b, '')} />
+            )}
             <span className="font-mono text-[11px] text-zinc-500">{bucket}{prefix && '/' + prefix}</span>
             <button onClick={() => loadObjects(bucket, prefix)} className="btn-ghost ml-auto"><RefreshCw className="h-3 w-3" /> refresh</button>
           </div>
@@ -207,5 +231,25 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="text-xs text-zinc-500">{label}</span>
       <div className="mt-1">{children}</div>
     </label>
+  );
+}
+
+// Fallback input shown when ListBuckets is forbidden (typical for Hetzner
+// bucket-scoped credentials). User types the bucket name manually.
+function ManualBucketInput({ onSubmit }: { onSubmit: (b: string) => void }) {
+  const [v, setV] = useState('');
+  return (
+    <form
+      className="flex items-center gap-1"
+      onSubmit={(e) => { e.preventDefault(); if (v.trim()) onSubmit(v.trim()); }}
+    >
+      <input
+        className="input h-7 w-52 text-xs font-mono"
+        placeholder="bucket name (manual)"
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+      />
+      <button type="submit" className="btn-primary h-7 text-xs">open</button>
+    </form>
   );
 }
