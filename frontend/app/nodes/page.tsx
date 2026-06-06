@@ -7,6 +7,7 @@ import { useSSE } from '@/lib/sse';
 import type { NodeView, MetricsSample } from '@/lib/types';
 import { fmtBytes, fmtBps, fmtPct, fmtRelative, fmtUptime } from '@/lib/format';
 import { AuthShell } from '@/components/auth-shell';
+import { Bar } from '@/components/bar';
 import { Trash2 } from 'lucide-react';
 
 export default function NodesPage() {
@@ -38,7 +39,14 @@ function Nodes() {
     'node.metrics': (data: unknown) => {
       const m = data as MetricsSample;
       setNodes((prev) =>
-        prev.map((n) => (n.id === m.node_id ? { ...n, metrics: m, status: 'online' } : n))
+        prev.map((n) => (n.id === m.node_id ? { ...n, metrics: m, status: 'online', last_seen: m.reported_at } : n))
+      );
+    },
+    'node.connected': () => load(),
+    'node.disconnected': (data: unknown) => {
+      const d = data as { id: string };
+      setNodes((prev) =>
+        prev.map((n) => (n.id === d.id ? { ...n, status: 'offline', metrics: undefined } : n))
       );
     },
   });
@@ -50,7 +58,7 @@ function Nodes() {
       <header className="mb-4 flex items-end justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Nodes</h1>
-          <p className="text-xs text-zinc-500">{nodes.length - offline} online · {offline} offline</p>
+          <p className="text-xs text-zinc-500">{nodes.length - offline} online · {offline} offline · live updates</p>
         </div>
         {offline > 0 && (
           <button onClick={() => setCleanupOpen(true)} className="btn-ghost text-red-600">
@@ -59,56 +67,12 @@ function Nodes() {
         )}
       </header>
 
-      <div className="card overflow-hidden p-0">
-        <table className="w-full text-sm">
-          <thead className="border-b border-zinc-200 text-left text-[11px] uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
-            <tr>
-              <th className="px-4 py-2">Hostname</th>
-              <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2">OS</th>
-              <th className="px-4 py-2">CPU</th>
-              <th className="px-4 py-2">RAM</th>
-              <th className="px-4 py-2">Disk</th>
-              <th className="px-4 py-2">Net ↓/↑</th>
-              <th className="px-4 py-2">Uptime</th>
-              <th className="px-4 py-2 text-right">Last seen</th>
-            </tr>
-          </thead>
-          <tbody>
-            {nodes.map((n) => {
-              const m = n.metrics;
-              return (
-                <tr key={n.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900">
-                  <td className="px-4 py-2 font-medium">
-                    <Link href={`/node?id=${encodeURIComponent(n.id)}`} className="hover:underline">
-                      {n.hostname}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2">
-                    <span className={n.status === 'online' ? 'badge-green' : 'badge-zinc'}>{n.status}</span>
-                  </td>
-                  <td className="px-4 py-2 text-zinc-500">{n.os}/{n.arch}</td>
-                  <td className="px-4 py-2 font-mono">{fmtPct(m?.cpu_percent ?? 0, 1)}</td>
-                  <td className="px-4 py-2 font-mono">{fmtPct(m?.mem_percent ?? 0, 1)}</td>
-                  <td className="px-4 py-2 font-mono">{fmtPct(m?.disk_percent ?? 0, 1)}</td>
-                  <td className="px-4 py-2 font-mono text-[12px]">
-                    {fmtBps(m?.net_rx_bps ?? 0)} / {fmtBps(m?.net_tx_bps ?? 0)}
-                  </td>
-                  <td className="px-4 py-2 text-zinc-500">{fmtUptime(m?.uptime_seconds)}</td>
-                  <td className="px-4 py-2 text-right text-zinc-500">{fmtRelative(n.last_seen)}</td>
-                </tr>
-              );
-            })}
-            {nodes.length === 0 && (
-              <tr><td colSpan={9} className="px-4 py-6 text-center text-sm text-zinc-500">No nodes yet.</td></tr>
-            )}
-          </tbody>
-        </table>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {nodes.map((n) => <NodeRow key={n.id} node={n} />)}
+        {nodes.length === 0 && (
+          <div className="card text-sm text-zinc-500">No nodes yet.</div>
+        )}
       </div>
-      <p className="mt-3 text-[11px] text-zinc-500">
-        Total disk shown is the root filesystem mounted at <code>/</code>. Bytes/sec are leader-computed deltas between heartbeats.{' '}
-        <span className="text-zinc-400">Cleanup nimmt nur Nodes raus die JETZT offline UND idle ≥ Schwelle sind — online Nodes bleiben.</span>
-      </p>
 
       {cleanupOpen && (
         <CleanupModal
@@ -117,12 +81,72 @@ function Nodes() {
           onDone={() => { setCleanupOpen(false); load(); }}
         />
       )}
-
-      {/* fmtBytes kept warm for future detail columns */}
-      <span className="hidden">{fmtBytes(0)}</span>
     </div>
   );
 }
+
+function NodeRow({ node }: { node: NodeView }) {
+  const m = node.metrics;
+  const offline = node.status !== 'online';
+  const diskFree = m ? Math.max(0, m.disk_total_bytes - m.disk_used_bytes) : 0;
+
+  return (
+    <Link
+      href={`/node?id=${encodeURIComponent(node.id)}`}
+      className="card block transition hover:border-zinc-300 hover:shadow-sm dark:hover:border-zinc-700"
+    >
+      <div className="mb-3 flex items-start justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">{node.hostname}</span>
+            <span className={offline ? 'badge-zinc' : 'badge-green'}>
+              {offline ? 'offline' : 'online'}
+            </span>
+          </div>
+          <div className="text-[11px] text-zinc-500">
+            {node.os}/{node.arch}
+            {m?.cpu_cores ? ` · ${m.cpu_cores} cores` : ''}
+            {m?.uptime_seconds ? ` · up ${fmtUptime(m.uptime_seconds)}` : ''}
+          </div>
+        </div>
+        <div className="text-right text-[11px] text-zinc-500">
+          {offline ? 'last seen' : 'updated'}<br />
+          {fmtRelative(node.last_seen)}
+        </div>
+      </div>
+
+      {m && !offline ? (
+        <div className="space-y-2.5">
+          <Bar
+            label="CPU"
+            value={m.cpu_percent}
+            detail={fmtPct(m.cpu_percent, 1)}
+          />
+          <Bar
+            label="RAM"
+            value={m.mem_percent}
+            detail={`${fmtBytes(m.mem_used_bytes)} / ${fmtBytes(m.mem_total_bytes)}`}
+          />
+          <Bar
+            label="Disk"
+            value={m.disk_percent}
+            detail={`${fmtBytes(diskFree)} free · ${fmtBytes(m.disk_total_bytes)}`}
+          />
+          <div className="grid grid-cols-2 gap-2 pt-1 text-[11px] text-zinc-500">
+            <div>↓ {fmtBps(m.net_rx_bps)}</div>
+            <div className="text-right">↑ {fmtBps(m.net_tx_bps)}</div>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-md bg-zinc-100 px-3 py-4 text-xs text-zinc-500 dark:bg-zinc-800/60">
+          No live metrics. Agent disconnected.
+        </div>
+      )}
+    </Link>
+  );
+}
+
+// ─── Cleanup modal ──────────────────────────────────────────────────────────
 
 type Preset = 'all' | 'h1' | 'h6' | 'h24' | 'd7' | 'd30' | 'custom';
 
@@ -171,7 +195,7 @@ function CleanupModal({ offlineCount, onClose, onDone }: {
       <div className="card w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         <h3 className="mb-1 text-base font-semibold">Offline-Nodes löschen</h3>
         <p className="mb-4 text-xs text-zinc-500">
-          {offlineCount} Node(s) sind aktuell offline. Online-Nodes werden NIE gelöscht — der Filter prüft Live-Status + last_seen.
+          {offlineCount} Node(s) sind aktuell offline. Online-Nodes werden NIE gelöscht.
         </p>
 
         <div className="space-y-1.5 text-sm">
@@ -197,8 +221,8 @@ function CleanupModal({ offlineCount, onClose, onDone }: {
 
         {dangerous && (
           <div className="mt-4 rounded-md bg-red-50 p-3 text-xs text-red-900 dark:bg-red-900/30 dark:text-red-200">
-            <strong>Achtung:</strong> "alle offline" löscht JEDEN Node der gerade nicht verbunden ist —
-            auch welche die in 1 Min wieder online sind. Tippe <code>DELETE</code> zum Bestätigen.
+            <strong>Achtung:</strong> "alle offline" löscht JEDEN Node der gerade nicht verbunden ist.
+            Tippe <code>DELETE</code> zum Bestätigen.
             <input
               className="input mt-2 h-7 font-mono text-xs"
               value={confirmText}

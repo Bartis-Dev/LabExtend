@@ -13,6 +13,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
@@ -187,6 +188,14 @@ func (s *ManagerAgentServer) Channel(stream pb.ManagerAgent_ChannelServer) error
 			"agent_id", agentID, "hostname", hello.Hostname)
 	}
 	defer s.registry.Unregister(conn)
+	defer func() {
+		// Flip the DB row to offline; keep last_seen so we can compute idle
+		// time in the UI. Uses fresh ctx because stream ctx is already dead.
+		if s.db != nil {
+			_, _ = s.db.ExecContext(context.Background(),
+				`UPDATE nodes SET status = 'offline' WHERE id = ?`, agentID)
+		}
+	}()
 	defer slog.Info("agent disconnected", "agent_id", agentID, "hostname", hello.Hostname)
 
 	if err := s.upsertNode(ctx, conn); err != nil {
@@ -287,10 +296,15 @@ func (s *ManagerAgentServer) handleEvent(c *AgentConn, ev *pb.Event) {
 }
 
 // applyHeartbeat ingests the heartbeat into the metrics store, persists it,
-// and broadcasts the computed sample over SSE.
+// bumps nodes.last_seen + status=online, and broadcasts on SSE.
 func (s *ManagerAgentServer) applyHeartbeat(ctx context.Context, c *AgentConn, h *pb.Heartbeat) error {
 	if s.metrics == nil {
 		return nil // unit tests without store
+	}
+	if s.db != nil {
+		_, _ = s.db.ExecContext(ctx,
+			`UPDATE nodes SET last_seen = ?, status = 'online' WHERE id = ?`,
+			time.Now().Unix(), c.ID)
 	}
 	sample := s.metrics.Apply(c.ID, h)
 	if s.registry != nil && s.registry.hub != nil {
@@ -339,6 +353,21 @@ func startGRPCServer(ctx context.Context, cfg *config.Config, reg *AgentRegistry
 	opts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(authInt.unary),
 		grpc.StreamInterceptor(authInt.stream),
+		// Keepalive — server pings idle clients every 30s; without this an
+		// idle overlay-network connection can be dropped by intermediate
+		// load-balancers / NAT after a few minutes, causing the "agent
+		// disappears for 1-2 min then reconnects" flap.
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:                  30 * time.Second,
+			Timeout:               10 * time.Second,
+			MaxConnectionIdle:     0, // 0 = no idle close
+			MaxConnectionAge:      0,
+			MaxConnectionAgeGrace: 0,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
 	}
 	if cfg.GRPCTLSCert != "" && cfg.GRPCTLSKey != "" {
 		tlsCreds, err := loadServerTLS(cfg.GRPCTLSCert, cfg.GRPCTLSKey, cfg.GRPCTLSClientCA)

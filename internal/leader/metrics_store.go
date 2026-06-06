@@ -139,11 +139,26 @@ func (s *metricsStore) MarkOffline(nodeID string) {
 	s.mu.Unlock()
 }
 
-// Persist writes the sample to node_metrics so it survives restart.
+// Persist writes the sample to node_metrics (latest snapshot) AND appends a
+// row to node_metric_samples (short-retention history for sub-minute UI
+// granularity).
 func (s *metricsStore) Persist(ctx context.Context, sample *MetricsSample) error {
 	if s.db == nil {
 		return nil
 	}
+	// Raw sample for the 5m / 1h windows. Errors here are non-fatal — the
+	// upsert below is the source of truth for "current state".
+	_, _ = s.db.ExecContext(ctx, `
+		INSERT INTO node_metric_samples
+			(node_id, ts_ms, cpu_percent, mem_pct, disk_pct,
+			 net_rx_bps, net_tx_bps, disk_read_bps, disk_write_bps)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, sample.NodeID, sample.ReportedAt*1000,
+		sample.CPUPercent, sample.MemPercent, sample.DiskPercent,
+		sample.NetRxBps, sample.NetTxBps,
+		sample.DiskReadBps, sample.DiskWriteBps,
+	)
+
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO node_metrics
 			(node_id, reported_at, uptime_seconds, load_avg_1m,
@@ -245,8 +260,11 @@ func (s *metricsStore) flushBucket(nodeID string, b *minuteBucket) {
 	}
 }
 
-// RunPruneLoop runs forever, pruning bucket rows older than retentionHours.
-func (s *metricsStore) RunPruneLoop(ctx context.Context, retentionHours int) {
+// RunPruneLoop runs forever, pruning bucket rows older than bucketRetentionHours
+// AND raw-sample rows older than sampleRetentionHours. Bucket retention is the
+// long view (default 7d, configurable); sample retention is short (default 2h)
+// because samples are only used for the live-graph 5m/1h windows.
+func (s *metricsStore) RunPruneLoop(ctx context.Context, bucketRetentionHours, sampleRetentionHours int) {
 	t := time.NewTicker(5 * time.Minute)
 	defer t.Stop()
 	for {
@@ -257,13 +275,50 @@ func (s *metricsStore) RunPruneLoop(ctx context.Context, retentionHours int) {
 			if s.db == nil {
 				continue
 			}
-			cutoff := time.Now().Add(-time.Duration(retentionHours) * time.Hour).Unix()
+			bucketCutoff := time.Now().Add(-time.Duration(bucketRetentionHours) * time.Hour).Unix()
 			if _, err := s.db.ExecContext(ctx,
-				`DELETE FROM node_metric_buckets WHERE bucket_minute < ?`, cutoff); err != nil {
+				`DELETE FROM node_metric_buckets WHERE bucket_minute < ?`, bucketCutoff); err != nil {
 				slog.Warn("metrics bucket prune failed", "err", err)
+			}
+			sampleCutoffMs := time.Now().Add(-time.Duration(sampleRetentionHours) * time.Hour).UnixMilli()
+			if _, err := s.db.ExecContext(ctx,
+				`DELETE FROM node_metric_samples WHERE ts_ms < ?`, sampleCutoffMs); err != nil {
+				slog.Warn("metrics sample prune failed", "err", err)
 			}
 		}
 	}
+}
+
+// SamplesForNode returns raw per-heartbeat samples for the [sinceMs, untilMs]
+// window. Used for the 5m / 1h UI views where 1-min buckets aren't fine enough.
+func (s *metricsStore) SamplesForNode(ctx context.Context, nodeID string, sinceMs, untilMs int64) ([]MetricsBucket, error) {
+	if s.db == nil {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT ts_ms, cpu_percent, mem_pct, disk_pct,
+		       net_rx_bps, net_tx_bps, disk_read_bps, disk_write_bps
+		FROM node_metric_samples
+		WHERE node_id = ? AND ts_ms BETWEEN ? AND ?
+		ORDER BY ts_ms ASC
+	`, nodeID, sinceMs, untilMs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MetricsBucket
+	for rows.Next() {
+		var b MetricsBucket
+		var tsMs int64
+		if err := rows.Scan(&tsMs, &b.CPUPercent, &b.MemPercent, &b.DiskPercent,
+			&b.NetRxBps, &b.NetTxBps, &b.DiskReadBps, &b.DiskWriteBps); err != nil {
+			return nil, err
+		}
+		// Samples table uses ms; reuse the bucket-shape with seconds for the UI.
+		b.BucketMinute = tsMs / 1000
+		out = append(out, b)
+	}
+	return out, rows.Err()
 }
 
 // BucketsForNode returns minute averages for one node within [since, until].

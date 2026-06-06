@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/Bartis-Dev/LabExtend/internal/config"
@@ -87,6 +88,15 @@ func (c *Client) connectAndServe(parentCtx context.Context) error {
 		c.cfg.LeaderAddr,
 		grpc.WithTransportCredentials(creds),
 		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
+		// Keepalive — ping the leader every 30s even when the channel is
+		// idle. Without this, NAT / overlay-network intermediates can silently
+		// drop the connection after ~5min, manifesting as agents flapping
+		// offline/online for 1-2 min.
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                30 * time.Second,
+			Timeout:             10 * time.Second,
+			PermitWithoutStream: true,
+		}),
 	)
 	if err != nil {
 		return fmt.Errorf("grpc dial: %w", err)

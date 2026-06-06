@@ -118,6 +118,7 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 			authed.Post("/nodes/cleanup", monDeps.CleanupNodes)
 			authed.Get("/nodes/{id}", monDeps.GetNode)
 			authed.Get("/nodes/{id}/history", monDeps.NodeHistory)
+			authed.Get("/nodes/{id}/samples", monDeps.NodeSamples)
 
 			authed.Get("/containers", monDeps.ListContainers)
 			authed.Get("/containers/{node}/{id}", monDeps.GetContainer)

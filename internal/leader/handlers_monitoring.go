@@ -172,6 +172,37 @@ func (d *MonitoringDeps) CleanupNodes(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// NodeSamples returns raw per-heartbeat samples for one node. Used by the
+// UI for sub-minute granularity (5m + 1h time-windows). Default last 5 min.
+//
+//	?since_ms=<ms>  ?until_ms=<ms>   (both inclusive)
+func (d *MonitoringDeps) NodeSamples(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	now := time.Now().UnixMilli()
+	since := now - 5*60*1000
+	until := now
+	if v := r.URL.Query().Get("since_ms"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			since = n
+		}
+	}
+	if v := r.URL.Query().Get("until_ms"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			until = n
+		}
+	}
+	samples, err := d.Metrics.SamplesForNode(r.Context(), id, since, until)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"samples":  samples,
+		"since_ms": since,
+		"until_ms": until,
+	})
+}
+
 // NodeHistory returns minute-bucket averages for the requested window
 // (default last 60 minutes).
 func (d *MonitoringDeps) NodeHistory(w http.ResponseWriter, r *http.Request) {

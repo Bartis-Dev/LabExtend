@@ -52,6 +52,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	maxLogLines := intEnv("BPM_LOG_MAX_LINES", 5000)
 	logRetention := intEnv("BPM_LOG_RETENTION_HOURS", 0)
 	bucketRetention := intEnv("BPM_METRIC_RETENTION_HOURS", 24)
+	sampleRetention := intEnv("BPM_SAMPLE_RETENTION_HOURS", 2)
 	logs := newLogStore(database, maxLogLines)
 	alerts := newAlertEngine(database, metrics, containers, registry, hub)
 	audit := newAuditLogger(database, cfg.DisableAudit)
@@ -70,7 +71,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	backupScheduler := backup.NewScheduler(database, backupRunner)
 
 	// Background loops.
-	go metrics.RunPruneLoop(ctx, bucketRetention)
+	go metrics.RunPruneLoop(ctx, bucketRetention, sampleRetention)
 	go logs.RunRetentionLoop(ctx, logRetention)
 	go alerts.Run(ctx)
 	go func() {
