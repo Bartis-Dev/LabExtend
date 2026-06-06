@@ -33,7 +33,7 @@ export default function SetupPage() {
         body: { email, username, password, display_name: displayName },
       });
       setCSRFToken(me.csrf_token);
-      router.replace('/dashboard');
+      router.replace('/nodes');
     } catch (e: unknown) {
       const err = e as { body?: { error?: string } };
       setError(err?.body?.error ?? 'Setup failed.');

@@ -7,7 +7,7 @@ import { api } from '@/lib/api';
 /**
  * Boot router. Resolves:
  *   • setup not completed     → /setup
- *   • setup done, logged in   → /dashboard
+ *   • setup done, logged in   → /nodes
  *   • setup done, not logged in (401/403) → /login
  *   • network / 5xx error     → retry every 2s, don't redirect (avoids
  *                               kicking the user out during brief restarts)
@@ -42,7 +42,7 @@ export default function HomePage() {
       }
       try {
         await api('/api/me');
-        if (alive) router.replace('/dashboard');
+        if (alive) router.replace('/nodes');
       } catch (e: unknown) {
         if (!alive) return;
         const err = e as { status?: number };

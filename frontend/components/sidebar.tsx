@@ -4,13 +4,12 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import clsx from 'clsx';
 import {
-  LayoutDashboard, Server, Boxes, Bell, Webhook, FolderOpen, Clock,
+  Server, Boxes, Bell, Webhook, FolderOpen, Clock,
   HardDrive, Database, LogOut, Users, ScrollText, UserCircle,
 } from 'lucide-react';
 import { api, setCSRFToken } from '@/lib/api';
 
 const NAV = [
-  { href: '/dashboard',  label: 'Dashboard', icon: LayoutDashboard },
   { href: '/nodes',      label: 'Nodes',     icon: Server },
   { href: '/containers', label: 'Containers',icon: Boxes },
   { href: '/alerts',     label: 'Alerts',    icon: Bell },

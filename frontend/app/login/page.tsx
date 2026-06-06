@@ -27,7 +27,7 @@ export default function LoginPage() {
       if (me.requires_2fa) {
         setStep('2fa');
       } else {
-        router.replace('/dashboard');
+        router.replace('/nodes');
       }
     } catch (e: unknown) {
       const err = e as { body?: { error?: string } };
@@ -45,7 +45,7 @@ export default function LoginPage() {
       await api('/api/auth/2fa/verify', {
         method: 'POST', body: { code, is_recovery: isRecovery },
       });
-      router.replace('/dashboard');
+      router.replace('/nodes');
     } catch (e: unknown) {
       const err = e as { body?: { error?: string } };
       setError(err?.body?.error ?? 'Invalid code.');
