@@ -49,25 +49,25 @@ function S3() {
   const loadBuckets = async (id: string, ep?: S3Endpoint) => {
     setSelected(id); setBucket(''); setObjects([]); setPrefix('');
     try {
-      const r = await api<{ buckets: string[]; bucket_scoped?: boolean }>(
+      const r = await api<{ buckets: string[] }>(
         `/api/s3/endpoints/${encodeURIComponent(id)}/buckets`,
       );
       const list = r.buckets ?? [];
       setBuckets(list);
-      // Auto-open the bucket when there's only one (typical for bucket-
-      // scoped Hetzner / R2 credentials with default_bucket configured).
-      if (list.length === 1) {
-        loadObjects(list[0], '');
-      } else if (ep?.default_bucket && list.includes(ep.default_bucket)) {
-        loadObjects(ep.default_bucket, '');
-      }
+      // Auto-open behavior — eliminates the dead "selected but nothing
+      // shown" state that happens when the user has 1 bucket or a pinned
+      // default_bucket.
+      const target =
+        list.length === 1 ? list[0]
+        : ep?.default_bucket && list.includes(ep.default_bucket) ? ep.default_bucket
+        : '';
+      if (target) loadObjects(target, '');
     } catch (e: unknown) {
-      // No default_bucket configured AND ListBuckets failed — true error.
       setBuckets([]);
       alert(
         'Bucket-Liste konnte nicht geladen werden.\n\n' +
         apiErr(e) +
-        '\n\nFix: Edit endpoint → "Default bucket (optional)" → trage deinen Bucket-Namen ein.',
+        '\n\nFix: Edit endpoint → "Default bucket" → trage deinen Bucket-Namen ein.',
       );
     }
   };

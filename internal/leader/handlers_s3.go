@@ -194,15 +194,28 @@ func (d *S3Deps) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	buckets, err := c.ListBuckets(r.Context())
-	if err == nil {
+
+	// Happy path: ListBuckets returned a non-empty list. We're done.
+	if err == nil && len(buckets) > 0 {
 		slog.Info("s3.test: ListBuckets ok",
 			"endpoint_id", id, "name", name, "endpoint", endpoint, "bucket_count", len(buckets))
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "bucket_count": len(buckets)})
 		return
 	}
-	slog.Warn("s3.test: ListBuckets failed — trying default_bucket fallback",
-		"endpoint_id", id, "name", name, "endpoint", endpoint, "region", region,
-		"default_bucket", defaultBucket, "err", err)
+
+	// Either ListBuckets errored (Hetzner: 403 AccessDenied), OR it
+	// succeeded but returned an empty list (Cloudflare R2: object-scoped
+	// tokens see no buckets even though they can access their own). In
+	// both cases, fall back to a HeadBucket on the configured default.
+	if err != nil {
+		slog.Warn("s3.test: ListBuckets failed — trying default_bucket fallback",
+			"endpoint_id", id, "name", name, "endpoint", endpoint, "region", region,
+			"default_bucket", defaultBucket, "err", err)
+	} else {
+		slog.Info("s3.test: ListBuckets returned 0 — probing default_bucket",
+			"endpoint_id", id, "name", name, "endpoint", endpoint,
+			"default_bucket", defaultBucket)
+	}
 
 	if defaultBucket != "" {
 		if perr := c.HeadBucket(r.Context(), defaultBucket); perr == nil {
@@ -215,13 +228,27 @@ func (d *S3Deps) Test(w http.ResponseWriter, r *http.Request) {
 		} else {
 			slog.Warn("s3.test: HeadBucket fallback also failed",
 				"endpoint_id", id, "name", name, "bucket", defaultBucket, "err", perr)
+			if err == nil {
+				err = fmt.Errorf("ListBuckets returned 0 buckets")
+			}
 			writeErr(w, http.StatusBadGateway, fmt.Errorf(
-				"ListBuckets: %v; HeadBucket(%q): %v", err, defaultBucket, perr))
+				"%v; HeadBucket(%q): %v", err, defaultBucket, perr))
 			return
 		}
 	}
-	writeErr(w, http.StatusBadGateway, fmt.Errorf(
-		"%w — set 'default_bucket' on this endpoint so we can probe it instead", err))
+
+	// No default_bucket configured.
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, fmt.Errorf(
+			"%w — set 'default_bucket' on this endpoint so we can probe it instead", err))
+		return
+	}
+	// ListBuckets succeeded with empty list, no default configured. Tell
+	// the user that's not actually verified connectivity.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "bucket_count": 0,
+		"hint": "ListBuckets returned 0 buckets (R2 object-scoped tokens behave this way). Set 'default_bucket' to actually verify a bucket is reachable.",
+	})
 }
 
 // ─── bucket / object browsing ───────────────────────────────────────────────
@@ -246,33 +273,48 @@ func (d *S3Deps) Buckets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	buckets, err := c.ListBuckets(r.Context())
-	if err == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"buckets": buckets})
-		return
-	}
-	slog.Warn("s3.buckets: ListBuckets failed — falling back to default_bucket",
-		"endpoint_id", id, "name", name, "default_bucket", defaultBucket, "err", err)
 
-	if defaultBucket != "" {
-		// Verify the bucket is actually reachable with these creds before
-		// pretending it exists — avoids a confusing dropdown that explodes
-		// when clicked.
+	// If a default_bucket is configured and it's not already in the
+	// visible list, splice it in (after HeadBucket-verifying it's
+	// reachable). This handles two cases the same way:
+	//   - Hetzner: ListBuckets → 403 → buckets is empty, err != nil
+	//   - R2 object-scoped: ListBuckets → 200 [] → buckets empty, err nil
+	//   - Account-scoped token but user wants to pin one bucket → splice
+	if defaultBucket != "" && !containsString(buckets, defaultBucket) {
 		if perr := c.HeadBucket(r.Context(), defaultBucket); perr == nil {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"buckets":         []string{defaultBucket},
-				"bucket_scoped":   true, // hint for UI: don't suggest "add bucket"
-				"list_buckets_err": err.Error(),
-			})
-			return
-		} else {
-			slog.Warn("s3.buckets: HeadBucket fallback also failed",
-				"endpoint_id", id, "name", name, "bucket", defaultBucket, "err", perr)
+			buckets = append(buckets, defaultBucket)
+			err = nil // the bucket is reachable, that's all the UI needs
+			slog.Info("s3.buckets: spliced default_bucket into list",
+				"endpoint_id", id, "name", name, "bucket", defaultBucket)
+		} else if err != nil {
+			slog.Warn("s3.buckets: ListBuckets failed and default_bucket also unreachable",
+				"endpoint_id", id, "name", name, "bucket", defaultBucket,
+				"list_err", err, "head_err", perr)
 			writeErr(w, http.StatusBadGateway, fmt.Errorf(
 				"ListBuckets: %v; HeadBucket(%q): %v", err, defaultBucket, perr))
 			return
+		} else {
+			slog.Warn("s3.buckets: default_bucket unreachable but ListBuckets ok with 0",
+				"endpoint_id", id, "name", name, "bucket", defaultBucket, "err", perr)
 		}
 	}
-	writeErr(w, http.StatusBadGateway, err)
+
+	if err != nil {
+		slog.Warn("s3.buckets: ListBuckets failed and no default_bucket configured",
+			"endpoint_id", id, "name", name, "err", err)
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"buckets": buckets})
+}
+
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *S3Deps) Objects(w http.ResponseWriter, r *http.Request) {
