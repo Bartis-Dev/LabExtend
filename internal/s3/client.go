@@ -129,7 +129,10 @@ func NewClient(ctx context.Context, ep EndpointConfig) (*Client, error) {
 	// level signing / header mismatches).
 	logMode := aws.ClientLogMode(0)
 	if os.Getenv("BPM_S3_DEBUG") == "1" {
-		logMode = aws.LogRequest | aws.LogResponse
+		// LogResponseWithBody dumps the XML error body too — without it
+		// R2's 403 is opaque ('AccessDenied: Access Denied'), with it
+		// you see the actual reason code (InvalidArgument, etc).
+		logMode = aws.LogRequest | aws.LogResponseWithBody
 	}
 
 	awscfg, err := config.LoadDefaultConfig(ctx,
