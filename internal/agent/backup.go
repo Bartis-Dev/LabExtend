@@ -110,6 +110,10 @@ func (h *Handler) RunBackup(ctx context.Context, req *pb.RunBackupReq) (*pb.RunB
 	}()
 
 	// Reader side: stream to S3 in chunks (multipart upload).
+	slog.Info("backup: opening uploader",
+		"run_id", req.RunId, "endpoint", req.S3Endpoint, "region", req.S3Region,
+		"bucket", req.S3Bucket, "key", req.S3Key, "path_style", req.S3PathStyle,
+		"access_key", req.S3AccessKey)
 	uploader, err := s3.NewUploader(s3.UploaderConfig{
 		Endpoint:  req.S3Endpoint,
 		Region:    req.S3Region,
@@ -120,15 +124,25 @@ func (h *Handler) RunBackup(ctx context.Context, req *pb.RunBackupReq) (*pb.RunB
 	})
 	if err != nil {
 		_ = pr.Close()
+		slog.Warn("backup: uploader init failed",
+			"run_id", req.RunId, "endpoint", req.S3Endpoint, "err", err)
 		return nil, fmt.Errorf("s3 init: %w", err)
 	}
 
 	uploaded, uploadErr := uploader.Upload(runCtx, req.S3Key, pr)
 
 	if walkErr != nil {
+		slog.Warn("backup: walk failed", "run_id", req.RunId, "err", walkErr)
 		return nil, walkErr
 	}
 	if uploadErr != nil {
+		// Log the FULL AWS error string here — the leader truncates it for
+		// the Discord embed, this line in the agent log is the source of
+		// truth when diagnosing 403 / signature issues.
+		slog.Warn("backup: S3 upload failed",
+			"run_id", req.RunId, "endpoint", req.S3Endpoint, "region", req.S3Region,
+			"bucket", req.S3Bucket, "key", req.S3Key, "path_style", req.S3PathStyle,
+			"err", uploadErr.Error())
 		return nil, uploadErr
 	}
 

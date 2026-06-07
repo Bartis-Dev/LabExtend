@@ -421,7 +421,11 @@ func (r *Runner) fireWebhook(ctx context.Context, p plan, status, planName, runI
 		var failed []string
 		for _, n := range results {
 			if n.Status != "success" {
-				failed = append(failed, n.NodeID+": "+truncate(n.Error, 100))
+				// 400 chars per node — leaves room for ~3 failing nodes
+				// inside Discord's 1024-char field cap and actually shows
+				// the AWS error code (AccessDenied / SignatureDoesNotMatch)
+				// that always sits after the truncation point at 100.
+				failed = append(failed, n.NodeID+": "+truncate(n.Error, 400))
 			}
 		}
 		if len(failed) > 0 {
