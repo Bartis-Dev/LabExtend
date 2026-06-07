@@ -13,7 +13,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -38,9 +40,7 @@ type staticEndpointResolver struct {
 }
 
 func newStaticResolver(rawURL string, pathStyle bool) (*staticEndpointResolver, error) {
-	// Tolerate stored values without a scheme — Hetzner's docs show endpoints
-	// as bare hostnames (nbg1.your-objectstorage.com), and users naturally
-	// paste them that way. Default to https.
+	original := rawURL
 	rawURL = strings.TrimSpace(rawURL)
 	if !strings.Contains(rawURL, "://") {
 		rawURL = "https://" + rawURL
@@ -52,17 +52,18 @@ func newStaticResolver(rawURL string, pathStyle bool) (*staticEndpointResolver, 
 	if u.Scheme == "" || u.Host == "" {
 		return nil, fmt.Errorf("endpoint must be a full URL (scheme + host), got %q", rawURL)
 	}
-	// Strip path + query + fragment. The R2 dashboard hands users a URL
+	// Strip path + query + fragment. R2's dashboard hands users a URL
 	// like https://<account>.r2.cloudflarestorage.com/<bucket> — users
-	// (correctly per its UI) paste the whole thing. With the bucket in
-	// the endpoint path, path-style requests build /<bucket>/<bucket>/<key>
-	// which HeadBucket *sometimes* tolerates but PutObject / multipart
-	// uploads sign+route against, producing 403 SignatureDoesNotMatch.
-	// The S3 endpoint URL is by definition the host only.
+	// (correctly per its UI) paste the whole thing. The S3 endpoint URL
+	// is by definition the host only.
+	hadPath := u.Path != "" && u.Path != "/"
 	u.Path = ""
 	u.RawPath = ""
 	u.RawQuery = ""
 	u.Fragment = ""
+	slog.Info("s3.client: resolver built",
+		"original", original, "stripped", u.String(),
+		"had_path", hadPath, "path_style", pathStyle, "bucket_sub", !pathStyle)
 	return &staticEndpointResolver{uri: *u, bucketSub: !pathStyle}, nil
 }
 
@@ -119,6 +120,16 @@ func NewClient(ctx context.Context, ep EndpointConfig) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	// LogMode: BPM_S3_DEBUG=1 turns on full HTTP request + response
+	// logging via slog at INFO level. Use for diagnosing 403s where the
+	// AWS error code (AccessDenied / SignatureDoesNotMatch) doesn't
+	// match the actual cause (R2 returns AccessDenied for many low-
+	// level signing / header mismatches).
+	logMode := aws.ClientLogMode(0)
+	if os.Getenv("BPM_S3_DEBUG") == "1" {
+		logMode = aws.LogRequest | aws.LogResponse
+	}
+
 	awscfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion(ep.Region),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(ep.Creds.AccessKey, ep.Creds.SecretKey, "")),
@@ -132,6 +143,7 @@ func NewClient(ctx context.Context, ep EndpointConfig) (*Client, error) {
 		// is what these providers expect.
 		config.WithRequestChecksumCalculation(aws.RequestChecksumCalculationWhenRequired),
 		config.WithResponseChecksumValidation(aws.ResponseChecksumValidationWhenRequired),
+		config.WithClientLogMode(logMode),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("aws config: %w", err)
