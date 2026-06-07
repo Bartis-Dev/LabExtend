@@ -36,9 +36,14 @@ import (
 // `Invalid region: region was not a valid DNS name`). For S3-compatible
 // providers (Hetzner, Backblaze, MinIO, …) we always know the exact URL
 // up-front — the rules engine is just noise.
+//
+// IMPORTANT: when a custom EndpointResolverV2 is set, the SDK no longer
+// auto-injects the bucket into the URL — it's our job. Otherwise PutObject
+// would go to /<key> with no bucket, and R2 happily returns
+// 403 AccessDenied for the missing-bucket case.
 type staticEndpointResolver struct {
-	uri        url.URL
-	bucketSub  bool // virtual-hosted (false = path style)
+	uri       url.URL
+	pathStyle bool // true: bucket in path, false: bucket as subdomain
 }
 
 func newStaticResolver(rawURL string, pathStyle bool) (*staticEndpointResolver, error) {
@@ -65,17 +70,26 @@ func newStaticResolver(rawURL string, pathStyle bool) (*staticEndpointResolver, 
 	u.Fragment = ""
 	slog.Info("s3.client: resolver built",
 		"original", original, "stripped", u.String(),
-		"had_path", hadPath, "path_style", pathStyle, "bucket_sub", !pathStyle)
-	return &staticEndpointResolver{uri: *u, bucketSub: !pathStyle}, nil
+		"had_path", hadPath, "path_style", pathStyle)
+	return &staticEndpointResolver{uri: *u, pathStyle: pathStyle}, nil
 }
 
-// ResolveEndpoint returns our fixed URL. For path-style we always return the
-// same host (the bucket goes in the path). For virtual-hosted we prepend the
-// bucket as a subdomain.
+// ResolveEndpoint returns a URL with the bucket injected based on the
+// configured style:
+//   - pathStyle=true  → /<bucket>  prepended to the request path
+//   - pathStyle=false → <bucket>.  prepended to the host (virtual-hosted)
+//
+// The SDK appends /<key> to whatever we return, so the final request URL
+// becomes /<bucket>/<key> (path) or bucket.host/<key> (virtual).
 func (r *staticEndpointResolver) ResolveEndpoint(_ context.Context, params awss3.EndpointParameters) (smithyendpoints.Endpoint, error) {
 	out := r.uri
-	if r.bucketSub && params.Bucket != nil && *params.Bucket != "" {
-		out.Host = *params.Bucket + "." + out.Host
+	if params.Bucket != nil && *params.Bucket != "" {
+		bucket := *params.Bucket
+		if r.pathStyle {
+			out.Path = "/" + bucket
+		} else {
+			out.Host = bucket + "." + out.Host
+		}
 	}
 	return smithyendpoints.Endpoint{URI: out}, nil
 }
