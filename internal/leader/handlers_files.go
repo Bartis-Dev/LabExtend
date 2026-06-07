@@ -120,13 +120,30 @@ func (d *FilesDeps) DeletePath(w http.ResponseWriter, r *http.Request) {
 // resolveManagedRoot looks up the node_paths row for this (nodeID, root) and
 // returns the canonical absolute path. Prevents callers from poking outside
 // the labels they were allowed to manage.
+// virtualFullRoot is the implicit "/" managed root every node has. Writes
+// under it default to uid 0:0, no read-only, no DB entry. User-defined
+// Path Profiles take precedence when their path is more specific.
+func virtualFullRoot(nodeID string) NodePath {
+	return NodePath{
+		NodeID:     nodeID,
+		Label:      "Full filesystem (/)",
+		Path:       "/",
+		DefaultUID: 0,
+		DefaultGID: 0,
+	}
+}
+
 func (d *FilesDeps) resolveManagedRoot(ctx serverCtx, nodeID, root string) (NodePath, error) {
+	cleaned := filepath.Clean(root)
+	if cleaned == "/" {
+		return virtualFullRoot(nodeID), nil
+	}
 	var p NodePath
 	var ro int
 	err := d.DB.QueryRowContext(ctx,
 		`SELECT id, node_id, label, path, default_uid, default_gid,
 		        COALESCE(default_user_label,''), read_only, created_at
-		 FROM node_paths WHERE node_id = ? AND path = ?`, nodeID, filepath.Clean(root),
+		 FROM node_paths WHERE node_id = ? AND path = ?`, nodeID, cleaned,
 	).Scan(&p.ID, &p.NodeID, &p.Label, &p.Path, &p.DefaultUID, &p.DefaultGID,
 		&p.DefaultUserLabel, &ro, &p.CreatedAt)
 	if err != nil {
@@ -450,6 +467,102 @@ func (d *FilesDeps) LookupUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res.GetLookupUser())
 }
 
+// SuggestOwner stats the file at `path` and its parent directory, and
+// reports whether the file's owner differs from the parent's. Used by the
+// frontend's "Fix permissions" affordance: when you create a file as root
+// inside a directory owned by 999:999 (a container user), the file ends
+// up as root:root and the UI offers to chown it back to 999:999 — what
+// the surrounding files already are.
+//
+// Returns:
+//
+//	{
+//	  needs_fix: bool,
+//	  current:   { uid, gid, owner_name, group_name },
+//	  suggested: { uid, gid, owner_name, group_name, source: "parent" },
+//	  parent_path: "/var/lib/...",
+//	  is_dir: bool,                // if true, recursive chown is meaningful
+//	}
+func (d *FilesDeps) SuggestOwner(w http.ResponseWriter, r *http.Request) {
+	nodeID := chi.URLParam(r, "id")
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if body.Path == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("path required"))
+		return
+	}
+	cleaned := filepath.Clean(body.Path)
+	if err := d.assertUnderManagedRoot(r.Context(), nodeID, cleaned); err != nil {
+		writeErr(w, http.StatusForbidden, err)
+		return
+	}
+	parent := filepath.Dir(cleaned)
+	if parent == cleaned {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"needs_fix": false,
+			"reason":    "path has no parent (filesystem root)",
+		})
+		return
+	}
+
+	conn, err := d.Registry.RequireAgent(nodeID)
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, err)
+		return
+	}
+
+	curRes, err := conn.RequestWithDefault(r.Context(), &pb.Command{
+		Op: &pb.Command_Stat{Stat: &pb.StatReq{Path: cleaned}},
+	})
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, fmt.Errorf("stat %s: %w", cleaned, err))
+		return
+	}
+	curEntry := curRes.GetStat().GetEntry()
+	if curEntry == nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("stat returned no entry for %s", cleaned))
+		return
+	}
+
+	parRes, err := conn.RequestWithDefault(r.Context(), &pb.Command{
+		Op: &pb.Command_Stat{Stat: &pb.StatReq{Path: parent}},
+	})
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, fmt.Errorf("stat parent %s: %w", parent, err))
+		return
+	}
+	parEntry := parRes.GetStat().GetEntry()
+	if parEntry == nil {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("stat returned no entry for parent %s", parent))
+		return
+	}
+
+	needsFix := curEntry.Uid != parEntry.Uid || curEntry.Gid != parEntry.Gid
+	writeJSON(w, http.StatusOK, map[string]any{
+		"needs_fix": needsFix,
+		"current": map[string]any{
+			"uid":        curEntry.Uid,
+			"gid":        curEntry.Gid,
+			"owner_name": curEntry.OwnerName,
+			"group_name": curEntry.GroupName,
+		},
+		"suggested": map[string]any{
+			"uid":        parEntry.Uid,
+			"gid":        parEntry.Gid,
+			"owner_name": parEntry.OwnerName,
+			"group_name": parEntry.GroupName,
+			"source":     "parent",
+		},
+		"parent_path": parent,
+		"is_dir":      curEntry.IsDir,
+	})
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 // assertUnderManagedRoot returns nil if `path` lies inside ANY of the node's
@@ -460,7 +573,9 @@ func (d *FilesDeps) assertUnderManagedRoot(ctx serverCtx, nodeID, path string) e
 	return err
 }
 
-// findManagedRoot returns the managed-path entry that contains `path`.
+// findManagedRoot returns the most-specific managed-path entry that
+// contains `path`. Falls back to the virtual full-filesystem root if no
+// user-defined profile matches but the path is absolute.
 func (d *FilesDeps) findManagedRoot(ctx serverCtx, nodeID, path string) (NodePath, error) {
 	cleaned := filepath.Clean(path)
 	rows, err := d.DB.QueryContext(ctx, `
@@ -471,6 +586,8 @@ func (d *FilesDeps) findManagedRoot(ctx serverCtx, nodeID, path string) (NodePat
 		return NodePath{}, err
 	}
 	defer rows.Close()
+	var best NodePath
+	bestLen := -1
 	for rows.Next() {
 		var p NodePath
 		var ro int
@@ -480,10 +597,21 @@ func (d *FilesDeps) findManagedRoot(ctx serverCtx, nodeID, path string) (NodePat
 		}
 		p.ReadOnly = ro == 1
 		if cleaned == p.Path || strings.HasPrefix(cleaned, p.Path+"/") {
-			return p, nil
+			if len(p.Path) > bestLen {
+				best = p
+				bestLen = len(p.Path)
+			}
 		}
 	}
-	return NodePath{}, fmt.Errorf("path %q is not under any managed root for this node", cleaned)
+	if bestLen >= 0 {
+		return best, nil
+	}
+	// No explicit profile matched. Fall back to the virtual full root —
+	// every absolute path is reachable, defaults are root:root.
+	if strings.HasPrefix(cleaned, "/") {
+		return virtualFullRoot(nodeID), nil
+	}
+	return NodePath{}, fmt.Errorf("path %q is not absolute", cleaned)
 }
 
 // serverCtx is an alias so handler-helper signatures stay short.

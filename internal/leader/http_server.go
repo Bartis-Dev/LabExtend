@@ -149,6 +149,7 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 			authed.Post("/nodes/{id}/files/rename", filesDeps.Rename)
 			authed.Delete("/nodes/{id}/files", filesDeps.Delete)
 			authed.Post("/nodes/{id}/files/chown", filesDeps.Chown)
+			authed.Post("/nodes/{id}/files/suggest-owner", filesDeps.SuggestOwner)
 			authed.Get("/nodes/{id}/files/lookup-user", filesDeps.LookupUser)
 
 			// ── cron ──────────────────────────────────────────────────

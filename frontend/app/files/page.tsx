@@ -7,7 +7,7 @@ import { api } from '@/lib/api';
 import type { NodeView } from '@/lib/types';
 import { AuthShell } from '@/components/auth-shell';
 import { fmtBytes, fmtAbsTime } from '@/lib/format';
-import { Folder, File as FileIcon, ChevronRight, RefreshCw, Trash2, FolderPlus, UserCog } from 'lucide-react';
+import { Folder, File as FileIcon, ChevronRight, RefreshCw, Trash2, FolderPlus, UserCog, ShieldAlert, HardDrive } from 'lucide-react';
 
 interface NodePath {
   id: number;
@@ -44,10 +44,26 @@ export default function FilesPage() {
   );
 }
 
+// VIRTUAL_ROOT is the implicit "/" entry every node gets in the sidebar.
+// Backend's findManagedRoot accepts any absolute path as virtual; here we
+// just synthesize the sidebar item so the user has a one-click entry into
+// the full filesystem without configuring a Path Profile.
+const VIRTUAL_ROOT: NodePath = {
+  id: -1,
+  node_id: '',
+  label: 'Full filesystem (/)',
+  path: '/',
+  default_uid: 0,
+  default_gid: 0,
+  default_user_label: 'root',
+  read_only: false,
+  created_at: 0,
+};
+
 function Files() {
   const params = useSearchParams();
   const nodeID = params.get('node') ?? '';
-  const root = params.get('root') ?? '';
+  const root = params.get('root') || '/';   // implicit virtual root when empty
   const sub = params.get('sub') ?? '';
 
   const [nodes, setNodes] = useState<NodeView[]>([]);
@@ -56,6 +72,7 @@ function Files() {
   const [showHidden, setShowHidden] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [fixTarget, setFixTarget] = useState<FileEntry | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -162,7 +179,9 @@ function Files() {
       <header className="mb-4 flex items-end justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Files</h1>
-          <p className="text-xs text-zinc-500">Per-node browser. Operations bounded by configured managed roots.</p>
+          <p className="text-xs text-zinc-500">
+            Per-node browser. Full filesystem by default, optional Path Profiles jail writes to a specific UID.
+          </p>
         </div>
         <div className="flex gap-2 text-xs">
           <button onClick={loadEntries} className="btn-ghost"><RefreshCw className="h-3.5 w-3.5" /> refresh</button>
@@ -189,9 +208,24 @@ function Files() {
           </div>
           {nodeID && (
             <div className="card mt-3 p-3">
-              <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">Managed roots</div>
+              <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">Roots</div>
               <ul className="space-y-1">
-                {paths.length === 0 && <li className="text-xs text-zinc-500">none yet</li>}
+                <li>
+                  <Link href={`/files?node=${encodeURIComponent(nodeID)}&root=${encodeURIComponent('/')}`}
+                    className={`block rounded-md px-2 py-1 text-sm ${root === '/' ? 'bg-zinc-100 dark:bg-zinc-800' : 'hover:bg-zinc-100 dark:hover:bg-zinc-900'}`}
+                  >
+                    <div className="inline-flex items-center gap-1.5">
+                      <HardDrive className="h-3.5 w-3.5 text-zinc-500" />
+                      <span>{VIRTUAL_ROOT.label}</span>
+                    </div>
+                    <div className="text-[10px] text-zinc-400">full access · writes as root:root</div>
+                  </Link>
+                </li>
+              </ul>
+
+              <div className="mt-3 mb-1 text-[11px] uppercase tracking-wide text-zinc-500">Path Profiles</div>
+              <ul className="space-y-1">
+                {paths.length === 0 && <li className="text-xs text-zinc-500">none yet — add one to jail file ops to a specific path + UID</li>}
                 {paths.map((p) => (
                   <li key={p.id}>
                     <Link href={`/files?node=${encodeURIComponent(nodeID)}&root=${encodeURIComponent(p.path)}`}
@@ -199,7 +233,7 @@ function Files() {
                     >
                       <div>{p.label}</div>
                       <div className="font-mono text-[11px] text-zinc-500">{p.path}</div>
-                      <div className="text-[10px] text-zinc-400">default {p.default_uid}:{p.default_gid}{p.read_only && ' · read-only'}</div>
+                      <div className="text-[10px] text-zinc-400">writes as {p.default_user_label || p.default_uid}:{p.default_gid}{p.read_only && ' · read-only'}</div>
                     </Link>
                   </li>
                 ))}
@@ -257,7 +291,8 @@ function Files() {
                       <td className="px-4 py-2 font-mono text-[12px] text-zinc-500">{e.owner_name || e.uid}:{e.gid}</td>
                       <td className="px-4 py-2 text-[11px] text-zinc-500">{fmtAbsTime(e.mtime_ms)}</td>
                       <td className="px-4 py-2 text-right">
-                        <button onClick={() => onChown(e)} className="btn-ghost" title="chown"><UserCog className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => setFixTarget(e)} className="btn-ghost text-amber-600" title="fix permissions to match surrounding files"><ShieldAlert className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => onChown(e)} className="btn-ghost" title="manual chown"><UserCog className="h-3.5 w-3.5" /></button>
                         <button onClick={() => onDelete(e)} className="btn-ghost text-red-600" title="delete"><Trash2 className="h-3.5 w-3.5" /></button>
                       </td>
                     </tr>
@@ -269,11 +304,142 @@ function Files() {
               </table>
             ) : (
               <div className="p-8 text-center text-sm text-zinc-500">
-                {nodeID ? 'Pick a managed root from the sidebar.' : 'Pick a node from the sidebar.'}
+                Pick a node from the sidebar.
               </div>
             )}
           </div>
         </section>
+      </div>
+
+      {fixTarget && (
+        <FixPermissionsModal
+          nodeID={nodeID}
+          path={fullPath(fixTarget.name)}
+          file={fixTarget}
+          onClose={() => setFixTarget(null)}
+          onDone={() => { setFixTarget(null); loadEntries(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Fix-permissions modal ──────────────────────────────────────────────────
+// Fetches suggested owner (= parent dir's uid:gid) and prompts user to
+// apply. Default recursive ON for directories — that's the case where
+// "I created some files as root inside this volume and now nothing inside
+// works" is most painful.
+function FixPermissionsModal({ nodeID, path, file, onClose, onDone }: {
+  nodeID: string;
+  path: string;
+  file: FileEntry;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [suggest, setSuggest] = useState<{
+    needs_fix: boolean;
+    current?: { uid: number; gid: number; owner_name?: string; group_name?: string };
+    suggested?: { uid: number; gid: number; owner_name?: string; group_name?: string; source?: string };
+    parent_path?: string;
+    is_dir?: boolean;
+    reason?: string;
+  } | null>(null);
+  const [recursive, setRecursive] = useState(file.is_dir);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api<typeof suggest>(`/api/nodes/${encodeURIComponent(nodeID)}/files/suggest-owner`, {
+          method: 'POST', body: { path },
+        });
+        setSuggest(r);
+      } catch (e: unknown) {
+        const er = e as { body?: { error?: string } };
+        setErr(er?.body?.error ?? String(e));
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [nodeID, path]);
+
+  const apply = async () => {
+    if (!suggest?.suggested) return;
+    setBusy(true);
+    try {
+      const res = await api<{ changed_count: number }>(`/api/nodes/${encodeURIComponent(nodeID)}/files/chown`, {
+        method: 'POST',
+        body: { path, uid: suggest.suggested.uid, gid: suggest.suggested.gid, recursive },
+      });
+      alert(`Changed ${res.changed_count} entries.`);
+      onDone();
+    } catch (e: unknown) {
+      const er = e as { body?: { error?: string } };
+      setErr(er?.body?.error ?? String(e));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="card w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <h3 className="mb-1 flex items-center gap-2 text-base font-semibold">
+          <ShieldAlert className="h-4 w-4 text-amber-600" /> Fix permissions
+        </h3>
+        <p className="mb-3 font-mono text-[11px] text-zinc-500">{path}</p>
+
+        {loading && <p className="text-sm text-zinc-500">Analyzing…</p>}
+        {err && <p className="text-sm text-red-600">{err}</p>}
+
+        {suggest && !suggest.needs_fix && (
+          <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+            Already matches parent directory ({suggest.current?.uid}:{suggest.current?.gid}). Nothing to fix.
+          </p>
+        )}
+
+        {suggest && suggest.needs_fix && suggest.current && suggest.suggested && (
+          <div className="space-y-3 text-sm">
+            <div className="rounded-md bg-zinc-50 p-3 dark:bg-zinc-900/40">
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <div className="text-[10px] uppercase text-zinc-500">current</div>
+                  <div className="font-mono">
+                    {suggest.current.owner_name || suggest.current.uid}:{suggest.current.group_name || suggest.current.gid}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase text-zinc-500">suggested (parent dir)</div>
+                  <div className="font-mono text-emerald-700 dark:text-emerald-400">
+                    {suggest.suggested.owner_name || suggest.suggested.uid}:{suggest.suggested.group_name || suggest.suggested.gid}
+                  </div>
+                </div>
+              </div>
+              {suggest.parent_path && (
+                <div className="mt-2 truncate text-[10px] text-zinc-400">
+                  parent: <span className="font-mono">{suggest.parent_path}</span>
+                </div>
+              )}
+            </div>
+
+            {file.is_dir && (
+              <label className="flex cursor-pointer items-center gap-2 text-xs">
+                <input type="checkbox" checked={recursive} onChange={(e) => setRecursive(e.target.checked)} />
+                Apply recursively (every file and subdir inside)
+              </label>
+            )}
+          </div>
+        )}
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button onClick={onClose} className="btn-ghost">Cancel</button>
+          {suggest?.needs_fix && (
+            <button onClick={apply} disabled={busy} className="btn-primary">
+              {busy ? 'Applying…' : `Set owner ${suggest.suggested?.uid}:${suggest.suggested?.gid}${recursive && file.is_dir ? ' (recursive)' : ''}`}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
