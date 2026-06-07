@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -37,6 +38,13 @@ type staticEndpointResolver struct {
 }
 
 func newStaticResolver(rawURL string, pathStyle bool) (*staticEndpointResolver, error) {
+	// Tolerate stored values without a scheme — Hetzner's docs show endpoints
+	// as bare hostnames (nbg1.your-objectstorage.com), and users naturally
+	// paste them that way. Default to https.
+	rawURL = strings.TrimSpace(rawURL)
+	if !strings.Contains(rawURL, "://") {
+		rawURL = "https://" + rawURL
+	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse endpoint %q: %w", rawURL, err)
