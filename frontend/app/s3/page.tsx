@@ -95,11 +95,17 @@ function S3() {
   };
   const test = async (id: string) => {
     try {
-      const r = await api<{ ok: boolean; bucket_count?: number; tested_bucket?: string; hint?: string }>(
+      const r = await api<{ ok: boolean; bucket_count?: number; tested_bucket?: string; write_probe?: string; hint?: string }>(
         `/api/s3/endpoints/${encodeURIComponent(id)}/test`, { method: 'POST' });
-      if (r.tested_bucket) alert(`OK — bucket "${r.tested_bucket}" reachable.`);
-      else if (r.hint)     alert(`OK — ${r.bucket_count ?? 0} buckets visible.\n\n${r.hint}`);
-      else                 alert(`OK — ${r.bucket_count ?? 0} bucket(s) visible.`);
+      if (r.tested_bucket && r.write_probe === 'ok') {
+        alert(`OK — bucket "${r.tested_bucket}" reachable. Read + write both work.`);
+      } else if (r.tested_bucket) {
+        alert(`OK — bucket "${r.tested_bucket}" reachable (read only verified).`);
+      } else if (r.hint) {
+        alert(`OK — ${r.bucket_count ?? 0} buckets visible.\n\n${r.hint}`);
+      } else {
+        alert(`OK — ${r.bucket_count ?? 0} bucket(s) visible.`);
+      }
     } catch (e: unknown) { alert('failed: ' + apiErr(e)); }
   };
 

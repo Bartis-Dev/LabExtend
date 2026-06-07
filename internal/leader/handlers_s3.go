@@ -1,6 +1,7 @@
 package leader
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -219,10 +220,35 @@ func (d *S3Deps) Test(w http.ResponseWriter, r *http.Request) {
 
 	if defaultBucket != "" {
 		if perr := c.HeadBucket(r.Context(), defaultBucket); perr == nil {
-			slog.Info("s3.test: HeadBucket fallback ok",
+			// HeadBucket worked → also try a real PutObject + DeleteObject
+			// roundtrip. Many S3-compatible providers (R2 most notably)
+			// distinguish read-only and read+write permissions at this
+			// boundary, and HeadBucket alone is not enough to confirm
+			// the agent will be able to upload a backup.
+			probeKey := fmt.Sprintf("_labextend_probe_%d.txt", time.Now().UnixNano())
+			probeBody := []byte("labextend connectivity probe — safe to delete")
+			if werr := c.PutObject(r.Context(), defaultBucket, probeKey,
+				bytes.NewReader(probeBody), "text/plain"); werr != nil {
+				slog.Warn("s3.test: HeadBucket ok but PutObject probe failed",
+					"endpoint_id", id, "name", name, "bucket", defaultBucket,
+					"probe_key", probeKey, "err", werr.Error())
+				writeErr(w, http.StatusBadGateway, fmt.Errorf(
+					"read works (HeadBucket ok) but write fails (PutObject %q): %v — your token most likely has Object Read only, not Read+Write, or is scoped to a different bucket",
+					probeKey, werr))
+				return
+			}
+			// Best-effort cleanup. We don't fail the test if this errors —
+			// the upload itself succeeded, that's the answer we wanted.
+			if _, derr := c.DeleteObjects(r.Context(), defaultBucket, []string{probeKey}); derr != nil {
+				slog.Warn("s3.test: probe cleanup failed (object remains)",
+					"endpoint_id", id, "name", name, "bucket", defaultBucket,
+					"probe_key", probeKey, "err", derr)
+			}
+			slog.Info("s3.test: HeadBucket + write probe ok",
 				"endpoint_id", id, "name", name, "bucket", defaultBucket)
 			writeJSON(w, http.StatusOK, map[string]any{
 				"ok": true, "tested_bucket": defaultBucket,
+				"write_probe": "ok",
 			})
 			return
 		} else {
