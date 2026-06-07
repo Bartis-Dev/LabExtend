@@ -441,19 +441,54 @@ func (r *Runner) fireWebhook(ctx context.Context, p plan, status, planName, runI
 
 // renderKeyTemplate substitutes placeholders in the S3 key template.
 // Supported: {date}, {datetime}, {host}, {node_id}, {plan}, {plan_id}.
+//
+// Substituted values are passed through s3KeySafe — S3 allows almost any
+// byte in a key but providers' SigV4 signers do NOT all handle the same
+// special chars the same way. The classic killer is ':' in a key path:
+// Cloudflare R2 rejects the request with `403 AccessDenied` (instead of
+// a clearer SignatureDoesNotMatch) when the path contains a raw colon.
+// Plan names like "Docker-Volumes-Daily-03:00" explode silently without
+// this. We normalize *substituted values only* — the template itself
+// (your slashes between segments) is honored as written.
 func renderKeyTemplate(tmpl string, t AgentInfo, p plan, now time.Time) string {
 	r := strings.NewReplacer(
 		"{date}", now.Format("2006-01-02"),
 		"{datetime}", now.Format("2006-01-02T15-04-05"),
-		"{host}", t.Hostname,
-		"{node_id}", t.ID,
-		"{plan}", p.Name,
-		"{plan_id}", p.ID,
+		"{host}", s3KeySafe(t.Hostname),
+		"{node_id}", s3KeySafe(t.ID),
+		"{plan}", s3KeySafe(p.Name),
+		"{plan_id}", s3KeySafe(p.ID),
 	)
 	if tmpl == "" {
 		tmpl = "backups/{host}/{date}/{plan}.tar.gz"
 	}
 	return r.Replace(tmpl)
+}
+
+// s3KeySafe normalizes a string for safe embedding in an S3 object key
+// segment. Keeps alphanumerics, dot, dash, underscore. Everything else
+// becomes a dash (collapsing runs of dashes to a single one). Per AWS
+// docs these are the "safe" characters that every S3-compatible
+// implementation handles identically.
+func s3KeySafe(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	lastDash := false
+	for _, r := range s {
+		ok := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '.' || r == '-' || r == '_'
+		if ok {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	// Trim leading/trailing dashes.
+	return strings.Trim(b.String(), "-")
 }
 
 func humanBytes(n uint64) string {
