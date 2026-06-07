@@ -322,12 +322,22 @@ func (r *Runner) resolveScope(p plan) []AgentInfo {
 	case "all":
 		return all
 	case "node":
-		for _, a := range all {
-			if a.ID == p.ScopeValue || a.Hostname == p.ScopeValue {
-				return []AgentInfo{a}
+		// Comma-separated list of node IDs or hostnames. Allows the UI to
+		// offer a multiselect and still encode the result in one column.
+		wanted := make(map[string]bool)
+		for _, w := range strings.Split(p.ScopeValue, ",") {
+			w = strings.TrimSpace(w)
+			if w != "" {
+				wanted[w] = true
 			}
 		}
-		return nil
+		out := make([]AgentInfo, 0)
+		for _, a := range all {
+			if wanted[a.ID] || wanted[a.Hostname] {
+				out = append(out, a)
+			}
+		}
+		return out
 	case "label":
 		k, v, ok := strings.Cut(p.ScopeValue, "=")
 		if !ok {

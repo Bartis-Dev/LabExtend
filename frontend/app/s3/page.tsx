@@ -255,7 +255,15 @@ function S3() {
             <h3 className="mb-3 text-base font-semibold">{editing.id ? 'Edit endpoint' : 'New endpoint'}</h3>
             <div className="space-y-3 text-sm">
               <Field label="Name"><input className="input" value={editing.name ?? ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Field>
-              <Field label="Endpoint URL"><input className="input font-mono text-[12px]" placeholder="https://fsn1.your-objectstorage.com" value={editing.endpoint ?? ''} onChange={(e) => setEditing({ ...editing, endpoint: e.target.value })} /></Field>
+              <Field label="Endpoint URL">
+                <input className="input font-mono text-[12px]" placeholder="https://fsn1.your-objectstorage.com" value={editing.endpoint ?? ''} onChange={(e) => setEditing({ ...editing, endpoint: e.target.value })} />
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  <strong>Nur host, kein bucket im pfad.</strong> Cloudflare R2 zeigt&nbsp;
+                  <code className="text-[10px]">https://&lt;account&gt;.r2.cloudflarestorage.com/&lt;bucket&gt;</code>
+                  — den <code className="text-[10px]">/&lt;bucket&gt;</code>-Teil weglassen. Hetzner:&nbsp;
+                  <code className="text-[10px]">https://nbg1.your-objectstorage.com</code>
+                </p>
+              </Field>
               <Field label="Region"><input className="input" value={editing.region ?? 'us-east-1'} onChange={(e) => setEditing({ ...editing, region: e.target.value })} /></Field>
               <Field label="Access key"><input className="input font-mono text-[12px]" value={editing.access_key ?? ''} onChange={(e) => setEditing({ ...editing, access_key: e.target.value })} /></Field>
               <Field label={editing.id ? 'Secret key (leave empty to keep)' : 'Secret key'}>

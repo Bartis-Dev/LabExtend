@@ -52,6 +52,17 @@ func newStaticResolver(rawURL string, pathStyle bool) (*staticEndpointResolver, 
 	if u.Scheme == "" || u.Host == "" {
 		return nil, fmt.Errorf("endpoint must be a full URL (scheme + host), got %q", rawURL)
 	}
+	// Strip path + query + fragment. The R2 dashboard hands users a URL
+	// like https://<account>.r2.cloudflarestorage.com/<bucket> — users
+	// (correctly per its UI) paste the whole thing. With the bucket in
+	// the endpoint path, path-style requests build /<bucket>/<bucket>/<key>
+	// which HeadBucket *sometimes* tolerates but PutObject / multipart
+	// uploads sign+route against, producing 403 SignatureDoesNotMatch.
+	// The S3 endpoint URL is by definition the host only.
+	u.Path = ""
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
 	return &staticEndpointResolver{uri: *u, bucketSub: !pathStyle}, nil
 }
 

@@ -27,6 +27,7 @@ interface BackupRun {
 }
 interface S3EndpointMini { id: string; name: string }
 interface WebhookMini { id: string; name: string }
+interface NodeMini { id: string; hostname: string; labels?: Record<string, string> }
 
 export default function BackupsPage() {
   return <AuthShell><Backups /></AuthShell>;
@@ -37,6 +38,7 @@ function Backups() {
   const [runs, setRuns] = useState<BackupRun[]>([]);
   const [endpoints, setEndpoints] = useState<S3EndpointMini[]>([]);
   const [webhooks, setWebhooks] = useState<WebhookMini[]>([]);
+  const [nodes, setNodes] = useState<NodeMini[]>([]);
   const [editing, setEditing] = useState<Partial<BackupPlan> | null>(null);
 
   const load = async () => {
@@ -44,6 +46,7 @@ function Backups() {
     try { setRuns((await api<{ runs: BackupRun[] }>('/api/backups/runs?limit=50')).runs ?? []); } catch { /* */ }
     try { setEndpoints(((await api<{ endpoints: S3EndpointMini[] }>('/api/s3/endpoints')).endpoints ?? []).map((e) => ({ id: e.id, name: e.name }))); } catch { /* */ }
     try { setWebhooks(((await api<{ webhooks: WebhookMini[] }>('/api/webhooks')).webhooks ?? []).map((w) => ({ id: w.id, name: w.name }))); } catch { /* */ }
+    try { setNodes(((await api<{ nodes: NodeMini[] }>('/api/nodes')).nodes ?? []).map((n) => ({ id: n.id, hostname: n.hostname, labels: n.labels }))); } catch { /* */ }
   };
   useEffect(() => { load(); }, []);
   useSSE({
@@ -168,18 +171,14 @@ function Backups() {
                   value={(editing.sources ?? []).join(', ')}
                   onChange={(e) => setEditing({ ...editing, sources: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
               </Field>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Scope">
-                  <select className="input" value={editing.scope_type ?? 'all'} onChange={(e) => setEditing({ ...editing, scope_type: e.target.value })}>
-                    <option value="all">all agents</option>
-                    <option value="node">single node</option>
-                    <option value="label">label k=v</option>
-                  </select>
-                </Field>
-                <Field label="Scope value (host / label=value)">
-                  <input className="input" value={editing.scope_value ?? ''} onChange={(e) => setEditing({ ...editing, scope_value: e.target.value })} />
-                </Field>
-              </div>
+              <Field label="Scope">
+                <ScopePicker
+                  type={editing.scope_type ?? 'all'}
+                  value={editing.scope_value ?? ''}
+                  nodes={nodes}
+                  onChange={(t, v) => setEditing({ ...editing, scope_type: t, scope_value: v })}
+                />
+              </Field>
               <Field label="Schedule">
                 <SchedulePicker
                   variant="seconds"
@@ -241,5 +240,101 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="text-xs text-zinc-500">{label}</span>
       <div className="mt-1">{children}</div>
     </label>
+  );
+}
+
+// ScopePicker — three modes:
+//   all   : every connected agent (no value)
+//   node  : multiselect of currently-known agents (CSV of hostnames)
+//   label : free text in the form key=value (with autocomplete hint
+//           pulled from labels seen across the fleet)
+function ScopePicker({ type, value, nodes, onChange }: {
+  type: string;
+  value: string;
+  nodes: NodeMini[];
+  onChange: (type: string, value: string) => void;
+}) {
+  const selected = new Set(value.split(',').map((s) => s.trim()).filter(Boolean));
+  const toggle = (host: string) => {
+    if (selected.has(host)) selected.delete(host);
+    else selected.add(host);
+    onChange('node', Array.from(selected).join(','));
+  };
+
+  // Collect distinct labels for the autocomplete hint.
+  const labelHints = new Set<string>();
+  for (const n of nodes) {
+    for (const [k, v] of Object.entries(n.labels ?? {})) {
+      labelHints.add(`${k}=${v}`);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="inline-flex rounded-md border border-zinc-200 p-0.5 text-xs dark:border-zinc-700">
+        {[
+          { v: 'all',   label: 'All agents' },
+          { v: 'node',  label: 'Pick nodes' },
+          { v: 'label', label: 'By label' },
+        ].map((opt) => (
+          <button key={opt.v} type="button"
+            onClick={() => onChange(opt.v, opt.v === 'all' ? '' : value)}
+            className={`rounded px-2 py-1 ${type === opt.v ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400'}`}
+          >{opt.label}</button>
+        ))}
+      </div>
+
+      {type === 'all' && (
+        <p className="text-[11px] text-zinc-500">
+          Runs on every currently-connected agent ({nodes.length} {nodes.length === 1 ? 'node' : 'nodes'} right now).
+        </p>
+      )}
+
+      {type === 'node' && (
+        <div className="space-y-1.5 rounded-md bg-zinc-50 p-2 dark:bg-zinc-900/40">
+          {nodes.length === 0 ? (
+            <p className="text-[11px] text-zinc-500">No agents are connected right now. The plan will run on whatever's online when it fires.</p>
+          ) : nodes.map((n) => (
+            <label key={n.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800">
+              <input
+                type="checkbox"
+                checked={selected.has(n.hostname)}
+                onChange={() => toggle(n.hostname)}
+              />
+              <span className="font-mono">{n.hostname}</span>
+              {n.labels && Object.keys(n.labels).length > 0 && (
+                <span className="text-[10px] text-zinc-500">
+                  {Object.entries(n.labels).map(([k, v]) => `${k}=${v}`).join(' · ')}
+                </span>
+              )}
+            </label>
+          ))}
+          <p className="mt-2 text-[10px] text-zinc-500">{selected.size} selected</p>
+        </div>
+      )}
+
+      {type === 'label' && (
+        <div>
+          <input
+            className="input font-mono text-[12px]"
+            placeholder="role=worker"
+            value={value}
+            onChange={(e) => onChange('label', e.target.value)}
+          />
+          <p className="mt-1 text-[11px] text-zinc-500">
+            Format: <code>key=value</code> — matches any agent whose labels include the pair.
+            {labelHints.size > 0 && (
+              <> Examples from your fleet: {Array.from(labelHints).slice(0, 5).map((s, i) => (
+                <button key={i} type="button" onClick={() => onChange('label', s)}
+                  className="ml-1 rounded bg-zinc-100 px-1 font-mono text-[10px] hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700">{s}</button>
+              ))}</>
+            )}
+            <br />
+            Agent labels are set per-agent via the <code>BPM_AGENT_LABELS</code> env var
+            (e.g. <code>role=worker,zone=eu</code>) in your compose file.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
