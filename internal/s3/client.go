@@ -26,6 +26,8 @@ import (
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	smithyendpoints "github.com/aws/smithy-go/endpoints"
+	"github.com/aws/smithy-go/middleware"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 // staticEndpointResolver bypasses the aws-sdk-go-v2 endpoint-rules engine
@@ -152,6 +154,39 @@ func NewClient(ctx context.Context, ep EndpointConfig) (*Client, error) {
 		o.EndpointResolverV2 = resolver
 		o.UsePathStyle = ep.PathStyle
 		o.Region = ep.Region
+		// Belt-and-suspenders: also set the per-client option, not just
+		// the config-level one. NewFromConfig propagates these but if
+		// something in our chain re-overrides them, we lose the fix.
+		o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+		o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
+
+		// Strip every x-amz-*checksum* header BEFORE SigV4 signing.
+		// The manager.Uploader's CreateMultipartUpload path hard-codes a
+		// 'X-Amz-Checksum-Algorithm: CRC32' header that R2 rejects with
+		// a misleading '403 AccessDenied'. Setting
+		// RequestChecksumCalculation = WhenRequired alone doesn't remove
+		// it. We add a Build-stage middleware that wipes those headers
+		// after they're added but before Finalize-stage signing runs —
+		// the signature then only covers what actually ships.
+		o.APIOptions = append(o.APIOptions, func(stack *middleware.Stack) error {
+			return stack.Build.Add(
+				middleware.BuildMiddlewareFunc("BPMStripChecksumHeaders",
+					func(ctx context.Context, in middleware.BuildInput, next middleware.BuildHandler) (middleware.BuildOutput, middleware.Metadata, error) {
+						if req, ok := in.Request.(*smithyhttp.Request); ok {
+							for h := range req.Header {
+								lh := strings.ToLower(h)
+								if strings.HasPrefix(lh, "x-amz-checksum-") ||
+									strings.HasPrefix(lh, "x-amz-sdk-checksum-") ||
+									lh == "x-amz-trailer" {
+									req.Header.Del(h)
+								}
+							}
+						}
+						return next.HandleBuild(ctx, in)
+					}),
+				middleware.After,
+			)
+		})
 	})
 	up := manager.NewUploader(raw, func(u *manager.Uploader) {
 		u.PartSize = 8 * 1024 * 1024 // 8 MiB parts
