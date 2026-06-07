@@ -122,6 +122,16 @@ func NewClient(ctx context.Context, ep EndpointConfig) (*Client, error) {
 	awscfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion(ep.Region),
 		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(ep.Creds.AccessKey, ep.Creds.SecretKey, "")),
+		// Critical for S3-compatible providers (Cloudflare R2, Hetzner,
+		// Backblaze, MinIO). aws-sdk-go-v2 v1.30+ defaults to
+		// "WhenSupported" which adds an x-amz-checksum-crc32 header to
+		// every PUT / multipart upload. R2 + Hetzner reject the unknown
+		// header — and worse, return 403 AccessDenied instead of 400
+		// BadRequest, making the cause invisible. "WhenRequired" only
+		// sends a checksum when the caller explicitly sets one, which
+		// is what these providers expect.
+		config.WithRequestChecksumCalculation(aws.RequestChecksumCalculationWhenRequired),
+		config.WithResponseChecksumValidation(aws.ResponseChecksumValidationWhenRequired),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("aws config: %w", err)
@@ -137,8 +147,6 @@ func NewClient(ctx context.Context, ep EndpointConfig) (*Client, error) {
 	})
 	return &Client{cfg: ep, raw: raw, uploader: up}, nil
 }
-
-var _ = aws.String // keep import alive if other helpers remove their use
 
 // ListBuckets returns every bucket on the endpoint — cheap smoke test.
 func (c *Client) ListBuckets(ctx context.Context) ([]string, error) {
