@@ -110,8 +110,17 @@ function NodeRow({ node }: { node: NodeView }) {
           </div>
         </div>
         <div className="text-right text-[11px] text-zinc-500">
-          {offline ? 'last seen' : 'updated'}<br />
-          {fmtRelative(node.last_seen)}
+          {offline ? (
+            <>last seen<br />{fmtRelative(node.last_seen)}</>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+              <span className="relative inline-flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              </span>
+              live
+            </span>
+          )}
         </div>
       </div>
 

@@ -73,7 +73,7 @@ function S3() {
 
   const save = async (e: Partial<S3Endpoint & { secret_key: string }>) => {
     const payload = {
-      name: e.name ?? '', endpoint: e.endpoint ?? '', region: e.region || 'eu-central',
+      name: e.name ?? '', endpoint: e.endpoint ?? '', region: e.region || 'us-east-1',
       access_key: e.access_key ?? '', secret_key: e.secret_key ?? '',
       path_style: e.path_style ?? true, default_bucket: e.default_bucket ?? '',
     };
@@ -106,7 +106,7 @@ function S3() {
           <h1 className="text-2xl font-semibold tracking-tight">Object storage</h1>
           <p className="text-xs text-zinc-500">Hetzner Object Storage + any S3-compatible endpoint.</p>
         </div>
-        <button onClick={() => setEditing({ path_style: true, region: 'eu-central' })} className="btn-primary">Add endpoint</button>
+        <button onClick={() => setEditing({ path_style: true, region: 'us-east-1' })} className="btn-primary">Add endpoint</button>
       </header>
 
       <div className="card mb-4 overflow-hidden p-0">
@@ -203,7 +203,7 @@ function S3() {
             <div className="space-y-3 text-sm">
               <Field label="Name"><input className="input" value={editing.name ?? ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Field>
               <Field label="Endpoint URL"><input className="input font-mono text-[12px]" placeholder="https://fsn1.your-objectstorage.com" value={editing.endpoint ?? ''} onChange={(e) => setEditing({ ...editing, endpoint: e.target.value })} /></Field>
-              <Field label="Region"><input className="input" value={editing.region ?? 'eu-central'} onChange={(e) => setEditing({ ...editing, region: e.target.value })} /></Field>
+              <Field label="Region"><input className="input" value={editing.region ?? 'us-east-1'} onChange={(e) => setEditing({ ...editing, region: e.target.value })} /></Field>
               <Field label="Access key"><input className="input font-mono text-[12px]" value={editing.access_key ?? ''} onChange={(e) => setEditing({ ...editing, access_key: e.target.value })} /></Field>
               <Field label={editing.id ? 'Secret key (leave empty to keep)' : 'Secret key'}>
                 <input className="input font-mono text-[12px]" type="password" value={editing.secret_key ?? ''} onChange={(e) => setEditing({ ...editing, secret_key: e.target.value })} />

@@ -132,7 +132,9 @@ function NodeDetail() {
             {node.os}/{node.arch} · v{node.version || '—'}
             {m?.cpu_cores ? ` · ${m.cpu_cores} cores` : ''}
             {m?.uptime_seconds ? ` · up ${fmtUptime(m.uptime_seconds)}` : ''}
-            {' · '}{node.status === 'online' ? 'updated' : 'last seen'} {fmtRelative(node.last_seen)}
+            {node.status === 'online'
+              ? ''
+              : ' · last seen ' + fmtRelative(node.last_seen)}
           </p>
         </div>
         <span className={node.status === 'online' ? 'badge-green' : 'badge-zinc'}>{node.status}</span>

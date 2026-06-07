@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -21,7 +22,41 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	smithyendpoints "github.com/aws/smithy-go/endpoints"
 )
+
+// staticEndpointResolver bypasses the aws-sdk-go-v2 endpoint-rules engine
+// entirely. The rules engine validates region as a "DNS name" and refuses
+// anything that doesn't match (e.g. "eu-central" fails with
+// `Invalid region: region was not a valid DNS name`). For S3-compatible
+// providers (Hetzner, Backblaze, MinIO, …) we always know the exact URL
+// up-front — the rules engine is just noise.
+type staticEndpointResolver struct {
+	uri        url.URL
+	bucketSub  bool // virtual-hosted (false = path style)
+}
+
+func newStaticResolver(rawURL string, pathStyle bool) (*staticEndpointResolver, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse endpoint %q: %w", rawURL, err)
+	}
+	if u.Scheme == "" || u.Host == "" {
+		return nil, fmt.Errorf("endpoint must be a full URL (scheme + host), got %q", rawURL)
+	}
+	return &staticEndpointResolver{uri: *u, bucketSub: !pathStyle}, nil
+}
+
+// ResolveEndpoint returns our fixed URL. For path-style we always return the
+// same host (the bucket goes in the path). For virtual-hosted we prepend the
+// bucket as a subdomain.
+func (r *staticEndpointResolver) ResolveEndpoint(_ context.Context, params awss3.EndpointParameters) (smithyendpoints.Endpoint, error) {
+	out := r.uri
+	if r.bucketSub && params.Bucket != nil && *params.Bucket != "" {
+		out.Host = *params.Bucket + "." + out.Host
+	}
+	return smithyendpoints.Endpoint{URI: out}, nil
+}
 
 // Credentials is the minimal set needed to talk to any S3-compatible endpoint.
 type Credentials struct {
@@ -46,12 +81,24 @@ type Client struct {
 }
 
 // NewClient builds an S3 client configured for the given endpoint.
+//
+// The region is only used for SigV4 signing — endpoint resolution is fully
+// bypassed via staticEndpointResolver, so values like "eu-central" or
+// custom location codes ("nbg1") don't trip the aws-sdk-go-v2 endpoint
+// rules engine.
 func NewClient(ctx context.Context, ep EndpointConfig) (*Client, error) {
 	if ep.Endpoint == "" {
 		return nil, errors.New("endpoint URL required")
 	}
 	if ep.Region == "" {
-		ep.Region = "eu-central"
+		// us-east-1 is the universal default that every S3-compatible
+		// provider accepts in SigV4. Hetzner, Backblaze, MinIO, Wasabi
+		// all happily sign with this.
+		ep.Region = "us-east-1"
+	}
+	resolver, err := newStaticResolver(ep.Endpoint, ep.PathStyle)
+	if err != nil {
+		return nil, err
 	}
 	awscfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion(ep.Region),
@@ -61,8 +108,9 @@ func NewClient(ctx context.Context, ep EndpointConfig) (*Client, error) {
 		return nil, fmt.Errorf("aws config: %w", err)
 	}
 	raw := awss3.NewFromConfig(awscfg, func(o *awss3.Options) {
-		o.BaseEndpoint = aws.String(ep.Endpoint)
+		o.EndpointResolverV2 = resolver
 		o.UsePathStyle = ep.PathStyle
+		o.Region = ep.Region
 	})
 	up := manager.NewUploader(raw, func(u *manager.Uploader) {
 		u.PartSize = 8 * 1024 * 1024 // 8 MiB parts
@@ -70,6 +118,8 @@ func NewClient(ctx context.Context, ep EndpointConfig) (*Client, error) {
 	})
 	return &Client{cfg: ep, raw: raw, uploader: up}, nil
 }
+
+var _ = aws.String // keep import alive if other helpers remove their use
 
 // ListBuckets returns every bucket on the endpoint — cheap smoke test.
 func (c *Client) ListBuckets(ctx context.Context) ([]string, error) {
