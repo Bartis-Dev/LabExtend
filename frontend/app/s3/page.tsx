@@ -46,17 +46,29 @@ function S3() {
   };
   useEffect(() => { load(); }, []);
 
-  const loadBuckets = async (id: string) => {
+  const loadBuckets = async (id: string, ep?: S3Endpoint) => {
     setSelected(id); setBucket(''); setObjects([]); setPrefix('');
     try {
-      const r = await api<{ buckets: string[] }>(`/api/s3/endpoints/${encodeURIComponent(id)}/buckets`);
-      setBuckets(r.buckets ?? []);
+      const r = await api<{ buckets: string[]; bucket_scoped?: boolean }>(
+        `/api/s3/endpoints/${encodeURIComponent(id)}/buckets`,
+      );
+      const list = r.buckets ?? [];
+      setBuckets(list);
+      // Auto-open the bucket when there's only one (typical for bucket-
+      // scoped Hetzner / R2 credentials with default_bucket configured).
+      if (list.length === 1) {
+        loadObjects(list[0], '');
+      } else if (ep?.default_bucket && list.includes(ep.default_bucket)) {
+        loadObjects(ep.default_bucket, '');
+      }
     } catch (e: unknown) {
-      // Hetzner credentials are typically bucket-scoped and have no
-      // ListAllMyBuckets permission → 403/AccessDenied. Leave the dropdown
-      // empty and let the user type a bucket name manually.
+      // No default_bucket configured AND ListBuckets failed — true error.
       setBuckets([]);
-      alert('ListBuckets fehlgeschlagen — gib den Bucket-Namen manuell ein im Feld unten.\n\n' + apiErr(e));
+      alert(
+        'Bucket-Liste konnte nicht geladen werden.\n\n' +
+        apiErr(e) +
+        '\n\nFix: Edit endpoint → "Default bucket (optional)" → trage deinen Bucket-Namen ein.',
+      );
     }
   };
 
@@ -128,7 +140,7 @@ function S3() {
                 <td className="px-4 py-2 text-zinc-500">{e.region}</td>
                 <td className="px-4 py-2 font-mono text-[11px]">{e.access_key}</td>
                 <td className="px-4 py-2 text-right">
-                  <button onClick={() => loadBuckets(e.id)} className="btn-ghost">browse</button>
+                  <button onClick={() => loadBuckets(e.id, e)} className="btn-ghost">browse</button>
                   <button onClick={() => test(e.id)} className="btn-ghost">test</button>
                   <button onClick={() => setEditing({ ...e, secret_key: '' })} className="btn-ghost">edit</button>
                   <button onClick={() => remove(e.id)} className="btn-ghost text-red-600">delete</button>
@@ -208,7 +220,13 @@ function S3() {
               <Field label={editing.id ? 'Secret key (leave empty to keep)' : 'Secret key'}>
                 <input className="input font-mono text-[12px]" type="password" value={editing.secret_key ?? ''} onChange={(e) => setEditing({ ...editing, secret_key: e.target.value })} />
               </Field>
-              <Field label="Default bucket (optional)"><input className="input" value={editing.default_bucket ?? ''} onChange={(e) => setEditing({ ...editing, default_bucket: e.target.value })} /></Field>
+              <Field label="Default bucket">
+                <input className="input font-mono text-[12px]" placeholder="bartisdev-backups" value={editing.default_bucket ?? ''} onChange={(e) => setEditing({ ...editing, default_bucket: e.target.value })} />
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  Bei Hetzner & Cloudflare R2: <strong>nötig</strong>. Diese Anbieter blockieren ListBuckets per default —
+                  ohne diesen Wert kann der UI keinen Bucket anzeigen. Trag genau den Bucket-Namen ein wie er bei deinem Anbieter heißt.
+                </p>
+              </Field>
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={editing.path_style ?? true} onChange={(e) => setEditing({ ...editing, path_style: e.target.checked })} />
                 Path-style (Hetzner: yes)

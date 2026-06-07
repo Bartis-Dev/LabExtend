@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -164,62 +165,114 @@ func (d *S3Deps) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // Test verifies the endpoint credentials. Tries ListBuckets first; if that
-// fails (typical for Hetzner bucket-scoped credentials with AccessDenied)
-// AND a default_bucket is configured on the endpoint, falls back to a
-// HeadBucket on the default bucket as a connectivity probe.
+// fails (typical for Hetzner / R2 bucket-scoped credentials with
+// AccessDenied) AND a default_bucket is configured on the endpoint, falls
+// back to a HeadBucket on the default bucket as a connectivity probe.
 //
 // Returns one of:
 //
 //	{"ok": true, "bucket_count": N}                  — ListBuckets worked
 //	{"ok": true, "tested_bucket": "<name>"}          — fallback worked
 //	502 + {"error": "<aws message>"}                 — both failed
+//
+// Every failure path is logged with the endpoint URL + region so the
+// operator can `docker service logs labextend_labextend-leader` and see
+// exactly what AWS / Hetzner / R2 replied.
 func (d *S3Deps) Test(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	var name, endpoint, region, defaultBucket string
+	_ = d.DB.QueryRowContext(r.Context(), `
+		SELECT name, endpoint, region, COALESCE(default_bucket,'')
+		FROM s3_endpoints WHERE id = ?
+	`, id).Scan(&name, &endpoint, &region, &defaultBucket)
+
 	c, err := d.clientFor(r, id)
 	if err != nil {
+		slog.Warn("s3.test: client build failed",
+			"endpoint_id", id, "name", name, "endpoint", endpoint, "region", region, "err", err)
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	buckets, err := c.ListBuckets(r.Context())
 	if err == nil {
+		slog.Info("s3.test: ListBuckets ok",
+			"endpoint_id", id, "name", name, "endpoint", endpoint, "bucket_count", len(buckets))
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "bucket_count": len(buckets)})
 		return
 	}
-	// ListBuckets failed — try the default bucket as a fallback probe.
-	var defaultBucket string
-	_ = d.DB.QueryRowContext(r.Context(),
-		`SELECT COALESCE(default_bucket,'') FROM s3_endpoints WHERE id = ?`, id).Scan(&defaultBucket)
+	slog.Warn("s3.test: ListBuckets failed — trying default_bucket fallback",
+		"endpoint_id", id, "name", name, "endpoint", endpoint, "region", region,
+		"default_bucket", defaultBucket, "err", err)
+
 	if defaultBucket != "" {
 		if perr := c.HeadBucket(r.Context(), defaultBucket); perr == nil {
+			slog.Info("s3.test: HeadBucket fallback ok",
+				"endpoint_id", id, "name", name, "bucket", defaultBucket)
 			writeJSON(w, http.StatusOK, map[string]any{
 				"ok": true, "tested_bucket": defaultBucket,
 			})
 			return
 		} else {
+			slog.Warn("s3.test: HeadBucket fallback also failed",
+				"endpoint_id", id, "name", name, "bucket", defaultBucket, "err", perr)
 			writeErr(w, http.StatusBadGateway, fmt.Errorf(
 				"ListBuckets: %v; HeadBucket(%q): %v", err, defaultBucket, perr))
 			return
 		}
 	}
 	writeErr(w, http.StatusBadGateway, fmt.Errorf(
-		"%w (and no default_bucket set on the endpoint to probe instead)", err))
+		"%w — set 'default_bucket' on this endpoint so we can probe it instead", err))
 }
 
 // ─── bucket / object browsing ───────────────────────────────────────────────
 
+// Buckets lists every bucket on the endpoint. For credentials that aren't
+// allowed to ListAllMyBuckets (Hetzner & R2 default), we fall back to
+// returning the configured `default_bucket` as the only visible bucket so
+// the UI can still render a normal dropdown instead of an error.
 func (d *S3Deps) Buckets(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	var name, endpoint, defaultBucket string
+	_ = d.DB.QueryRowContext(r.Context(), `
+		SELECT name, endpoint, COALESCE(default_bucket,'')
+		FROM s3_endpoints WHERE id = ?
+	`, id).Scan(&name, &endpoint, &defaultBucket)
+
 	c, err := d.clientFor(r, id)
 	if err != nil {
+		slog.Warn("s3.buckets: client build failed",
+			"endpoint_id", id, "name", name, "endpoint", endpoint, "err", err)
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	buckets, err := c.ListBuckets(r.Context())
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, err)
+	if err == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"buckets": buckets})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"buckets": buckets})
+	slog.Warn("s3.buckets: ListBuckets failed — falling back to default_bucket",
+		"endpoint_id", id, "name", name, "default_bucket", defaultBucket, "err", err)
+
+	if defaultBucket != "" {
+		// Verify the bucket is actually reachable with these creds before
+		// pretending it exists — avoids a confusing dropdown that explodes
+		// when clicked.
+		if perr := c.HeadBucket(r.Context(), defaultBucket); perr == nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"buckets":         []string{defaultBucket},
+				"bucket_scoped":   true, // hint for UI: don't suggest "add bucket"
+				"list_buckets_err": err.Error(),
+			})
+			return
+		} else {
+			slog.Warn("s3.buckets: HeadBucket fallback also failed",
+				"endpoint_id", id, "name", name, "bucket", defaultBucket, "err", perr)
+			writeErr(w, http.StatusBadGateway, fmt.Errorf(
+				"ListBuckets: %v; HeadBucket(%q): %v", err, defaultBucket, perr))
+			return
+		}
+	}
+	writeErr(w, http.StatusBadGateway, err)
 }
 
 func (d *S3Deps) Objects(w http.ResponseWriter, r *http.Request) {
@@ -229,11 +282,15 @@ func (d *S3Deps) Objects(w http.ResponseWriter, r *http.Request) {
 	cont := r.URL.Query().Get("continuation")
 	c, err := d.clientFor(r, id)
 	if err != nil {
+		slog.Warn("s3.objects: client build failed",
+			"endpoint_id", id, "bucket", bucket, "err", err)
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	objs, next, err := c.ListObjects(r.Context(), bucket, prefix, cont)
 	if err != nil {
+		slog.Warn("s3.objects: ListObjects failed",
+			"endpoint_id", id, "bucket", bucket, "prefix", prefix, "err", err)
 		writeErr(w, http.StatusBadGateway, err)
 		return
 	}
