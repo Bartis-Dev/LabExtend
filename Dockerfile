@@ -69,7 +69,10 @@ USER root
 VOLUME ["/data"]
 EXPOSE 8080 9090
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
-
+# No HEALTHCHECK on purpose. The same image runs as either leader (HTTP +
+# gRPC) or agent (gRPC only). A baked-in wget on :8080 fails for the
+# agent — Swarm then keeps it in "starting" indefinitely. Health is
+# tracked the right way:
+#   - leader: Traefik observes its HTTP responses
+#   - agent : leader watches the per-agent gRPC stream + heartbeat
 ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/bpm"]

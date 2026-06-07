@@ -37,7 +37,7 @@ type TOTPManager struct {
 
 func NewTOTPManager(db *sql.DB, issuer, hexKey string) (*TOTPManager, error) {
 	if issuer == "" {
-		issuer = "labextend"
+		issuer = "LabExtend"
 	}
 	key, err := hex.DecodeString(hexKey)
 	if err != nil {

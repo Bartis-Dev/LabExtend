@@ -5,6 +5,8 @@ import { api } from '@/lib/api';
 import { useSSE } from '@/lib/sse';
 import { AuthShell } from '@/components/auth-shell';
 import { fmtBytes, fmtRelative } from '@/lib/format';
+import { SchedulePicker } from '@/components/schedule-picker';
+import { Play, Pencil, Trash2 } from 'lucide-react';
 
 interface BackupPlan {
   id: string; name: string; sources: string[];
@@ -110,9 +112,11 @@ function Backups() {
                 <td className="px-4 py-2 text-zinc-500">{p.last_run_at ? fmtRelative(p.last_run_at) : '—'}</td>
                 <td className="px-4 py-2"><span className={p.enabled ? 'badge-green' : 'badge-zinc'}>{p.enabled ? 'enabled' : 'disabled'}</span></td>
                 <td className="px-4 py-2 text-right">
-                  <button onClick={() => trigger(p.id)} className="btn-ghost">run now</button>
-                  <button onClick={() => setEditing(p)} className="btn-ghost">edit</button>
-                  <button onClick={() => remove(p.id)} className="btn-ghost text-red-600">delete</button>
+                  <button onClick={() => trigger(p.id)} className="btn-primary mr-1 h-7 text-[12px]" title="Backup jetzt ausführen">
+                    <Play className="h-3 w-3" /> backup now
+                  </button>
+                  <button onClick={() => setEditing(p)} className="btn-ghost"><Pencil className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => remove(p.id)} className="btn-ghost text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
                 </td>
               </tr>
             ))}
@@ -176,8 +180,12 @@ function Backups() {
                   <input className="input" value={editing.scope_value ?? ''} onChange={(e) => setEditing({ ...editing, scope_value: e.target.value })} />
                 </Field>
               </div>
-              <Field label="Schedule (cron with seconds: 'sec min hr dom mon dow')">
-                <input className="input font-mono" value={editing.schedule ?? ''} onChange={(e) => setEditing({ ...editing, schedule: e.target.value })} />
+              <Field label="Schedule">
+                <SchedulePicker
+                  variant="seconds"
+                  value={editing.schedule ?? '0 0 3 * * *'}
+                  onChange={(v) => setEditing({ ...editing, schedule: v })}
+                />
               </Field>
               <div className="grid grid-cols-2 gap-3">
                 <Field label="S3 endpoint">

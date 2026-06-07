@@ -28,7 +28,7 @@ export function Sidebar({ userEmail }: { userEmail?: string }) {
   return (
     <aside className="flex h-screen w-60 flex-col border-r border-zinc-200 bg-white px-3 py-4 dark:border-zinc-800 dark:bg-zinc-950">
       <div className="px-2 pb-4">
-        <div className="text-sm font-semibold tracking-tight">labextend</div>
+        <div className="text-sm font-semibold tracking-tight">LabExtend</div>
         <div className="text-[11px] text-zinc-500">{userEmail ?? ''}</div>
       </div>
 

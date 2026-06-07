@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { AuthShell } from '@/components/auth-shell';
 import type { NodeView } from '@/lib/types';
+import { SchedulePicker } from '@/components/schedule-picker';
 
 interface CronJob {
   id: string;
@@ -118,10 +119,16 @@ function Cron() {
                   {nodes.map((n) => <option key={n.id} value={n.id}>{n.hostname}</option>)}
                 </select>
               </label>
-              <label className="block">
-                <span className="text-xs text-zinc-500">Schedule (5 fields: min hr dom mon dow)</span>
-                <input className="input mt-1 font-mono" placeholder="*/5 * * * *" value={editing.schedule ?? ''} onChange={(e) => setEditing({ ...editing, schedule: e.target.value })} />
-              </label>
+              <div>
+                <span className="text-xs text-zinc-500">Schedule</span>
+                <div className="mt-1">
+                  <SchedulePicker
+                    variant="cron"
+                    value={editing.schedule ?? '0 3 * * *'}
+                    onChange={(v) => setEditing({ ...editing, schedule: v })}
+                  />
+                </div>
+              </div>
               <label className="block">
                 <span className="text-xs text-zinc-500">Command</span>
                 <input className="input mt-1 font-mono text-[12px]" placeholder="echo hello >> /tmp/log" value={editing.command ?? ''} onChange={(e) => setEditing({ ...editing, command: e.target.value })} />

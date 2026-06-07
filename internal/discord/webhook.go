@@ -126,13 +126,13 @@ func AlertEmbed(state, ruleName, scope, message string, value float64, when time
 		fields = append(fields, Field{Name: "Detail", Value: message})
 	}
 	return Payload{
-		Username: "labextend",
+		Username: "LabExtend",
 		Embeds: []Embed{{
 			Title:     title,
 			Color:     color,
 			Timestamp: when.UTC().Format(time.RFC3339),
 			Fields:    fields,
-			Footer:    &Footer{Text: "labextend"},
+			Footer:    &Footer{Text: "LabExtend"},
 		}},
 	}
 }
@@ -149,13 +149,13 @@ func BackupSummary(planName, runID, status string, fields []Field, footerVersion
 		color = ColorRed
 	}
 	return Payload{
-		Username: "labextend",
+		Username: "LabExtend",
 		Embeds: []Embed{{
 			Title:     title,
 			Color:     color,
 			Timestamp: when.UTC().Format(time.RFC3339),
 			Fields:    fields,
-			Footer:    &Footer{Text: "labextend " + footerVersion},
+			Footer:    &Footer{Text: "LabExtend " + footerVersion},
 		}},
 	}
 }
