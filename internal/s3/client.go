@@ -68,7 +68,7 @@ func newStaticResolver(rawURL string, pathStyle bool) (*staticEndpointResolver, 
 	u.RawPath = ""
 	u.RawQuery = ""
 	u.Fragment = ""
-	slog.Info("s3.client: resolver built",
+	slog.Debug("s3.client: resolver built",
 		"original", original, "stripped", u.String(),
 		"had_path", hadPath, "path_style", pathStyle)
 	return &staticEndpointResolver{uri: *u, pathStyle: pathStyle}, nil
@@ -377,22 +377,31 @@ func NewUploader(cfg UploaderConfig) (*Uploader, error) {
 }
 
 // Upload streams body to s3://bucket/key using multipart upload. Returns the
-// total bytes successfully uploaded. The body MUST be the producer side of
-// the pipe; if upload fails mid-way the producer should see the read end
-// close and stop writing.
+// total bytes successfully uploaded.
 func (u *Uploader) Upload(ctx context.Context, key string, body io.Reader) (uint64, error) {
+	cr := &countingReader{r: body}
 	in := &awss3.PutObjectInput{
 		Bucket: aws.String(u.bucket),
 		Key:    aws.String(key),
-		Body:   body,
+		Body:   cr,
 	}
-	out, err := u.c.uploader.Upload(ctx, in)
-	if err != nil {
+	if _, err := u.c.uploader.Upload(ctx, in); err != nil {
 		return 0, err
 	}
-	// The SDK doesn't expose total bytes directly; tag from response doesn't
-	// help either. The caller (agent backup runner) tracks its own count and
-	// is the source of truth for "bytes_processed".
-	_ = out
-	return 0, nil
+	return cr.n, nil
+}
+
+// countingReader wraps an io.Reader and tallies bytes successfully read.
+// The S3 SDK doesn't expose total bytes uploaded — we count what we hand
+// it instead. Since the body is the producer side of an io.Pipe, only
+// bytes that actually made it into the upload buffer get counted.
+type countingReader struct {
+	r io.Reader
+	n uint64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += uint64(n)
+	return n, err
 }
