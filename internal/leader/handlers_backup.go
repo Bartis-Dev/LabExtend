@@ -38,6 +38,8 @@ type BackupPlan struct {
 	CompressionLevel int      `json:"compression_level"`
 	WebhookID        string   `json:"webhook_id,omitempty"`
 	WebhookMode      string   `json:"webhook_mode"`
+	Engine           string   `json:"engine"`            // tar (default) | pgdump
+	VerifyRestore    bool     `json:"verify_restore"`    // pgdump only
 	Enabled          bool     `json:"enabled"`
 	CreatedAt        int64    `json:"created_at"`
 	UpdatedAt        int64    `json:"updated_at"`
@@ -51,7 +53,7 @@ func (d *BackupDeps) ListPlans(w http.ResponseWriter, r *http.Request) {
 		SELECT id, name, sources_json, scope_type, COALESCE(scope_value,''),
 		       s3_endpoint_id, s3_bucket, key_template, schedule,
 		       retention_keep, compression, compression_level,
-		       COALESCE(webhook_id,''), webhook_mode, enabled,
+		       COALESCE(webhook_id,''), webhook_mode, engine, verify_restore, enabled,
 		       created_at, updated_at,
 		       COALESCE(last_run_at, 0), COALESCE(next_run_at, 0)
 		FROM backup_plans ORDER BY name
@@ -65,17 +67,18 @@ func (d *BackupDeps) ListPlans(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p BackupPlan
 		var sourcesJSON string
-		var en int
+		var en, verifyInt int
 		if err := rows.Scan(&p.ID, &p.Name, &sourcesJSON, &p.ScopeType, &p.ScopeValue,
 			&p.S3EndpointID, &p.S3Bucket, &p.KeyTemplate, &p.Schedule,
 			&p.RetentionKeep, &p.Compression, &p.CompressionLevel,
-			&p.WebhookID, &p.WebhookMode, &en,
+			&p.WebhookID, &p.WebhookMode, &p.Engine, &verifyInt, &en,
 			&p.CreatedAt, &p.UpdatedAt, &p.LastRunAt, &p.NextRunAt); err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
 		_ = json.Unmarshal([]byte(sourcesJSON), &p.Sources)
 		p.Enabled = en == 1
+		p.VerifyRestore = verifyInt == 1
 		out = append(out, p)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"plans": out})
@@ -95,6 +98,8 @@ type planReq struct {
 	CompressionLevel int      `json:"compression_level"`
 	WebhookID        string   `json:"webhook_id"`
 	WebhookMode      string   `json:"webhook_mode"`
+	Engine           string   `json:"engine"`
+	VerifyRestore    bool     `json:"verify_restore"`
 	Enabled          bool     `json:"enabled"`
 }
 
@@ -122,8 +127,15 @@ func (d *BackupDeps) CreatePlan(w http.ResponseWriter, r *http.Request) {
 	if req.WebhookMode == "" {
 		req.WebhookMode = "on-error"
 	}
+	if req.Engine == "" {
+		req.Engine = "tar"
+	}
 	if req.KeyTemplate == "" {
-		req.KeyTemplate = "backups/{host}/{date}/{plan}.tar.gz"
+		if req.Engine == "pgdump" {
+			req.KeyTemplate = "backups/{host}/{date}/{plan}.dump"
+		} else {
+			req.KeyTemplate = "backups/{host}/{date}/{plan}.tar.gz"
+		}
 	}
 	sourcesJSON, _ := json.Marshal(req.Sources)
 	id := uuid.NewString()
@@ -142,13 +154,14 @@ func (d *BackupDeps) CreatePlan(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO backup_plans
 			(id, name, sources_json, scope_type, scope_value, s3_endpoint_id,
 			 s3_bucket, key_template, schedule, retention_keep, compression,
-			 compression_level, webhook_id, webhook_mode, enabled,
-			 created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 compression_level, webhook_id, webhook_mode, engine, verify_restore,
+			 enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, id, req.Name, string(sourcesJSON), req.ScopeType, scopeArg,
 		req.S3EndpointID, req.S3Bucket, req.KeyTemplate, req.Schedule,
 		req.RetentionKeep, req.Compression, req.CompressionLevel,
-		widArg, req.WebhookMode, boolI(req.Enabled), now, now); err != nil {
+		widArg, req.WebhookMode, req.Engine, boolI(req.VerifyRestore),
+		boolI(req.Enabled), now, now); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -175,17 +188,22 @@ func (d *BackupDeps) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 	if req.ScopeValue != "" {
 		scopeArg = req.ScopeValue
 	}
+	if req.Engine == "" {
+		req.Engine = "tar"
+	}
 	res, err := d.DB.ExecContext(r.Context(), `
 		UPDATE backup_plans SET
 			name = ?, sources_json = ?, scope_type = ?, scope_value = ?,
 			s3_endpoint_id = ?, s3_bucket = ?, key_template = ?, schedule = ?,
 			retention_keep = ?, compression = ?, compression_level = ?,
-			webhook_id = ?, webhook_mode = ?, enabled = ?, updated_at = ?
+			webhook_id = ?, webhook_mode = ?, engine = ?, verify_restore = ?,
+			enabled = ?, updated_at = ?
 		WHERE id = ?
 	`, req.Name, string(sourcesJSON), req.ScopeType, scopeArg,
 		req.S3EndpointID, req.S3Bucket, req.KeyTemplate, req.Schedule,
 		req.RetentionKeep, req.Compression, req.CompressionLevel,
-		widArg, req.WebhookMode, boolI(req.Enabled), time.Now().Unix(), id)
+		widArg, req.WebhookMode, req.Engine, boolI(req.VerifyRestore),
+		boolI(req.Enabled), time.Now().Unix(), id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return

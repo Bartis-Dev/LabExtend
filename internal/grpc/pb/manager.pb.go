@@ -3304,6 +3304,8 @@ type RunBackupReq struct {
 	S3PathStyle   bool                   `protobuf:"varint,10,opt,name=s3_path_style,json=s3PathStyle,proto3" json:"s3_path_style,omitempty"`
 	Compression   string                 `protobuf:"bytes,11,opt,name=compression,proto3" json:"compression,omitempty"`
 	Level         uint32                 `protobuf:"varint,12,opt,name=level,proto3" json:"level,omitempty"`
+	Engine        string                 `protobuf:"bytes,13,opt,name=engine,proto3" json:"engine,omitempty"`
+	VerifyRestore bool                   `protobuf:"varint,14,opt,name=verify_restore,json=verifyRestore,proto3" json:"verify_restore,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3420,6 +3422,20 @@ func (x *RunBackupReq) GetLevel() uint32 {
 		return x.Level
 	}
 	return 0
+}
+
+func (x *RunBackupReq) GetEngine() string {
+	if x != nil {
+		return x.Engine
+	}
+	return ""
+}
+
+func (x *RunBackupReq) GetVerifyRestore() bool {
+	if x != nil {
+		return x.VerifyRestore
+	}
+	return false
 }
 
 type RunBackupResp struct {

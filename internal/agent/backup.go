@@ -58,6 +58,18 @@ func (h *Handler) RunBackup(ctx context.Context, req *pb.RunBackupReq) (*pb.RunB
 		cancel()
 	}()
 
+	// Engine dispatch. "" defaults to tar for backwards compatibility with
+	// older plans (the DB-migration also defaults engine='tar' for new rows).
+	switch req.Engine {
+	case "", "tar":
+		// fall through to legacy tar pipeline below
+	case "pgdump":
+		emit := h.monitor.eventEmitter()
+		return h.runPgDump(runCtx, req, emit)
+	default:
+		return nil, fmt.Errorf("unknown backup engine %q", req.Engine)
+	}
+
 	started := time.Now()
 
 	// Prefix source paths with host bind-mount.

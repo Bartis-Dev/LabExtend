@@ -302,6 +302,21 @@ message RunBackupReq {
   bool   s3_path_style    = 10;
   string compression      = 11;
   uint32 level            = 12;
+
+  // Engine selects how the backup data is produced.
+  //   ""       (legacy, default) == "tar"
+  //   "tar"    walk source paths, tar+gzip stream → S3 (existing behavior)
+  //   "pgdump" each source is a Postgres DSN; pg_dump -Fc each one, optionally
+  //            verify the dump by restoring it into a throwaway sidecar, then
+  //            push to S3. Compression/level are ignored (pg_dump's custom
+  //            format already compresses).
+  string engine          = 13;
+
+  // verify_restore — only meaningful for pgdump engine. If true, spin up a
+  // sidecar postgres container and pg_restore the dump into it; abort with
+  // an error if the restore fails. Adds ~30-60s per backup but guarantees
+  // the dump is actually restorable, not just successfully written.
+  bool   verify_restore  = 14;
 }
 
 message RunBackupResp {

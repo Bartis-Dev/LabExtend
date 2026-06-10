@@ -15,6 +15,8 @@ interface BackupPlan {
   key_template: string; schedule: string;
   retention_keep: number; compression: string; compression_level: number;
   webhook_id?: string; webhook_mode: string;
+  engine?: string;              // tar | pgdump
+  verify_restore?: boolean;     // pgdump only
   enabled: boolean;
   created_at: number; updated_at: number;
   last_run_at?: number; next_run_at?: number;
@@ -64,6 +66,7 @@ function Backups() {
       retention_keep: p.retention_keep ?? 7,
       compression: p.compression ?? 'gzip', compression_level: p.compression_level ?? 6,
       webhook_id: p.webhook_id ?? '', webhook_mode: p.webhook_mode ?? 'on-error',
+      engine: p.engine ?? 'tar', verify_restore: p.verify_restore ?? false,
       enabled: p.enabled ?? true,
     };
     if (p.id) await api(`/api/backups/plans/${p.id}`, { method: 'PUT', body: payload });
@@ -166,11 +169,51 @@ function Backups() {
             <h3 className="mb-3 text-base font-semibold">{editing.id ? 'Edit plan' : 'New plan'}</h3>
             <div className="space-y-3 text-sm">
               <Field label="Name"><input className="input" value={editing.name ?? ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></Field>
-              <Field label="Sources (comma-separated absolute paths)">
-                <input className="input font-mono text-[12px]" placeholder="/srv/data, /var/lib/docker/volumes/foo"
-                  value={(editing.sources ?? []).join(', ')}
-                  onChange={(e) => setEditing({ ...editing, sources: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
+
+              <Field label="Engine">
+                <div className="inline-flex rounded-md border border-zinc-200 p-0.5 text-xs dark:border-zinc-700">
+                  {[
+                    { v: 'tar',    label: 'tar+gzip',     desc: 'Volume snapshot (existing behaviour)' },
+                    { v: 'pgdump', label: 'pg_dump',      desc: 'Postgres logical dump → optional verify in sidecar' },
+                  ].map((opt) => (
+                    <button key={opt.v} type="button" title={opt.desc}
+                      onClick={() => setEditing({ ...editing, engine: opt.v })}
+                      className={`rounded px-3 py-1 ${(editing.engine ?? 'tar') === opt.v ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400'}`}
+                    >{opt.label}</button>
+                  ))}
+                </div>
+                {(editing.engine ?? 'tar') === 'pgdump' && (
+                  <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+                    <input type="checkbox"
+                      checked={editing.verify_restore ?? false}
+                      onChange={(e) => setEditing({ ...editing, verify_restore: e.target.checked })} />
+                    Verify by sidecar-restore (spawns throwaway postgres:15-alpine, pg_restore, +30-60s but guarantees the dump is restorable)
+                  </label>
+                )}
               </Field>
+
+              {(editing.engine ?? 'tar') === 'pgdump' ? (
+                <Field label="Postgres DSNs — one per line">
+                  <textarea
+                    rows={3}
+                    className="input font-mono text-[11px]"
+                    placeholder="host=db user=supabase_admin dbname=postgres password_secret=supabase-postgres-password"
+                    value={(editing.sources ?? []).join('\n')}
+                    onChange={(e) => setEditing({ ...editing, sources: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })}
+                  />
+                  <p className="mt-1 text-[11px] text-zinc-500">
+                    libpq <code>key=value</code> format. <code>password_secret=</code> reads
+                    <code> /run/secrets/&lt;name&gt;</code> on the agent — the password never lives in the plan row.
+                    One line = one database = one .dump file in S3.
+                  </p>
+                </Field>
+              ) : (
+                <Field label="Sources (comma-separated absolute paths)">
+                  <input className="input font-mono text-[12px]" placeholder="/srv/data, /var/lib/docker/volumes/foo"
+                    value={(editing.sources ?? []).join(', ')}
+                    onChange={(e) => setEditing({ ...editing, sources: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
+                </Field>
+              )}
               <Field label="Scope">
                 <ScopePicker
                   type={editing.scope_type ?? 'all'}

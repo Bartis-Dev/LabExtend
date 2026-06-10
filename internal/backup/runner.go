@@ -191,18 +191,20 @@ func (r *Runner) runOneNode(ctx context.Context, plan plan, target AgentInfo, ru
 
 	reply, err := r.agents.Request(ctx, target.ID, &pb.Command{
 		Op: &pb.Command_RunBackup{RunBackup: &pb.RunBackupReq{
-			PlanId:      plan.ID,
-			RunId:       runID,
-			Sources:     plan.Sources,
-			S3Endpoint:  s3.Endpoint,
-			S3Region:    s3.Region,
-			S3Bucket:    plan.S3Bucket,
-			S3Key:       s3Key,
-			S3AccessKey: s3.AccessKey,
-			S3SecretKey: s3.SecretKey,
-			S3PathStyle: s3.PathStyle,
-			Compression: plan.Compression,
-			Level:       uint32(plan.CompressionLevel),
+			PlanId:        plan.ID,
+			RunId:         runID,
+			Sources:       plan.Sources,
+			S3Endpoint:    s3.Endpoint,
+			S3Region:      s3.Region,
+			S3Bucket:      plan.S3Bucket,
+			S3Key:         s3Key,
+			S3AccessKey:   s3.AccessKey,
+			S3SecretKey:   s3.SecretKey,
+			S3PathStyle:   s3.PathStyle,
+			Compression:   plan.Compression,
+			Level:         uint32(plan.CompressionLevel),
+			Engine:        plan.Engine,
+			VerifyRestore: plan.VerifyRestore,
 		}},
 	})
 
@@ -261,6 +263,8 @@ type plan struct {
 	CompressionLevel int
 	WebhookID        string
 	WebhookMode      string
+	Engine           string // tar (default) | pgdump
+	VerifyRestore    bool
 }
 
 type s3EndpointCfg struct {
@@ -276,14 +280,17 @@ func (r *Runner) loadPlan(ctx context.Context, planID string) (plan, error) {
 	var sourcesJSON string
 	var scopeValue sql.NullString
 	var webhookID sql.NullString
+	var verifyInt int
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, name, sources_json, scope_type, scope_value, s3_endpoint_id,
 		       s3_bucket, key_template, retention_keep, compression, compression_level,
-		       webhook_id, webhook_mode
+		       webhook_id, webhook_mode, engine, verify_restore
 		FROM backup_plans WHERE id = ?
 	`, planID).Scan(&p.ID, &p.Name, &sourcesJSON, &p.ScopeType, &scopeValue,
 		&p.S3EndpointID, &p.S3Bucket, &p.KeyTemplate, &p.RetentionKeep,
-		&p.Compression, &p.CompressionLevel, &webhookID, &p.WebhookMode)
+		&p.Compression, &p.CompressionLevel, &webhookID, &p.WebhookMode,
+		&p.Engine, &verifyInt)
+	p.VerifyRestore = verifyInt == 1
 	if err != nil {
 		return p, err
 	}
@@ -460,7 +467,12 @@ func renderKeyTemplate(tmpl string, t AgentInfo, p plan, now time.Time) string {
 		"{plan_id}", s3KeySafe(p.ID),
 	)
 	if tmpl == "" {
-		tmpl = "backups/{host}/{date}/{plan}.tar.gz"
+		// pgdump default uses .dump (postgres custom format), tar default uses .tar.gz
+		if p.Engine == "pgdump" {
+			tmpl = "backups/{host}/{date}/{plan}.dump"
+		} else {
+			tmpl = "backups/{host}/{date}/{plan}.tar.gz"
+		}
 	}
 	return r.Replace(tmpl)
 }

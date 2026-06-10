@@ -54,7 +54,9 @@ RUN go build \
 # ─── stage 4: runtime ───────────────────────────────────────────────────────
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates tini dcron tzdata wget
+RUN apk add --no-cache ca-certificates tini dcron tzdata wget \
+    postgresql15-client \
+    docker-cli
 
 COPY --from=gobuild /out/bpm /usr/local/bin/bpm
 
