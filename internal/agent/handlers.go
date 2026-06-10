@@ -270,6 +270,19 @@ func (h *Handler) resolvePath(root, sub string) (string, error) {
 	}
 	root = filepath.Clean(root)
 	final := filepath.Clean(filepath.Join(root, sub))
+
+	// Special-case the virtual full-filesystem root "/". Any absolute path
+	// is by definition under "/", but the generic prefix-check below fails
+	// for it (string(root + Separator) becomes "//", and "/boot" doesn't
+	// start with "//"). filepath.Rel + a ".." scan is the standard way to
+	// express "is final inside root?" without that pitfall.
+	if root == string(filepath.Separator) {
+		if !filepath.IsAbs(final) {
+			return "", fmt.Errorf("path %s is not absolute", final)
+		}
+		return hostPrefix(h.cfg) + final, nil
+	}
+
 	if final != root && !strings.HasPrefix(final, root+string(filepath.Separator)) {
 		return "", fmt.Errorf("path escapes managed root: %s vs %s", final, root)
 	}
