@@ -40,7 +40,29 @@ func (c *hostCollector) Sample() *pb.Heartbeat {
 		hb.UptimeSeconds = si.Uptime
 		hb.LoadAvg_1M = float64(si.Loads[0]) / 65536.0
 		hb.MemTotalBytes = si.Totalram * uint64(si.Unit)
-		hb.MemUsedBytes = (si.Totalram - si.Freeram - si.Bufferram) * uint64(si.Unit)
+	}
+
+	// Memory used: prefer /proc/meminfo's MemAvailable (what `free`'s
+	// 'available' column shows) over the Sysinfo `Totalram-Freeram-Bufferram`
+	// formula, which does NOT subtract the page cache and so reports a node
+	// with mostly-cached RAM as "almost full". MemAvailable is what Linux
+	// itself considers usable without swapping — page-cache and reclaimable
+	// slab are counted as free because the kernel can evict them instantly
+	// when an app actually wants the memory.
+	//
+	// Fallback to the old Sysinfo formula if /proc/meminfo can't be read
+	// (containers in restricted modes, oddball kernels).
+	if total, available, ok := readMemInfo(); ok && total > 0 {
+		hb.MemTotalBytes = total
+		if available > total {
+			available = total
+		}
+		hb.MemUsedBytes = total - available
+	} else if hb.MemTotalBytes > 0 {
+		var si2 syscall.Sysinfo_t
+		if err := syscall.Sysinfo(&si2); err == nil {
+			hb.MemUsedBytes = (si2.Totalram - si2.Freeram - si2.Bufferram) * uint64(si2.Unit)
+		}
 	}
 
 	var st syscall.Statfs_t
@@ -75,6 +97,52 @@ func (c *hostCollector) Sample() *pb.Heartbeat {
 
 	c.prevSampleAt = time.Now()
 	return hb
+}
+
+// readMemInfo parses /proc/meminfo and returns (total, available, ok).
+// Values are converted from kB to bytes. We only look at two lines; the
+// scanner exits early once both are found.
+//
+// MemAvailable was introduced in kernel 3.14 (2014). Every Linux you'd
+// realistically run today has it.
+func readMemInfo() (total, available uint64, ok bool) {
+	f, err := os.Open("/proc/meminfo")
+	if err != nil {
+		return 0, 0, false
+	}
+	defer f.Close()
+
+	var haveTotal, haveAvail bool
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		switch {
+		case strings.HasPrefix(line, "MemTotal:"):
+			total = parseMemInfoKB(line)
+			haveTotal = true
+		case strings.HasPrefix(line, "MemAvailable:"):
+			available = parseMemInfoKB(line)
+			haveAvail = true
+		}
+		if haveTotal && haveAvail {
+			break
+		}
+	}
+	return total, available, haveTotal && haveAvail
+}
+
+// parseMemInfoKB pulls the numeric kB value out of a /proc/meminfo line
+// like "MemTotal:       16289340 kB".
+func parseMemInfoKB(line string) uint64 {
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return 0
+	}
+	kb, err := strconv.ParseUint(fields[1], 10, 64)
+	if err != nil {
+		return 0
+	}
+	return kb * 1024
 }
 
 // cpuTotals is the per-sample aggregate from /proc/stat cpu line.
