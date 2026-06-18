@@ -581,6 +581,7 @@ type Command struct {
 	//	*Command_ApplyCron
 	//	*Command_RunBackup
 	//	*Command_CancelBackup
+	//	*Command_ServiceUpdate
 	//	*Command_EnableLogs
 	//	*Command_DisableLogs
 	//	*Command_Exec
@@ -743,6 +744,15 @@ func (x *Command) GetCancelBackup() *CancelBackupReq {
 	return nil
 }
 
+func (x *Command) GetServiceUpdate() *ServiceUpdateReq {
+	if x != nil {
+		if x, ok := x.Op.(*Command_ServiceUpdate); ok {
+			return x.ServiceUpdate
+		}
+	}
+	return nil
+}
+
 func (x *Command) GetEnableLogs() *EnableLogsReq {
 	if x != nil {
 		if x, ok := x.Op.(*Command_EnableLogs); ok {
@@ -826,6 +836,11 @@ type Command_CancelBackup struct {
 	CancelBackup *CancelBackupReq `protobuf:"bytes,31,opt,name=cancel_backup,json=cancelBackup,proto3,oneof"`
 }
 
+type Command_ServiceUpdate struct {
+	// Swarm service control (force-redeploy a service via the manager socket).
+	ServiceUpdate *ServiceUpdateReq `protobuf:"bytes,32,opt,name=service_update,json=serviceUpdate,proto3,oneof"`
+}
+
 type Command_EnableLogs struct {
 	// Monitoring control (rarely used; agents stream proactively).
 	EnableLogs *EnableLogsReq `protobuf:"bytes,50,opt,name=enable_logs,json=enableLogs,proto3,oneof"`
@@ -865,6 +880,8 @@ func (*Command_RunBackup) isCommand_Op() {}
 
 func (*Command_CancelBackup) isCommand_Op() {}
 
+func (*Command_ServiceUpdate) isCommand_Op() {}
+
 func (*Command_EnableLogs) isCommand_Op() {}
 
 func (*Command_DisableLogs) isCommand_Op() {}
@@ -890,6 +907,7 @@ type CommandResult struct {
 	//	*CommandResult_ApplyCron
 	//	*CommandResult_RunBackup
 	//	*CommandResult_CancelBackup
+	//	*CommandResult_ServiceUpdate
 	//	*CommandResult_EnableLogs
 	//	*CommandResult_DisableLogs
 	//	*CommandResult_Exec
@@ -1066,6 +1084,15 @@ func (x *CommandResult) GetCancelBackup() *CancelBackupResp {
 	return nil
 }
 
+func (x *CommandResult) GetServiceUpdate() *ServiceUpdateResp {
+	if x != nil {
+		if x, ok := x.Payload.(*CommandResult_ServiceUpdate); ok {
+			return x.ServiceUpdate
+		}
+	}
+	return nil
+}
+
 func (x *CommandResult) GetEnableLogs() *EnableLogsResp {
 	if x != nil {
 		if x, ok := x.Payload.(*CommandResult_EnableLogs); ok {
@@ -1149,6 +1176,10 @@ type CommandResult_CancelBackup struct {
 	CancelBackup *CancelBackupResp `protobuf:"bytes,41,opt,name=cancel_backup,json=cancelBackup,proto3,oneof"`
 }
 
+type CommandResult_ServiceUpdate struct {
+	ServiceUpdate *ServiceUpdateResp `protobuf:"bytes,42,opt,name=service_update,json=serviceUpdate,proto3,oneof"`
+}
+
 type CommandResult_EnableLogs struct {
 	EnableLogs *EnableLogsResp `protobuf:"bytes,60,opt,name=enable_logs,json=enableLogs,proto3,oneof"`
 }
@@ -1186,6 +1217,8 @@ func (*CommandResult_ApplyCron) isCommandResult_Payload() {}
 func (*CommandResult_RunBackup) isCommandResult_Payload() {}
 
 func (*CommandResult_CancelBackup) isCommandResult_Payload() {}
+
+func (*CommandResult_ServiceUpdate) isCommandResult_Payload() {}
 
 func (*CommandResult_EnableLogs) isCommandResult_Payload() {}
 
@@ -3291,21 +3324,33 @@ func (x *ApplyCronResp) GetInstalled() uint32 {
 }
 
 type RunBackupReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PlanId        string                 `protobuf:"bytes,1,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
-	RunId         string                 `protobuf:"bytes,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	Sources       []string               `protobuf:"bytes,3,rep,name=sources,proto3" json:"sources,omitempty"`
-	S3Endpoint    string                 `protobuf:"bytes,4,opt,name=s3_endpoint,json=s3Endpoint,proto3" json:"s3_endpoint,omitempty"`
-	S3Region      string                 `protobuf:"bytes,5,opt,name=s3_region,json=s3Region,proto3" json:"s3_region,omitempty"`
-	S3Bucket      string                 `protobuf:"bytes,6,opt,name=s3_bucket,json=s3Bucket,proto3" json:"s3_bucket,omitempty"`
-	S3Key         string                 `protobuf:"bytes,7,opt,name=s3_key,json=s3Key,proto3" json:"s3_key,omitempty"`
-	S3AccessKey   string                 `protobuf:"bytes,8,opt,name=s3_access_key,json=s3AccessKey,proto3" json:"s3_access_key,omitempty"`
-	S3SecretKey   string                 `protobuf:"bytes,9,opt,name=s3_secret_key,json=s3SecretKey,proto3" json:"s3_secret_key,omitempty"`
-	S3PathStyle   bool                   `protobuf:"varint,10,opt,name=s3_path_style,json=s3PathStyle,proto3" json:"s3_path_style,omitempty"`
-	Compression   string                 `protobuf:"bytes,11,opt,name=compression,proto3" json:"compression,omitempty"`
-	Level         uint32                 `protobuf:"varint,12,opt,name=level,proto3" json:"level,omitempty"`
-	Engine        string                 `protobuf:"bytes,13,opt,name=engine,proto3" json:"engine,omitempty"`
-	VerifyRestore bool                   `protobuf:"varint,14,opt,name=verify_restore,json=verifyRestore,proto3" json:"verify_restore,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	PlanId      string                 `protobuf:"bytes,1,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
+	RunId       string                 `protobuf:"bytes,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	Sources     []string               `protobuf:"bytes,3,rep,name=sources,proto3" json:"sources,omitempty"`
+	S3Endpoint  string                 `protobuf:"bytes,4,opt,name=s3_endpoint,json=s3Endpoint,proto3" json:"s3_endpoint,omitempty"`
+	S3Region    string                 `protobuf:"bytes,5,opt,name=s3_region,json=s3Region,proto3" json:"s3_region,omitempty"`
+	S3Bucket    string                 `protobuf:"bytes,6,opt,name=s3_bucket,json=s3Bucket,proto3" json:"s3_bucket,omitempty"`
+	S3Key       string                 `protobuf:"bytes,7,opt,name=s3_key,json=s3Key,proto3" json:"s3_key,omitempty"`
+	S3AccessKey string                 `protobuf:"bytes,8,opt,name=s3_access_key,json=s3AccessKey,proto3" json:"s3_access_key,omitempty"`
+	S3SecretKey string                 `protobuf:"bytes,9,opt,name=s3_secret_key,json=s3SecretKey,proto3" json:"s3_secret_key,omitempty"`
+	S3PathStyle bool                   `protobuf:"varint,10,opt,name=s3_path_style,json=s3PathStyle,proto3" json:"s3_path_style,omitempty"`
+	Compression string                 `protobuf:"bytes,11,opt,name=compression,proto3" json:"compression,omitempty"`
+	Level       uint32                 `protobuf:"varint,12,opt,name=level,proto3" json:"level,omitempty"`
+	// Engine selects how the backup data is produced.
+	//
+	//	""       (legacy, default) == "tar"
+	//	"tar"    walk source paths, tar+gzip stream → S3 (existing behavior)
+	//	"pgdump" each source is a Postgres DSN; pg_dump -Fc each one, optionally
+	//	         verify the dump by restoring it into a throwaway sidecar, then
+	//	         push to S3. Compression/level are ignored (pg_dump's custom
+	//	         format already compresses).
+	Engine string `protobuf:"bytes,13,opt,name=engine,proto3" json:"engine,omitempty"`
+	// verify_restore — only meaningful for pgdump engine. If true, spin up a
+	// sidecar postgres container and pg_restore the dump into it; abort with
+	// an error if the restore fails. Adds ~30-60s per backup but guarantees
+	// the dump is actually restorable, not just successfully written.
+	VerifyRestore bool `protobuf:"varint,14,opt,name=verify_restore,json=verifyRestore,proto3" json:"verify_restore,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3892,6 +3937,105 @@ func (x *UploadResult) GetBytesWritten() uint64 {
 	return 0
 }
 
+// ServiceUpdateReq force-redeploys a swarm service, the Engine-API equivalent
+// of `docker service update --force <service>`. Must be handled by an agent on
+// a swarm MANAGER node (the leader's in-process agent).
+type ServiceUpdateReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Service       string                 `protobuf:"bytes,1,opt,name=service,proto3" json:"service,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServiceUpdateReq) Reset() {
+	*x = ServiceUpdateReq{}
+	mi := &file_manager_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServiceUpdateReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServiceUpdateReq) ProtoMessage() {}
+
+func (x *ServiceUpdateReq) ProtoReflect() protoreflect.Message {
+	mi := &file_manager_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServiceUpdateReq.ProtoReflect.Descriptor instead.
+func (*ServiceUpdateReq) Descriptor() ([]byte, []int) {
+	return file_manager_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *ServiceUpdateReq) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+type ServiceUpdateResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ServiceId     string                 `protobuf:"bytes,1,opt,name=service_id,json=serviceId,proto3" json:"service_id,omitempty"`
+	ForceCounter  uint64                 `protobuf:"varint,2,opt,name=force_counter,json=forceCounter,proto3" json:"force_counter,omitempty"` // new TaskTemplate.ForceUpdate value after the bump
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServiceUpdateResp) Reset() {
+	*x = ServiceUpdateResp{}
+	mi := &file_manager_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServiceUpdateResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServiceUpdateResp) ProtoMessage() {}
+
+func (x *ServiceUpdateResp) ProtoReflect() protoreflect.Message {
+	mi := &file_manager_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServiceUpdateResp.ProtoReflect.Descriptor instead.
+func (*ServiceUpdateResp) Descriptor() ([]byte, []int) {
+	return file_manager_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *ServiceUpdateResp) GetServiceId() string {
+	if x != nil {
+		return x.ServiceId
+	}
+	return ""
+}
+
+func (x *ServiceUpdateResp) GetForceCounter() uint64 {
+	if x != nil {
+		return x.ForceCounter
+	}
+	return 0
+}
+
 type ExecReq struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Cmd            string                 `protobuf:"bytes,1,opt,name=cmd,proto3" json:"cmd,omitempty"`
@@ -3903,7 +4047,7 @@ type ExecReq struct {
 
 func (x *ExecReq) Reset() {
 	*x = ExecReq{}
-	mi := &file_manager_proto_msgTypes[53]
+	mi := &file_manager_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3915,7 +4059,7 @@ func (x *ExecReq) String() string {
 func (*ExecReq) ProtoMessage() {}
 
 func (x *ExecReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[53]
+	mi := &file_manager_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3928,7 +4072,7 @@ func (x *ExecReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecReq.ProtoReflect.Descriptor instead.
 func (*ExecReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{53}
+	return file_manager_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *ExecReq) GetCmd() string {
@@ -3963,7 +4107,7 @@ type ExecResp struct {
 
 func (x *ExecResp) Reset() {
 	*x = ExecResp{}
-	mi := &file_manager_proto_msgTypes[54]
+	mi := &file_manager_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3975,7 +4119,7 @@ func (x *ExecResp) String() string {
 func (*ExecResp) ProtoMessage() {}
 
 func (x *ExecResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[54]
+	mi := &file_manager_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3988,7 +4132,7 @@ func (x *ExecResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecResp.ProtoReflect.Descriptor instead.
 func (*ExecResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{54}
+	return file_manager_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *ExecResp) GetExitCode() int32 {
@@ -4066,7 +4210,7 @@ const file_manager_proto_rawDesc = "" +
 	"\x0fdisk_read_bytes\x18\v \x01(\x04R\rdiskReadBytes\x12(\n" +
 	"\x10disk_write_bytes\x18\f \x01(\x04R\x0ediskWriteBytes\"\x1b\n" +
 	"\x04Ping\x12\x13\n" +
-	"\x05ts_ms\x18\x01 \x01(\x03R\x04tsMs\"\xbd\x06\n" +
+	"\x05ts_ms\x18\x01 \x01(\x03R\x04tsMs\"\x80\a\n" +
 	"\aCommand\x122\n" +
 	"\tlist_path\x18\x01 \x01(\v2\x13.bpm.v1.ListPathReqH\x00R\blistPath\x12%\n" +
 	"\x04stat\x18\x02 \x01(\v2\x0f.bpm.v1.StatReqH\x00R\x04stat\x122\n" +
@@ -4084,12 +4228,13 @@ const file_manager_proto_rawDesc = "" +
 	"apply_cron\x18\x15 \x01(\v2\x14.bpm.v1.ApplyCronReqH\x00R\tapplyCron\x125\n" +
 	"\n" +
 	"run_backup\x18\x1e \x01(\v2\x14.bpm.v1.RunBackupReqH\x00R\trunBackup\x12>\n" +
-	"\rcancel_backup\x18\x1f \x01(\v2\x17.bpm.v1.CancelBackupReqH\x00R\fcancelBackup\x128\n" +
+	"\rcancel_backup\x18\x1f \x01(\v2\x17.bpm.v1.CancelBackupReqH\x00R\fcancelBackup\x12A\n" +
+	"\x0eservice_update\x18  \x01(\v2\x18.bpm.v1.ServiceUpdateReqH\x00R\rserviceUpdate\x128\n" +
 	"\venable_logs\x182 \x01(\v2\x15.bpm.v1.EnableLogsReqH\x00R\n" +
 	"enableLogs\x12;\n" +
 	"\fdisable_logs\x183 \x01(\v2\x16.bpm.v1.DisableLogsReqH\x00R\vdisableLogs\x12%\n" +
 	"\x04exec\x18Z \x01(\v2\x0f.bpm.v1.ExecReqH\x00R\x04execB\x04\n" +
-	"\x02op\"\xfe\x06\n" +
+	"\x02op\"\xc2\a\n" +
 	"\rCommandResult\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x123\n" +
@@ -4110,7 +4255,8 @@ const file_manager_proto_rawDesc = "" +
 	"apply_cron\x18\x1f \x01(\v2\x15.bpm.v1.ApplyCronRespH\x00R\tapplyCron\x126\n" +
 	"\n" +
 	"run_backup\x18( \x01(\v2\x15.bpm.v1.RunBackupRespH\x00R\trunBackup\x12?\n" +
-	"\rcancel_backup\x18) \x01(\v2\x18.bpm.v1.CancelBackupRespH\x00R\fcancelBackup\x129\n" +
+	"\rcancel_backup\x18) \x01(\v2\x18.bpm.v1.CancelBackupRespH\x00R\fcancelBackup\x12B\n" +
+	"\x0eservice_update\x18* \x01(\v2\x19.bpm.v1.ServiceUpdateRespH\x00R\rserviceUpdate\x129\n" +
 	"\venable_logs\x18< \x01(\v2\x16.bpm.v1.EnableLogsRespH\x00R\n" +
 	"enableLogs\x12<\n" +
 	"\fdisable_logs\x18= \x01(\v2\x17.bpm.v1.DisableLogsRespH\x00R\vdisableLogs\x12&\n" +
@@ -4262,7 +4408,7 @@ const file_manager_proto_rawDesc = "" +
 	"\fApplyCronReq\x12+\n" +
 	"\aentries\x18\x01 \x03(\v2\x11.bpm.v1.CronEntryR\aentries\"-\n" +
 	"\rApplyCronResp\x12\x1c\n" +
-	"\tinstalled\x18\x01 \x01(\rR\tinstalled\"\xee\x02\n" +
+	"\tinstalled\x18\x01 \x01(\rR\tinstalled\"\xad\x03\n" +
 	"\fRunBackupReq\x12\x17\n" +
 	"\aplan_id\x18\x01 \x01(\tR\x06planId\x12\x15\n" +
 	"\x06run_id\x18\x02 \x01(\tR\x05runId\x12\x18\n" +
@@ -4277,7 +4423,9 @@ const file_manager_proto_rawDesc = "" +
 	"\rs3_path_style\x18\n" +
 	" \x01(\bR\vs3PathStyle\x12 \n" +
 	"\vcompression\x18\v \x01(\tR\vcompression\x12\x14\n" +
-	"\x05level\x18\f \x01(\rR\x05level\"\xa5\x01\n" +
+	"\x05level\x18\f \x01(\rR\x05level\x12\x16\n" +
+	"\x06engine\x18\r \x01(\tR\x06engine\x12%\n" +
+	"\x0everify_restore\x18\x0e \x01(\bR\rverifyRestore\"\xa5\x01\n" +
 	"\rRunBackupResp\x12\x15\n" +
 	"\x06s3_key\x18\x01 \x01(\tR\x05s3Key\x12%\n" +
 	"\x0ebytes_uploaded\x18\x02 \x01(\x04R\rbytesUploaded\x12\x1d\n" +
@@ -4306,7 +4454,13 @@ const file_manager_proto_rawDesc = "" +
 	"\x13apply_default_owner\x18\x03 \x01(\bR\x11applyDefaultOwner\x12\x1c\n" +
 	"\toverwrite\x18\x04 \x01(\bR\toverwrite\"3\n" +
 	"\fUploadResult\x12#\n" +
-	"\rbytes_written\x18\x01 \x01(\x04R\fbytesWritten\"X\n" +
+	"\rbytes_written\x18\x01 \x01(\x04R\fbytesWritten\",\n" +
+	"\x10ServiceUpdateReq\x12\x18\n" +
+	"\aservice\x18\x01 \x01(\tR\aservice\"W\n" +
+	"\x11ServiceUpdateResp\x12\x1d\n" +
+	"\n" +
+	"service_id\x18\x01 \x01(\tR\tserviceId\x12#\n" +
+	"\rforce_counter\x18\x02 \x01(\x04R\fforceCounter\"X\n" +
 	"\aExecReq\x12\x10\n" +
 	"\x03cmd\x18\x01 \x01(\tR\x03cmd\x12\x12\n" +
 	"\x04args\x18\x02 \x03(\tR\x04args\x12'\n" +
@@ -4333,7 +4487,7 @@ func file_manager_proto_rawDescGZIP() []byte {
 	return file_manager_proto_rawDescData
 }
 
-var file_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 57)
+var file_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 59)
 var file_manager_proto_goTypes = []any{
 	(*AgentMessage)(nil),      // 0: bpm.v1.AgentMessage
 	(*LeaderMessage)(nil),     // 1: bpm.v1.LeaderMessage
@@ -4388,10 +4542,12 @@ var file_manager_proto_goTypes = []any{
 	(*UploadChunk)(nil),       // 50: bpm.v1.UploadChunk
 	(*UploadStart)(nil),       // 51: bpm.v1.UploadStart
 	(*UploadResult)(nil),      // 52: bpm.v1.UploadResult
-	(*ExecReq)(nil),           // 53: bpm.v1.ExecReq
-	(*ExecResp)(nil),          // 54: bpm.v1.ExecResp
-	nil,                       // 55: bpm.v1.Hello.LabelsEntry
-	nil,                       // 56: bpm.v1.ContainerSnapshot.LabelsEntry
+	(*ServiceUpdateReq)(nil),  // 53: bpm.v1.ServiceUpdateReq
+	(*ServiceUpdateResp)(nil), // 54: bpm.v1.ServiceUpdateResp
+	(*ExecReq)(nil),           // 55: bpm.v1.ExecReq
+	(*ExecResp)(nil),          // 56: bpm.v1.ExecResp
+	nil,                       // 57: bpm.v1.Hello.LabelsEntry
+	nil,                       // 58: bpm.v1.ContainerSnapshot.LabelsEntry
 }
 var file_manager_proto_depIdxs = []int32{
 	2,  // 0: bpm.v1.AgentMessage.hello:type_name -> bpm.v1.Hello
@@ -4401,7 +4557,7 @@ var file_manager_proto_depIdxs = []int32{
 	3,  // 4: bpm.v1.LeaderMessage.welcome:type_name -> bpm.v1.Welcome
 	5,  // 5: bpm.v1.LeaderMessage.ping:type_name -> bpm.v1.Ping
 	6,  // 6: bpm.v1.LeaderMessage.command:type_name -> bpm.v1.Command
-	55, // 7: bpm.v1.Hello.labels:type_name -> bpm.v1.Hello.LabelsEntry
+	57, // 7: bpm.v1.Hello.labels:type_name -> bpm.v1.Hello.LabelsEntry
 	20, // 8: bpm.v1.Command.list_path:type_name -> bpm.v1.ListPathReq
 	23, // 9: bpm.v1.Command.stat:type_name -> bpm.v1.StatReq
 	25, // 10: bpm.v1.Command.read_file:type_name -> bpm.v1.ReadFileReq
@@ -4415,49 +4571,51 @@ var file_manager_proto_depIdxs = []int32{
 	42, // 18: bpm.v1.Command.apply_cron:type_name -> bpm.v1.ApplyCronReq
 	44, // 19: bpm.v1.Command.run_backup:type_name -> bpm.v1.RunBackupReq
 	46, // 20: bpm.v1.Command.cancel_backup:type_name -> bpm.v1.CancelBackupReq
-	16, // 21: bpm.v1.Command.enable_logs:type_name -> bpm.v1.EnableLogsReq
-	18, // 22: bpm.v1.Command.disable_logs:type_name -> bpm.v1.DisableLogsReq
-	53, // 23: bpm.v1.Command.exec:type_name -> bpm.v1.ExecReq
-	22, // 24: bpm.v1.CommandResult.list_path:type_name -> bpm.v1.ListPathResp
-	24, // 25: bpm.v1.CommandResult.stat:type_name -> bpm.v1.StatResp
-	26, // 26: bpm.v1.CommandResult.read_file:type_name -> bpm.v1.ReadFileResp
-	28, // 27: bpm.v1.CommandResult.write_file:type_name -> bpm.v1.WriteFileResp
-	30, // 28: bpm.v1.CommandResult.mkdir:type_name -> bpm.v1.MkdirResp
-	32, // 29: bpm.v1.CommandResult.rename:type_name -> bpm.v1.RenameResp
-	34, // 30: bpm.v1.CommandResult.delete:type_name -> bpm.v1.DeleteResp
-	36, // 31: bpm.v1.CommandResult.chown:type_name -> bpm.v1.ChownResp
-	38, // 32: bpm.v1.CommandResult.lookup_user:type_name -> bpm.v1.LookupUserResp
-	41, // 33: bpm.v1.CommandResult.list_cron:type_name -> bpm.v1.ListCronResp
-	43, // 34: bpm.v1.CommandResult.apply_cron:type_name -> bpm.v1.ApplyCronResp
-	45, // 35: bpm.v1.CommandResult.run_backup:type_name -> bpm.v1.RunBackupResp
-	47, // 36: bpm.v1.CommandResult.cancel_backup:type_name -> bpm.v1.CancelBackupResp
-	17, // 37: bpm.v1.CommandResult.enable_logs:type_name -> bpm.v1.EnableLogsResp
-	19, // 38: bpm.v1.CommandResult.disable_logs:type_name -> bpm.v1.DisableLogsResp
-	54, // 39: bpm.v1.CommandResult.exec:type_name -> bpm.v1.ExecResp
-	9,  // 40: bpm.v1.Event.backup_progress:type_name -> bpm.v1.BackupProgress
-	10, // 41: bpm.v1.Event.backup_log:type_name -> bpm.v1.BackupLogLine
-	11, // 42: bpm.v1.Event.cron_changed:type_name -> bpm.v1.CronChanged
-	13, // 43: bpm.v1.Event.container_report:type_name -> bpm.v1.ContainerReport
-	15, // 44: bpm.v1.Event.log_batch:type_name -> bpm.v1.LogBatch
-	56, // 45: bpm.v1.ContainerSnapshot.labels:type_name -> bpm.v1.ContainerSnapshot.LabelsEntry
-	12, // 46: bpm.v1.ContainerReport.containers:type_name -> bpm.v1.ContainerSnapshot
-	14, // 47: bpm.v1.LogBatch.lines:type_name -> bpm.v1.LogLine
-	21, // 48: bpm.v1.ListPathResp.entries:type_name -> bpm.v1.FileEntry
-	21, // 49: bpm.v1.StatResp.entry:type_name -> bpm.v1.FileEntry
-	39, // 50: bpm.v1.ListCronResp.entries:type_name -> bpm.v1.CronEntry
-	39, // 51: bpm.v1.ApplyCronReq.entries:type_name -> bpm.v1.CronEntry
-	51, // 52: bpm.v1.UploadChunk.start:type_name -> bpm.v1.UploadStart
-	0,  // 53: bpm.v1.ManagerAgent.Channel:input_type -> bpm.v1.AgentMessage
-	48, // 54: bpm.v1.ManagerAgent.DownloadFile:input_type -> bpm.v1.DownloadRequest
-	50, // 55: bpm.v1.ManagerAgent.UploadFile:input_type -> bpm.v1.UploadChunk
-	1,  // 56: bpm.v1.ManagerAgent.Channel:output_type -> bpm.v1.LeaderMessage
-	49, // 57: bpm.v1.ManagerAgent.DownloadFile:output_type -> bpm.v1.FileChunk
-	52, // 58: bpm.v1.ManagerAgent.UploadFile:output_type -> bpm.v1.UploadResult
-	56, // [56:59] is the sub-list for method output_type
-	53, // [53:56] is the sub-list for method input_type
-	53, // [53:53] is the sub-list for extension type_name
-	53, // [53:53] is the sub-list for extension extendee
-	0,  // [0:53] is the sub-list for field type_name
+	53, // 21: bpm.v1.Command.service_update:type_name -> bpm.v1.ServiceUpdateReq
+	16, // 22: bpm.v1.Command.enable_logs:type_name -> bpm.v1.EnableLogsReq
+	18, // 23: bpm.v1.Command.disable_logs:type_name -> bpm.v1.DisableLogsReq
+	55, // 24: bpm.v1.Command.exec:type_name -> bpm.v1.ExecReq
+	22, // 25: bpm.v1.CommandResult.list_path:type_name -> bpm.v1.ListPathResp
+	24, // 26: bpm.v1.CommandResult.stat:type_name -> bpm.v1.StatResp
+	26, // 27: bpm.v1.CommandResult.read_file:type_name -> bpm.v1.ReadFileResp
+	28, // 28: bpm.v1.CommandResult.write_file:type_name -> bpm.v1.WriteFileResp
+	30, // 29: bpm.v1.CommandResult.mkdir:type_name -> bpm.v1.MkdirResp
+	32, // 30: bpm.v1.CommandResult.rename:type_name -> bpm.v1.RenameResp
+	34, // 31: bpm.v1.CommandResult.delete:type_name -> bpm.v1.DeleteResp
+	36, // 32: bpm.v1.CommandResult.chown:type_name -> bpm.v1.ChownResp
+	38, // 33: bpm.v1.CommandResult.lookup_user:type_name -> bpm.v1.LookupUserResp
+	41, // 34: bpm.v1.CommandResult.list_cron:type_name -> bpm.v1.ListCronResp
+	43, // 35: bpm.v1.CommandResult.apply_cron:type_name -> bpm.v1.ApplyCronResp
+	45, // 36: bpm.v1.CommandResult.run_backup:type_name -> bpm.v1.RunBackupResp
+	47, // 37: bpm.v1.CommandResult.cancel_backup:type_name -> bpm.v1.CancelBackupResp
+	54, // 38: bpm.v1.CommandResult.service_update:type_name -> bpm.v1.ServiceUpdateResp
+	17, // 39: bpm.v1.CommandResult.enable_logs:type_name -> bpm.v1.EnableLogsResp
+	19, // 40: bpm.v1.CommandResult.disable_logs:type_name -> bpm.v1.DisableLogsResp
+	56, // 41: bpm.v1.CommandResult.exec:type_name -> bpm.v1.ExecResp
+	9,  // 42: bpm.v1.Event.backup_progress:type_name -> bpm.v1.BackupProgress
+	10, // 43: bpm.v1.Event.backup_log:type_name -> bpm.v1.BackupLogLine
+	11, // 44: bpm.v1.Event.cron_changed:type_name -> bpm.v1.CronChanged
+	13, // 45: bpm.v1.Event.container_report:type_name -> bpm.v1.ContainerReport
+	15, // 46: bpm.v1.Event.log_batch:type_name -> bpm.v1.LogBatch
+	58, // 47: bpm.v1.ContainerSnapshot.labels:type_name -> bpm.v1.ContainerSnapshot.LabelsEntry
+	12, // 48: bpm.v1.ContainerReport.containers:type_name -> bpm.v1.ContainerSnapshot
+	14, // 49: bpm.v1.LogBatch.lines:type_name -> bpm.v1.LogLine
+	21, // 50: bpm.v1.ListPathResp.entries:type_name -> bpm.v1.FileEntry
+	21, // 51: bpm.v1.StatResp.entry:type_name -> bpm.v1.FileEntry
+	39, // 52: bpm.v1.ListCronResp.entries:type_name -> bpm.v1.CronEntry
+	39, // 53: bpm.v1.ApplyCronReq.entries:type_name -> bpm.v1.CronEntry
+	51, // 54: bpm.v1.UploadChunk.start:type_name -> bpm.v1.UploadStart
+	0,  // 55: bpm.v1.ManagerAgent.Channel:input_type -> bpm.v1.AgentMessage
+	48, // 56: bpm.v1.ManagerAgent.DownloadFile:input_type -> bpm.v1.DownloadRequest
+	50, // 57: bpm.v1.ManagerAgent.UploadFile:input_type -> bpm.v1.UploadChunk
+	1,  // 58: bpm.v1.ManagerAgent.Channel:output_type -> bpm.v1.LeaderMessage
+	49, // 59: bpm.v1.ManagerAgent.DownloadFile:output_type -> bpm.v1.FileChunk
+	52, // 60: bpm.v1.ManagerAgent.UploadFile:output_type -> bpm.v1.UploadResult
+	58, // [58:61] is the sub-list for method output_type
+	55, // [55:58] is the sub-list for method input_type
+	55, // [55:55] is the sub-list for extension type_name
+	55, // [55:55] is the sub-list for extension extendee
+	0,  // [0:55] is the sub-list for field type_name
 }
 
 func init() { file_manager_proto_init() }
@@ -4490,6 +4648,7 @@ func file_manager_proto_init() {
 		(*Command_ApplyCron)(nil),
 		(*Command_RunBackup)(nil),
 		(*Command_CancelBackup)(nil),
+		(*Command_ServiceUpdate)(nil),
 		(*Command_EnableLogs)(nil),
 		(*Command_DisableLogs)(nil),
 		(*Command_Exec)(nil),
@@ -4508,6 +4667,7 @@ func file_manager_proto_init() {
 		(*CommandResult_ApplyCron)(nil),
 		(*CommandResult_RunBackup)(nil),
 		(*CommandResult_CancelBackup)(nil),
+		(*CommandResult_ServiceUpdate)(nil),
 		(*CommandResult_EnableLogs)(nil),
 		(*CommandResult_DisableLogs)(nil),
 		(*CommandResult_Exec)(nil),
@@ -4529,7 +4689,7 @@ func file_manager_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_manager_proto_rawDesc), len(file_manager_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   57,
+			NumMessages:   59,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

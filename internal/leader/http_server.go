@@ -66,6 +66,12 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 	s3Deps := &S3Deps{DB: deps.DB, SecretsKey: deps.SecretsKey, Audit: deps.Audit}
 	backupDeps := &BackupDeps{DB: deps.DB, Scheduler: deps.Scheduler, Audit: deps.Audit}
 	usersDeps := &UsersDeps{DB: deps.DB, Audit: deps.Audit}
+	serviceDeps := &ServiceDeps{
+		Registry:     deps.Registry,
+		Audit:        deps.Audit,
+		LeaderNodeID: cfg.AgentHostID,
+		ServiceName:  cfg.PortainerService,
+	}
 	accountDeps := &AccountDeps{AuthDeps: authDeps, TOTP: deps.TOTP, Audit: deps.Audit}
 	auditDeps := &AuditDeps{DB: deps.DB}
 
@@ -159,6 +165,9 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 			authed.Put("/cronjobs/{id}", cronDeps.Update)
 			authed.Delete("/cronjobs/{id}", cronDeps.Delete)
 			authed.Post("/nodes/{id}/cronjobs/apply", cronDeps.Apply)
+
+			// ── swarm service control ─────────────────────────────────
+			authed.Post("/services/portainer-agent/restart", serviceDeps.RestartPortainerAgent)
 
 			// ── S3 ────────────────────────────────────────────────────
 			authed.Get("/s3/endpoints", s3Deps.List)

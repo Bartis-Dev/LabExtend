@@ -13,6 +13,7 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -219,6 +220,87 @@ func (c *dockerClient) Logs(ctx context.Context, id string, since time.Time) (io
 		return nil, fmt.Errorf("logs: status %d", resp.StatusCode)
 	}
 	return resp.Body, nil
+}
+
+// ─── swarm service control ──────────────────────────────────────────────────
+
+// serviceInspect is the slim shape we need from GET /services/{id}. Spec is
+// kept raw so we ship it back byte-for-byte (the Engine rejects partial specs).
+type serviceInspect struct {
+	ID      string `json:"ID"`
+	Version struct {
+		Index uint64 `json:"Index"`
+	} `json:"Version"`
+	Spec json.RawMessage `json:"Spec"`
+}
+
+// ServiceForceUpdate is the Engine-API equivalent of
+// `docker service update --force <service>`: it bumps TaskTemplate.ForceUpdate
+// and re-POSTs the otherwise-unchanged spec, forcing every task to redeploy.
+//
+// Requires a swarm MANAGER socket. A worker's engine returns 503 "This node is
+// not a swarm manager", which we surface verbatim.
+func (c *dockerClient) ServiceForceUpdate(ctx context.Context, nameOrID string) (serviceID string, newForce uint64, err error) {
+	insp, err := c.inspectService(ctx, nameOrID)
+	if err != nil {
+		return "", 0, err
+	}
+
+	// Decode into a generic map so we touch ONLY ForceUpdate and leave the rest
+	// of the spec intact.
+	var spec map[string]any
+	if err := json.Unmarshal(insp.Spec, &spec); err != nil {
+		return "", 0, fmt.Errorf("decode service spec: %w", err)
+	}
+	tt, _ := spec["TaskTemplate"].(map[string]any)
+	if tt == nil {
+		tt = map[string]any{}
+		spec["TaskTemplate"] = tt
+	}
+	cur, _ := tt["ForceUpdate"].(float64) // JSON numbers decode to float64
+	newForce = uint64(cur) + 1
+	tt["ForceUpdate"] = newForce
+
+	body, err := json.Marshal(spec)
+	if err != nil {
+		return "", 0, fmt.Errorf("encode service spec: %w", err)
+	}
+
+	// Pin the update to the version index we just read to avoid a racing write.
+	u := fmt.Sprintf("http://docker/services/%s/update?version=%d", url.PathEscape(insp.ID), insp.Version.Index)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", 0, fmt.Errorf("service update: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", 0, fmt.Errorf("service update: status %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	return insp.ID, newForce, nil
+}
+
+func (c *dockerClient) inspectService(ctx context.Context, nameOrID string) (*serviceInspect, error) {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/services/"+url.PathEscape(nameOrID), nil)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("inspect service: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("service %q not found", nameOrID)
+	}
+	if resp.StatusCode/100 != 2 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("inspect service: status %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	var out serviceInspect
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode service: %w", err)
+	}
+	return &out, nil
 }
 
 // ─── stats math helpers ─────────────────────────────────────────────────────

@@ -65,6 +65,7 @@ UI receives delta-computed rates (bps) — the leader does the math, the browser
 | `BPM_METRIC_RETENTION_HOURS` | `24` (Docker stack: `168` = 7d) | 1-min bucket retention. |
 | `BPM_DOCKER_SOCKET` | autodetect | Host Docker socket path inside container. |
 | `BPM_ALLOW_EXEC` | `false` | Enable generic ExecReq command (not recommended). |
+| `BPM_PORTAINER_SERVICE` | `portainer_agent` | Swarm service the sidebar "Restart Portainer" button force-updates (runs on the leader's manager socket). |
 
 ## Dev loop
 

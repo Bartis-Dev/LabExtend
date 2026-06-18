@@ -71,6 +71,11 @@ func (h *Handler) HandleCommand(ctx context.Context, cmd *pb.Command) *pb.Comman
 		r, err := h.CancelBackup(ctx, op.CancelBackup)
 		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_CancelBackup{CancelBackup: r}})
 
+	// ── swarm service control ───────────────────────────────────────────────
+	case *pb.Command_ServiceUpdate:
+		r, err := h.ServiceUpdate(ctx, op.ServiceUpdate)
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_ServiceUpdate{ServiceUpdate: r}})
+
 	// ── monitoring control ────────────────────────────────────────────────
 	case *pb.Command_EnableLogs:
 		h.monitor.SetLogsEnabled(op.EnableLogs.GetContainerId(), true)

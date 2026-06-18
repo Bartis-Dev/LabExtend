@@ -58,6 +58,11 @@ type Config struct {
 	// Feature flags
 	AllowExec bool
 
+	// Swarm service control. Default service force-updated by the "Restart
+	// Portainer Agent" button (leader-side, runs against the leader's manager
+	// socket). Override if the agent service has a different stack name.
+	PortainerService string
+
 	// Limits
 	FSMaxInlineBytes int64
 	UploadMaxBytes   int64
@@ -107,6 +112,7 @@ func Load() (*Config, error) {
 		TOTPKey:             os.Getenv("BPM_TOTP_KEY"),
 		TOTPIssuer:          stringEnv("BPM_TOTP_ISSUER", "labextend"),
 		AllowExec:           boolEnv("BPM_ALLOW_EXEC", false),
+		PortainerService:    stringEnv("BPM_PORTAINER_SERVICE", "portainer_agent"),
 		FSMaxInlineBytes:    int64Env("BPM_FS_MAX_INLINE_BYTES", 5*1024*1024),
 		UploadMaxBytes:      int64Env("BPM_UPLOAD_MAX_BYTES", 2*1024*1024*1024),
 		AgentHostID:         os.Getenv("BPM_AGENT_HOST_ID"),

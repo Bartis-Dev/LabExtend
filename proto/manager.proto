@@ -92,6 +92,9 @@ message Command {
     RunBackupReq    run_backup    = 30;
     CancelBackupReq cancel_backup = 31;
 
+    // Swarm service control (force-redeploy a service via the manager socket).
+    ServiceUpdateReq service_update = 32;
+
     // Monitoring control (rarely used; agents stream proactively).
     EnableLogsReq   enable_logs   = 50;
     DisableLogsReq  disable_logs  = 51;
@@ -119,6 +122,8 @@ message CommandResult {
 
     RunBackupResp    run_backup    = 40;
     CancelBackupResp cancel_backup = 41;
+
+    ServiceUpdateResp service_update = 42;
 
     EnableLogsResp   enable_logs   = 60;
     DisableLogsResp  disable_logs  = 61;
@@ -350,6 +355,17 @@ message UploadStart {
 }
 
 message UploadResult { uint64 bytes_written = 1; }
+
+// ─── swarm service control ──────────────────────────────────────────────────
+
+// ServiceUpdateReq force-redeploys a swarm service, the Engine-API equivalent
+// of `docker service update --force <service>`. Must be handled by an agent on
+// a swarm MANAGER node (the leader's in-process agent).
+message ServiceUpdateReq { string service = 1; } // service name or ID
+message ServiceUpdateResp {
+  string service_id    = 1;
+  uint64 force_counter = 2; // new TaskTemplate.ForceUpdate value after the bump
+}
 
 // ─── generic exec ───────────────────────────────────────────────────────────
 

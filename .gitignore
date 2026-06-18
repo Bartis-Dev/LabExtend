@@ -19,6 +19,7 @@ frontend/.next/
 frontend/out/
 frontend/.turbo/
 frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo
 
 # Runtime data (local dev)
 /_dev-data/
