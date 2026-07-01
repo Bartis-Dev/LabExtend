@@ -306,6 +306,53 @@ func (d *BackupDeps) ListRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"runs": out})
 }
 
+// DeleteRun removes a single backup run (and its per-node items via the
+// ON DELETE CASCADE on backup_run_items.run_id). In-flight runs (pending /
+// running) are refused so a live backup isn't yanked out from under the
+// runner. Only the DB record is dropped — S3 objects are left untouched.
+func (d *BackupDeps) DeleteRun(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var status string
+	err := d.DB.QueryRowContext(r.Context(),
+		`SELECT status FROM backup_runs WHERE id = ?`, id).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeErr(w, http.StatusNotFound, errors.New("run not found"))
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if status == "running" || status == "pending" {
+		writeErr(w, http.StatusConflict, errors.New("cannot delete a run that is still in progress"))
+		return
+	}
+
+	if _, err := d.DB.ExecContext(r.Context(),
+		`DELETE FROM backup_runs WHERE id = ?`, id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	d.Audit.Log(r.Context(), r, "backup.run.delete", "backup_run", id, map[string]any{"status": status})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// CleanupFailedRuns bulk-deletes every run whose status is 'failed'. Partial,
+// cancelled and successful runs are kept (they may hold usable S3 keys); use
+// DeleteRun for those individually. Returns how many rows were removed.
+func (d *BackupDeps) CleanupFailedRuns(w http.ResponseWriter, r *http.Request) {
+	res, err := d.DB.ExecContext(r.Context(),
+		`DELETE FROM backup_runs WHERE status = 'failed'`)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	n, _ := res.RowsAffected()
+	d.Audit.Log(r.Context(), r, "backup.run.cleanup_failed", "backup_run", "", map[string]any{"deleted": n})
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": n})
+}
+
 // actorEmail returns the email of the current user from the request context.
 func actorEmail(r *http.Request) string {
 	if sess, _ := r.Context().Value(authCtxKey{}).(*authSession); sess != nil {

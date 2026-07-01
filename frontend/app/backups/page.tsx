@@ -84,6 +84,17 @@ function Backups() {
     alert(`Run started: ${r.run_id}`);
     setTimeout(load, 1500);
   };
+  const deleteRun = async (id: string) => {
+    if (!confirm('Delete this backup run record? The S3 objects are not touched.')) return;
+    await api(`/api/backups/runs/${id}`, { method: 'DELETE' });
+    load();
+  };
+  const failedCount = runs.filter((r) => r.status === 'failed').length;
+  const cleanupFailed = async () => {
+    if (!confirm(`Delete all ${failedCount} failed run record(s)? The S3 objects are not touched.`)) return;
+    await api('/api/backups/runs/cleanup-failed', { method: 'POST' });
+    load();
+  };
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-8">
@@ -131,7 +142,14 @@ function Backups() {
         </table>
       </div>
 
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-500">Recent runs</h2>
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">Recent runs</h2>
+        {failedCount > 0 && (
+          <button onClick={cleanupFailed} className="btn-ghost h-7 text-[12px] text-red-600" title="Delete all failed run records at once">
+            <Trash2 className="h-3.5 w-3.5" /> cleanup failed ({failedCount})
+          </button>
+        )}
+      </div>
       <div className="card overflow-hidden p-0">
         <table className="w-full text-sm">
           <thead className="border-b border-zinc-200 text-left text-[11px] uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
@@ -142,6 +160,7 @@ function Backups() {
               <th className="px-4 py-2">Status</th>
               <th className="px-4 py-2">Nodes</th>
               <th className="px-4 py-2">Bytes</th>
+              <th className="px-4 py-2"></th>
             </tr>
           </thead>
           <tbody>
@@ -152,13 +171,20 @@ function Backups() {
                   <td className="px-4 py-2 text-zinc-500">{fmtRelative(r.started_at)}</td>
                   <td className="px-4 py-2">{r.plan_name || r.plan_id}</td>
                   <td className="px-4 py-2 text-[11px] text-zinc-500">{r.triggered_by}</td>
-                  <td className="px-4 py-2"><span className={r.status === 'success' ? 'badge-green' : r.status === 'partial' ? 'badge-amber' : r.status === 'failed' ? 'badge-red' : 'badge-zinc'}>{r.status}</span></td>
+                  <td className="px-4 py-2"><span title={r.error_summary || undefined} className={r.status === 'success' ? 'badge-green' : r.status === 'partial' ? 'badge-amber' : r.status === 'failed' ? 'badge-red' : 'badge-zinc'}>{r.status}</span></td>
                   <td className="px-4 py-2 text-zinc-500">{r.items?.length ?? 0}</td>
                   <td className="px-4 py-2 font-mono text-[11px]">{fmtBytes(totalBytes)}</td>
+                  <td className="px-4 py-2 text-right">
+                    {(r.status === 'failed' || r.status === 'partial' || r.status === 'cancelled') && (
+                      <button onClick={() => deleteRun(r.id)} className="btn-ghost h-7 text-red-600" title="Delete this run record">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </td>
                 </tr>
               );
             })}
-            {runs.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-center text-zinc-500">No runs yet.</td></tr>}
+            {runs.length === 0 && <tr><td colSpan={7} className="px-4 py-6 text-center text-zinc-500">No runs yet.</td></tr>}
           </tbody>
         </table>
       </div>

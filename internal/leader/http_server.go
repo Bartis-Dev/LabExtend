@@ -186,6 +186,8 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 			authed.Delete("/backups/plans/{id}", backupDeps.DeletePlan)
 			authed.Post("/backups/plans/{id}/trigger", backupDeps.TriggerPlan)
 			authed.Get("/backups/runs", backupDeps.ListRuns)
+			authed.Delete("/backups/runs/{id}", backupDeps.DeleteRun)
+			authed.Post("/backups/runs/cleanup-failed", backupDeps.CleanupFailedRuns)
 
 			// ── account self-service (any logged-in user) ─────────────
 			authed.Get("/account/totp", accountDeps.TOTPStatus)
