@@ -74,8 +74,12 @@ func (d *MonitoringDeps) GetNode(w http.ResponseWriter, r *http.Request) {
 // CleanupNodes deletes node rows that are currently offline (no live agent
 // in the registry) AND whose last_seen is older than `olderThanHours`. With
 // olderThanHours=0 every offline node is removed. Cascading FKs handle the
-// linked tables (node_metrics, node_metric_buckets, node_paths, cronjobs,
-// container_state); container_log_lines has no FK so we wipe it explicitly.
+// linked tables (node_metrics, node_metric_buckets, node_metric_samples,
+// node_paths, cronjobs, container_state); container_log_lines and
+// backup_run_items reference the node WITHOUT ON DELETE CASCADE, so we wipe
+// them explicitly first — otherwise SQLite rejects the node DELETE with
+// "FOREIGN KEY constraint failed" (only the DB index is dropped; the actual
+// S3 backup objects are untouched).
 //
 // Body: {"older_than_hours": 24}  →  delete offline nodes idle ≥24h
 //       {"older_than_hours": 0}   →  delete ALL offline nodes
@@ -142,8 +146,16 @@ func (d *MonitoringDeps) CleanupNodes(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
+		// backup_run_items references nodes(id) WITHOUT ON DELETE CASCADE, so
+		// the node DELETE would fail with a FK error while backup history for
+		// this node still exists → wipe those rows first.
+		if _, err := tx.ExecContext(r.Context(),
+			`DELETE FROM backup_run_items WHERE node_id = ?`, v.id); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 		// nodes DELETE cascades to: node_metrics, node_metric_buckets,
-		// node_paths, cronjobs, container_state.
+		// node_metric_samples, node_paths, cronjobs, container_state.
 		if _, err := tx.ExecContext(r.Context(),
 			`DELETE FROM nodes WHERE id = ?`, v.id); err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
