@@ -177,6 +177,44 @@ func (h *Handler) CancelBackup(_ context.Context, req *pb.CancelBackupReq) (*pb.
 	return &pb.CancelBackupResp{}, nil
 }
 
+// zeroes pads a tar entry whose file shrank after its header was written.
+type zeroes struct{}
+
+func (zeroes) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
+}
+
+// copyExactly writes exactly size bytes of src into dst, which is what a tar
+// entry demands once its header has been written.
+//
+// We archive a live tree: a file can grow or shrink between the walk's stat -
+// the number already committed to the header - and this read. archive/tar
+// enforces that number strictly, so an unbounded io.Copy of a file that grew
+// returns ErrWriteTooLong, and because the error travels back out of the walk
+// it abandons the entire node's archive. supaserver's running Postgres hit
+// this on five consecutive nights in Aug/Sep 2026 and uploaded 0 bytes each
+// time, while the six nodes without busy writers succeeded.
+//
+// So: truncate a grown file to its stat'd length, zero-pad one that shrank.
+// GNU tar behaves the same way (it warns "file changed as we read it" and
+// keeps going). The entry for such a file is a torn read either way - the
+// point is that it costs that one file rather than all of them.
+func copyExactly(dst io.Writer, src io.Reader, size int64) (int64, error) {
+	n, err := io.Copy(dst, io.LimitReader(src, size))
+	if err != nil {
+		return n, err
+	}
+	if n < size {
+		if _, err := io.CopyN(dst, zeroes{}, size-n); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
 // tarOneRoot walks `root` (file or dir), writing every entry into tw as a
 // path relative to root's parent. Counters are bumped per file.
 func tarOneRoot(
@@ -231,12 +269,19 @@ func tarOneRoot(
 		if info.Mode().IsRegular() {
 			f, err := os.Open(p)
 			if err != nil {
+				// The tree keeps changing while we archive it, so a file named
+				// by the walk can already be gone. That is not a reason to
+				// abandon the whole node.
+				if os.IsNotExist(err) {
+					filesDone.Add(1)
+					return nil
+				}
 				return err
 			}
-			n, err := io.Copy(tw, f)
+			n, err := copyExactly(tw, f, hdr.Size)
 			_ = f.Close()
 			if err != nil {
-				return err
+				return fmt.Errorf("%s: %w", p, err)
 			}
 			bytesProcessed.Add(uint64(n))
 		}
