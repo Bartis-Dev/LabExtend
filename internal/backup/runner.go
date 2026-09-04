@@ -97,7 +97,9 @@ func (r *Runner) run(planID, planName, runID, triggeredBy string) {
 	// Resolve scope.
 	targets := r.resolveScope(plan)
 	if len(targets) == 0 {
-		r.markFinished(ctx, runID, "failed", "no agents matched the scope", nil)
+		const e = "no agents matched the scope"
+		r.markFinished(ctx, runID, "failed", e, nil)
+		r.notify(ctx, plan, "failed", e, planName, runID, 0, time.Since(started), nil)
 		return
 	}
 
@@ -107,7 +109,9 @@ func (r *Runner) run(planID, planName, runID, triggeredBy string) {
 	// Resolve S3 endpoint creds.
 	s3Cfg, err := r.loadS3Endpoint(ctx, plan.S3EndpointID)
 	if err != nil {
-		r.markFinished(ctx, runID, "failed", "s3 endpoint: "+err.Error(), nil)
+		e := "s3 endpoint: " + err.Error()
+		r.markFinished(ctx, runID, "failed", e, nil)
+		r.notify(ctx, plan, "failed", e, planName, runID, 0, time.Since(started), nil)
 		return
 	}
 
@@ -155,19 +159,7 @@ func (r *Runner) run(planID, planName, runID, triggeredBy string) {
 		}
 	}
 
-	// Webhook (if configured + matches mode).
-	if plan.WebhookID != "" {
-		fire := false
-		switch plan.WebhookMode {
-		case "always":
-			fire = true
-		case "on-error":
-			fire = status != "success"
-		}
-		if fire {
-			r.fireWebhook(ctx, plan, status, planName, runID, totalBytes, time.Since(started), results)
-		}
-	}
+	r.notify(ctx, plan, status, "", planName, runID, totalBytes, time.Since(started), results)
 
 	r.publish("backup.finished", map[string]any{
 		"run_id": runID, "plan_id": planID, "status": status,
@@ -410,7 +402,36 @@ func (r *Runner) publish(topic string, data any) {
 
 // ─── webhook ────────────────────────────────────────────────────────────────
 
-func (r *Runner) fireWebhook(ctx context.Context, p plan, status, planName, runID string,
+// notify decides whether a finished run warrants a Discord message.
+//
+// It exists as its own method because run() can end in four places: three
+// early failures that never touch a node, and the normal path at the bottom.
+// Only the bottom used to notify, so a run that died while resolving its S3
+// credentials was written to backup_runs as failed and announced nowhere.
+// Six consecutive nightly runs were lost that way in August 2026 under a plan
+// explicitly set to webhook_mode=on-error - the one setting whose entire
+// purpose is to make that impossible.
+//
+// errSummary carries the reason for the early failures, which have no
+// NodeResults to derive one from; it is empty on the normal path.
+func (r *Runner) notify(ctx context.Context, p plan, status, errSummary, planName, runID string,
+	bytes uint64, dur time.Duration, results []NodeResult) {
+	if p.WebhookID == "" {
+		return
+	}
+	switch p.WebhookMode {
+	case "always":
+	case "on-error":
+		if status == "success" {
+			return
+		}
+	default:
+		return
+	}
+	r.fireWebhook(ctx, p, status, errSummary, planName, runID, bytes, dur, results)
+}
+
+func (r *Runner) fireWebhook(ctx context.Context, p plan, status, errSummary, planName, runID string,
 	bytes uint64, dur time.Duration, results []NodeResult) {
 	var url string
 	if err := r.db.QueryRowContext(ctx,
@@ -423,6 +444,11 @@ func (r *Runner) fireWebhook(ctx context.Context, p plan, status, planName, runI
 		{Name: "Bytes", Value: humanBytes(bytes), Inline: true},
 		{Name: "Duration", Value: dur.Round(time.Second).String(), Inline: true},
 		{Name: "Nodes", Value: fmt.Sprintf("%d", len(results)), Inline: true},
+	}
+	// An early failure has no NodeResults, so without this the embed would say
+	// "failed" and give the reader nothing to act on.
+	if errSummary != "" {
+		fields = append(fields, discord.Field{Name: "Error", Value: truncate(errSummary, 1000)})
 	}
 	if status != "success" {
 		var failed []string
