@@ -15,7 +15,26 @@ env:
   IMAGE_NAME: bartis-dev/labextend
 
 jobs:
+  # The Dockerfile compiles the code, so the pipeline could catch a build
+  # error - but nothing ever ran `go test`, so it could not catch a
+  # behavioural one. That gap shipped a backup-notification bug that then sat
+  # unnoticed for six days, precisely because its failure mode was silence.
+  # The generated proto stubs are committed, so this needs no protoc.
+  test:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: go test
+        run: go test ./...
+
   build:
+    needs: test
     runs-on: self-hosted
     permissions:
       contents: read
@@ -44,9 +63,9 @@ jobs:
             type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
 
-      # The Dockerfile runs protoc → go build → npm build internally, so a
-      # single docker build is the full CI. No separate go-test job — we
-      # rely on `go build ./...` inside the Dockerfile to catch breakage.
+      # The Dockerfile runs protoc → go build → npm build internally, so this
+      # one step covers compilation of both halves. The behavioural gate is
+      # the `test` job above, which this one waits for.
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
