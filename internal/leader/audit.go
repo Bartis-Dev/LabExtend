@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -134,21 +135,17 @@ func (d *AuditDeps) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"audit": out})
 }
 
-// clientIPFromRequest extracts a sensible client IP.
+// clientIPFromRequest extracts the client IP from RemoteAddr.
+//
+// It deliberately does not look at X-Forwarded-For: the realIP middleware has
+// already folded that header into RemoteAddr, but only when the peer is a
+// configured trusted proxy, and stripped it otherwise. Reading it a second time
+// here would reinstate exactly the spoofing the middleware exists to prevent —
+// every audit row's source_ip was attacker-chosen while this did so.
 func clientIPFromRequest(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		for i := 0; i < len(xff); i++ {
-			if xff[i] == ',' {
-				return xff[:i]
-			}
-		}
-		return xff
-	}
 	addr := r.RemoteAddr
-	for i := len(addr) - 1; i >= 0; i-- {
-		if addr[i] == ':' {
-			return addr[:i]
-		}
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return host
 	}
 	return addr
 }

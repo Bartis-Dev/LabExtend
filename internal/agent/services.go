@@ -21,3 +21,28 @@ func (h *Handler) ServiceUpdate(ctx context.Context, req *pb.ServiceUpdateReq) (
 	}
 	return &pb.ServiceUpdateResp{ServiceId: id, ForceCounter: force}, nil
 }
+
+// SwarmNodes returns the cluster's node list with the labels placement
+// constraints match. Manager-only, same as ServiceUpdate above.
+func (h *Handler) SwarmNodes(ctx context.Context, _ *pb.SwarmNodesReq) (*pb.SwarmNodesResp, error) {
+	nodes, err := h.monitor.docker.ListSwarmNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*pb.SwarmNode, 0, len(nodes))
+	for _, n := range nodes {
+		sn := &pb.SwarmNode{
+			Id:           n.ID,
+			Hostname:     n.Description.Hostname,
+			Role:         n.Spec.Role,
+			Availability: n.Spec.Availability,
+			State:        n.Status.State,
+			Labels:       n.Spec.Labels,
+		}
+		if n.ManagerStatus != nil {
+			sn.Leader = n.ManagerStatus.Leader
+		}
+		out = append(out, sn)
+	}
+	return &pb.SwarmNodesResp{Nodes: out}, nil
+}

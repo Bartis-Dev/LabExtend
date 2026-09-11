@@ -6,7 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
+	// Aliased because several handlers have a local variable called "path".
+	// These are paths on a REMOTE host and therefore always POSIX, so
+	// path/filepath is the wrong package here: on a Windows leader
+	// filepath.Clean("/") returns a backslash, which made the virtual "/" root
+	// fail its equality check and rejected every listing with "root not in
+	// managed paths for this node: /".
+	gopath "path"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +28,13 @@ type FilesDeps struct {
 	DB       *sql.DB
 	Registry *AgentRegistry
 	Audit    *AuditLogger
+
+	// MaxInlineBytes caps a whole-file read or write. Either travels as one
+	// gRPC message on the agent's shared channel.
+	MaxInlineBytes int64
 }
+
+var errReadOnlyRoot = errors.New("managed root is read-only")
 
 // NodePath is the JSON shape for /api/nodes/:id/paths.
 type NodePath struct {
@@ -82,11 +94,11 @@ func (d *FilesDeps) CreatePath(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	if req.Label == "" || req.Path == "" || !filepath.IsAbs(req.Path) {
+	if req.Label == "" || req.Path == "" || !strings.HasPrefix(req.Path, "/") {
 		writeErr(w, http.StatusBadRequest, errors.New("label + absolute path required"))
 		return
 	}
-	cleaned := filepath.Clean(req.Path)
+	cleaned := gopath.Clean(req.Path)
 	_, err := d.DB.ExecContext(r.Context(), `
 		INSERT INTO node_paths
 			(node_id, label, path, default_uid, default_gid, default_user_label, read_only, created_at)
@@ -134,7 +146,7 @@ func virtualFullRoot(nodeID string) NodePath {
 }
 
 func (d *FilesDeps) resolveManagedRoot(ctx serverCtx, nodeID, root string) (NodePath, error) {
-	cleaned := filepath.Clean(root)
+	cleaned := gopath.Clean(root)
 	if cleaned == "/" {
 		return virtualFullRoot(nodeID), nil
 	}
@@ -216,9 +228,11 @@ func (d *FilesDeps) ReadFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("path required"))
 		return
 	}
-	maxBytes := uint32(0)
+	// Always send an explicit cap: the agent's own default comes from its own
+	// environment, which need not match the leader's.
+	maxBytes := uint32(d.MaxInlineBytes)
 	if v := r.URL.Query().Get("max_bytes"); v != "" {
-		if n, err := strconv.ParseUint(v, 10, 32); err == nil {
+		if n, err := strconv.ParseUint(v, 10, 32); err == nil && n > 0 && int64(n) < d.MaxInlineBytes {
 			maxBytes = uint32(n)
 		}
 	}
@@ -250,9 +264,22 @@ type writeFileReq struct {
 
 func (d *FilesDeps) WriteFile(w http.ResponseWriter, r *http.Request) {
 	nodeID := chi.URLParam(r, "id")
+	// base64 inflates the payload by 4/3; the slack covers the JSON around it.
+	// Without a cap the whole body was decoded into memory before anything
+	// checked its size.
+	r.Body = http.MaxBytesReader(w, r.Body, d.MaxInlineBytes*4/3+64<<10)
 	var req writeFileReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			writeErr(w, http.StatusRequestEntityTooLarge, fmt.Errorf("file larger than %d bytes", d.MaxInlineBytes))
+			return
+		}
 		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if int64(len(req.Data)) > d.MaxInlineBytes {
+		writeErr(w, http.StatusRequestEntityTooLarge, fmt.Errorf("file larger than %d bytes", d.MaxInlineBytes))
 		return
 	}
 	if req.Path == "" {
@@ -265,7 +292,7 @@ func (d *FilesDeps) WriteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if root.ReadOnly {
-		writeErr(w, http.StatusForbidden, errors.New("managed root is read-only"))
+		writeErr(w, http.StatusForbidden, errReadOnlyRoot)
 		return
 	}
 	conn, err := d.Registry.RequireAgent(nodeID)
@@ -314,6 +341,10 @@ func (d *FilesDeps) Mkdir(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, err)
 		return
 	}
+	if root.ReadOnly {
+		writeErr(w, http.StatusForbidden, errReadOnlyRoot)
+		return
+	}
 	conn, err := d.Registry.RequireAgent(nodeID)
 	if err != nil {
 		writeErr(w, http.StatusServiceUnavailable, err)
@@ -352,13 +383,18 @@ func (d *FilesDeps) Rename(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	if _, err := d.findManagedRoot(r.Context(), nodeID, req.From); err != nil {
-		writeErr(w, http.StatusForbidden, err)
-		return
-	}
-	if _, err := d.findManagedRoot(r.Context(), nodeID, req.To); err != nil {
-		writeErr(w, http.StatusForbidden, err)
-		return
+	// Both ends: moving a file OUT of a read-only root and deleting it at
+	// its new place was a two-step way around the read-only flag.
+	for _, p := range []string{req.From, req.To} {
+		root, err := d.findManagedRoot(r.Context(), nodeID, p)
+		if err != nil {
+			writeErr(w, http.StatusForbidden, err)
+			return
+		}
+		if root.ReadOnly {
+			writeErr(w, http.StatusForbidden, errReadOnlyRoot)
+			return
+		}
 	}
 	conn, err := d.Registry.RequireAgent(nodeID)
 	if err != nil {
@@ -389,7 +425,7 @@ func (d *FilesDeps) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if root.ReadOnly {
-		writeErr(w, http.StatusForbidden, errors.New("read-only root"))
+		writeErr(w, http.StatusForbidden, errReadOnlyRoot)
 		return
 	}
 	conn, err := d.Registry.RequireAgent(nodeID)
@@ -421,8 +457,15 @@ func (d *FilesDeps) Chown(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	if _, err := d.findManagedRoot(r.Context(), nodeID, req.Path); err != nil {
+	root, err := d.findManagedRoot(r.Context(), nodeID, req.Path)
+	if err != nil {
 		writeErr(w, http.StatusForbidden, err)
+		return
+	}
+	// A wrong owner locks the service that owns the data out of it just as
+	// surely as deleting it would.
+	if root.ReadOnly {
+		writeErr(w, http.StatusForbidden, errReadOnlyRoot)
 		return
 	}
 	conn, err := d.Registry.RequireAgent(nodeID)
@@ -496,12 +539,12 @@ func (d *FilesDeps) SuggestOwner(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("path required"))
 		return
 	}
-	cleaned := filepath.Clean(body.Path)
+	cleaned := gopath.Clean(body.Path)
 	if err := d.assertUnderManagedRoot(r.Context(), nodeID, cleaned); err != nil {
 		writeErr(w, http.StatusForbidden, err)
 		return
 	}
-	parent := filepath.Dir(cleaned)
+	parent := gopath.Dir(cleaned)
 	if parent == cleaned {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"needs_fix": false,
@@ -577,7 +620,7 @@ func (d *FilesDeps) assertUnderManagedRoot(ctx serverCtx, nodeID, path string) e
 // contains `path`. Falls back to the virtual full-filesystem root if no
 // user-defined profile matches but the path is absolute.
 func (d *FilesDeps) findManagedRoot(ctx serverCtx, nodeID, path string) (NodePath, error) {
-	cleaned := filepath.Clean(path)
+	cleaned := gopath.Clean(path)
 	rows, err := d.DB.QueryContext(ctx, `
 		SELECT id, node_id, label, path, default_uid, default_gid,
 		       COALESCE(default_user_label,''), read_only, created_at

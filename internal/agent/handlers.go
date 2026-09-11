@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -26,6 +28,7 @@ type Handler struct {
 	host    *hostCollector
 	monitor *monitor
 	cronctl *cronManager
+	pty     *ptyManager
 
 	// User-lookup cache (60s TTL). LookupUser is hit during every directory
 	// listing — caching is the difference between snappy and unusable on
@@ -40,11 +43,13 @@ type userCacheEntry struct {
 }
 
 func NewHandler(cfg *config.Config) *Handler {
+	mon := newMonitor(cfg)
 	return &Handler{
 		cfg:       cfg,
 		host:      newHostCollector(),
-		monitor:   newMonitor(cfg),
-		cronctl:   newCronManager(hostPrefix(cfg) + "/etc/cron.d/bpm"),
+		monitor:   mon,
+		cronctl:   newCronManager(hostPrefix(cfg)+"/etc/cron.d/bpm", cronShell(hostPrefix(cfg))),
+		pty:       newPtyManager(mon.docker, cfg.ShellImage),
 		userCache: make(map[uint32]userCacheEntry),
 	}
 }
@@ -61,6 +66,17 @@ func hostPrefix(cfg *config.Config) string {
 		return "/host"
 	}
 	return ""
+}
+
+// cronShell picks the SHELL line for the cron file. bash stays the default
+// wherever the host has it, so existing jobs that use bash syntax keep
+// working; hosts without it (Alpine, slim images) get sh instead of a SHELL
+// that fails every job with "no such file or directory".
+func cronShell(prefix string) string {
+	if _, err := os.Stat(prefix + "/bin/bash"); err == nil {
+		return "/bin/bash"
+	}
+	return "/bin/sh"
 }
 
 // ─── filesystem ─────────────────────────────────────────────────────────────
@@ -105,23 +121,52 @@ func (h *Handler) ReadFile(_ context.Context, req *pb.ReadFileReq) (*pb.ReadFile
 	if err != nil {
 		return nil, err
 	}
-	maxBytes := req.MaxBytes
-	if maxBytes == 0 {
-		maxBytes = uint32(h.cfg.FSMaxInlineBytes)
-	}
-	f, err := os.Open(final)
+	data, truncated, err := readCapped(final, inlineLimit(h.cfg.FSMaxInlineBytes, req.MaxBytes))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read %s: %w", req.Path, err)
+	}
+	return &pb.ReadFileResp{Data: data, Truncated: truncated}, nil
+}
+
+// inlineLimit is how many bytes one read may return. The whole file travels
+// back in a single gRPC message, so the configured limit caps it whatever the
+// caller asked for. The math is int64 on purpose: maxBytes+1 on the raw uint32
+// wrapped to 0 for 4294967295, and the file came back empty and "complete".
+func inlineLimit(configured int64, requested uint32) int64 {
+	if requested > 0 && int64(requested) < configured {
+		return int64(requested)
+	}
+	return configured
+}
+
+// readCapped returns at most limit bytes of a regular file and whether there
+// was more.
+func readCapped(path string, limit int64) ([]byte, bool, error) {
+	// Commands run one at a time, so opening a FIFO — which blocks until a
+	// writer shows up — would stall every later command on this node.
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, false, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, false, errors.New("not a regular file")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
 	}
 	defer f.Close()
 
-	buf := make([]byte, maxBytes+1)
-	n, _ := f.Read(buf)
-	truncated := uint32(n) > maxBytes
-	if truncated {
-		n = int(maxBytes)
+	// ReadAll, not one Read: a single read syscall may return less than asked
+	// (proc files, network filesystems), and that was reported as complete.
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, false, err
 	}
-	return &pb.ReadFileResp{Data: buf[:n], Truncated: truncated}, nil
+	if int64(len(data)) > limit {
+		return data[:limit], true, nil
+	}
+	return data, false, nil
 }
 
 func (h *Handler) WriteFile(_ context.Context, req *pb.WriteFileReq) (*pb.WriteFileResp, error) {
@@ -225,7 +270,21 @@ func (h *Handler) Chown(_ context.Context, req *pb.ChownReq) (*pb.ChownResp, err
 	return &pb.ChownResp{ChangedCount: count}, nil
 }
 
+// LookupUser resolves a user name to the uid/gid it has *on the host*.
+//
+// os/user reads the passwd database of whatever filesystem the process sees,
+// which inside the agent container is the image's own — a handful of Alpine
+// system accounts. Every host account ("www-data", the uid a bind-mounted
+// volume actually belongs to) came back "unknown user", which is the only
+// reason anyone looks a name up here. The host's file is reachable through the
+// same /host prefix the file browser uses.
 func (h *Handler) LookupUser(_ context.Context, req *pb.LookupUserReq) (*pb.LookupUserResp, error) {
+	if prefix := hostPrefix(h.cfg); prefix != "" {
+		if u, err := lookupInPasswd(filepath.Join(prefix, "etc", "passwd"), req.Name); err == nil {
+			return u, nil
+		}
+		// Fall through: running natively, or /host/etc/passwd unreadable.
+	}
 	u, err := user.Lookup(req.Name)
 	if err != nil {
 		return nil, err
@@ -238,6 +297,46 @@ func (h *Handler) LookupUser(_ context.Context, req *pb.LookupUserReq) (*pb.Look
 		Gid:  uint32(gid),
 		Home: u.HomeDir,
 	}, nil
+}
+
+// lookupInPasswd parses a passwd(5) file for one account.
+// Format: name:password:uid:gid:gecos:home:shell
+func lookupInPasswd(path, name string) (*pb.LookupUserResp, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.Split(line, ":")
+		if len(parts) < 6 || parts[0] != name {
+			continue
+		}
+		uid, err := strconv.ParseUint(parts[2], 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("passwd entry %q has a bad uid: %w", name, err)
+		}
+		gid, err := strconv.ParseUint(parts[3], 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("passwd entry %q has a bad gid: %w", name, err)
+		}
+		return &pb.LookupUserResp{
+			Name: parts[0],
+			Uid:  uint32(uid),
+			Gid:  uint32(gid),
+			Home: parts[5],
+		}, nil
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("user: unknown user %s", name)
 }
 
 // ─── cron ───────────────────────────────────────────────────────────────────

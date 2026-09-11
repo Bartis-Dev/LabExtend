@@ -6,6 +6,8 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/base32"
 	"encoding/base64"
@@ -80,13 +82,16 @@ func (m *TOTPManager) BeginEnrollment(ctx context.Context, userID int64, account
 		return nil, fmt.Errorf("encrypt: %w", err)
 	}
 
+	// Only the pending columns are touched: an enrollment the user starts and
+	// abandons must not disturb 2FA that is already working, and neither must
+	// one an attacker starts with a stolen session.
 	if _, err := m.db.ExecContext(ctx, `
-		INSERT INTO totp_secrets (user_id, secret_enc, enabled, recovery_codes)
-		VALUES (?, ?, 0, ?)
+		INSERT INTO totp_secrets (user_id, secret_enc, enabled, recovery_codes,
+		                          pending_secret_enc, pending_recovery_codes)
+		VALUES (?, X'', 0, '[]', ?, ?)
 		ON CONFLICT(user_id) DO UPDATE SET
-			secret_enc     = excluded.secret_enc,
-			enabled        = 0,
-			recovery_codes = excluded.recovery_codes
+			pending_secret_enc     = excluded.pending_secret_enc,
+			pending_recovery_codes = excluded.pending_recovery_codes
 	`, userID, encSecret, string(codesJSON)); err != nil {
 		return nil, fmt.Errorf("persist: %w", err)
 	}
@@ -102,16 +107,31 @@ func (m *TOTPManager) BeginEnrollment(ctx context.Context, userID int64, account
 // FinishEnrollment verifies one code against the pending secret. On success
 // flips enabled=1 and records enrolled_at.
 func (m *TOTPManager) FinishEnrollment(ctx context.Context, userID int64, code string) error {
-	secret, err := m.loadSecret(ctx, userID)
+	var enc []byte
+	if err := m.db.QueryRowContext(ctx,
+		`SELECT pending_secret_enc FROM totp_secrets WHERE user_id = ? AND pending_secret_enc IS NOT NULL`,
+		userID).Scan(&enc); err != nil {
+		return ErrInvalidCode // no enrollment in progress
+	}
+	secret, err := m.decrypt(enc)
 	if err != nil {
 		return err
 	}
 	if !totp.Validate(code, secret) {
 		return ErrInvalidCode
 	}
-	_, err = m.db.ExecContext(ctx,
-		`UPDATE totp_secrets SET enabled = 1, enrolled_at = ? WHERE user_id = ?`,
-		time.Now().Unix(), userID)
+	// Promote the pending enrollment. Guarded on pending_secret_enc so two
+	// concurrent confirmations cannot promote the same secret twice.
+	_, err = m.db.ExecContext(ctx, `
+		UPDATE totp_secrets
+		   SET secret_enc             = pending_secret_enc,
+		       recovery_codes         = pending_recovery_codes,
+		       enabled                = 1,
+		       enrolled_at            = ?,
+		       pending_secret_enc     = NULL,
+		       pending_recovery_codes = NULL
+		 WHERE user_id = ? AND pending_secret_enc IS NOT NULL
+	`, time.Now().Unix(), userID)
 	return err
 }
 
@@ -140,15 +160,34 @@ func (m *TOTPManager) VerifyRecoveryCode(ctx context.Context, userID int64, code
 	if err := json.Unmarshal([]byte(codesJSON), &entries); err != nil {
 		return ErrInvalidCode
 	}
+	want := hashRecoveryCode(code)
 	for i, e := range entries {
-		if e.Code == code && !e.Used {
-			entries[i].Used = true
-			entries[i].UsedAt = time.Now().Unix()
-			out, _ := json.Marshal(entries)
-			_, _ = m.db.ExecContext(ctx,
-				`UPDATE totp_secrets SET recovery_codes = ? WHERE user_id = ?`, string(out), userID)
-			return nil
+		if e.Used {
+			continue
 		}
+		var match bool
+		switch {
+		case e.Hash != "":
+			match = subtle.ConstantTimeCompare([]byte(e.Hash), []byte(want)) == 1
+		case e.Code != "":
+			match = subtle.ConstantTimeCompare([]byte(e.Code), []byte(code)) == 1
+		}
+		if !match {
+			continue
+		}
+		entries[i].Used = true
+		entries[i].UsedAt = time.Now().Unix()
+		out, err := json.Marshal(entries)
+		if err != nil {
+			return err
+		}
+		// If this write is lost the code stays usable, so a failure here has to
+		// deny the login rather than quietly grant a reusable one.
+		if _, err := m.db.ExecContext(ctx,
+			`UPDATE totp_secrets SET recovery_codes = ? WHERE user_id = ?`, string(out), userID); err != nil {
+			return err
+		}
+		return nil
 	}
 	return ErrInvalidCode
 }
@@ -224,15 +263,29 @@ func (m *TOTPManager) gcm() (cipher.AEAD, error) {
 // ─── recovery codes ─────────────────────────────────────────────────────────
 
 type recoveryEntry struct {
-	Code   string `json:"code"`
+	// Hash is sha256(code) in hex. The codes used to be stored in cleartext
+	// right next to the AES-GCM-encrypted secret, which handed anyone with a
+	// copy of the database eight working second factors per user and defeated
+	// the point of encrypting the secret at all. Plain sha256 is the right
+	// primitive here rather than a slow KDF: these are 50-bit random codes,
+	// not passwords.
+	Hash string `json:"hash,omitempty"`
+	// Code is the legacy cleartext form, still accepted so recovery sheets
+	// printed before the change keep working until the user re-enrolls.
+	Code   string `json:"code,omitempty"`
 	Used   bool   `json:"used"`
 	UsedAt int64  `json:"used_at,omitempty"`
+}
+
+func hashRecoveryCode(code string) string {
+	sum := sha256.Sum256([]byte(code))
+	return hex.EncodeToString(sum[:])
 }
 
 func toRecoveryEntries(codes []string) []recoveryEntry {
 	out := make([]recoveryEntry, len(codes))
 	for i, c := range codes {
-		out[i] = recoveryEntry{Code: c}
+		out[i] = recoveryEntry{Hash: hashRecoveryCode(c)}
 	}
 	return out
 }

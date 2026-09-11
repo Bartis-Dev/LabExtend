@@ -51,19 +51,60 @@ type Runner struct {
 	agents     AgentRequester
 	pub        Publisher
 	secretsKey string // hex AES-256-GCM key for decrypting S3 + webhook creds
+
+	// inflight holds the plans that currently have a run executing. Nothing
+	// prevented a plan from running twice at once: RunPlan starts a goroutine
+	// and returns immediately, so the cron job function always completes
+	// instantly and even cron.SkipIfStillRunning would not have helped. Two
+	// concurrent runs of the same plan stream two different archives into the
+	// same key (the default template has date granularity), and both record
+	// success with different checksums, at most one of which matches the object
+	// that survived.
+	inflightMu sync.Mutex
+	inflight   map[string]struct{}
 }
 
+// ErrPlanRunning reports that a plan was asked to start while one of its runs
+// is still executing.
+var ErrPlanRunning = errors.New("a run for this plan is already in progress")
+
 func NewRunner(db *sql.DB, agents AgentRequester, pub Publisher, secretsKey string) *Runner {
-	return &Runner{db: db, agents: agents, pub: pub, secretsKey: secretsKey}
+	return &Runner{
+		db: db, agents: agents, pub: pub, secretsKey: secretsKey,
+		inflight: make(map[string]struct{}),
+	}
+}
+
+// claim reserves planID for a run, reporting false if one is already active.
+func (r *Runner) claim(planID string) bool {
+	r.inflightMu.Lock()
+	defer r.inflightMu.Unlock()
+	if _, busy := r.inflight[planID]; busy {
+		return false
+	}
+	r.inflight[planID] = struct{}{}
+	return true
+}
+
+func (r *Runner) release(planID string) {
+	r.inflightMu.Lock()
+	delete(r.inflight, planID)
+	r.inflightMu.Unlock()
 }
 
 // RunPlan executes one full backup run. Returns the new run_id immediately
 // and runs the actual work asynchronously (since a backup can take minutes).
 // Caller can poll /api/backups/runs/:id to follow progress.
-func (r *Runner) RunPlan(ctx context.Context, planID, planName, triggeredBy string) string {
+func (r *Runner) RunPlan(_ context.Context, planID, planName, triggeredBy string) (string, error) {
+	if !r.claim(planID) {
+		return "", ErrPlanRunning
+	}
 	runID := uuid.NewString()
-	go r.run(planID, planName, runID, triggeredBy)
-	return runID
+	go func() {
+		defer r.release(planID)
+		r.run(planID, planName, runID, triggeredBy)
+	}()
+	return runID, nil
 }
 
 // run is the async worker.
@@ -155,7 +196,8 @@ func (r *Runner) run(planID, planName, runID, triggeredBy string) {
 	// Retention prune (best-effort).
 	if plan.RetentionKeep > 0 {
 		if err := r.pruneRetention(ctx, plan, s3Cfg); err != nil {
-			slog.Warn("backup: retention prune failed", "plan", planID, "err", err)
+			slog.Warn("backup: retention prune skipped — old objects remain in the bucket",
+				"plan", planID, "retention_keep", plan.RetentionKeep, "err", err)
 		}
 	}
 
@@ -229,14 +271,21 @@ func (r *Runner) runOneNode(ctx context.Context, plan plan, target AgentInfo, ru
 
 // ─── retention prune ────────────────────────────────────────────────────────
 
-// pruneRetention lists keys matching this plan's prefix per node and deletes
-// all but the newest N. Implemented via the s3 package (we re-use the leader's
-// client construction via a small inline call).
+// ErrRetentionNotImplemented reports that retention_keep is configured but
+// nothing prunes anything.
+//
+// This has never deleted an object. It returned nil, and the caller only logs
+// on error, so a successful no-op was indistinguishable from a successful
+// prune: an operator who set "keep 7" on a nightly plan watched the bucket grow
+// without bound until the provider refused an upload mid-run. Being loud about
+// it is the honest state until the prune is actually built — and building it
+// means deleting objects from an operator's bucket based on a key template
+// whose shape the plan author chooses, which needs its own design pass rather
+// than a quick list-and-delete loop.
+var ErrRetentionNotImplemented = errors.New("retention pruning is not implemented; old objects are never deleted")
+
 func (r *Runner) pruneRetention(_ context.Context, _ plan, _ s3EndpointCfg) error {
-	// NOTE: full impl requires listing under each node's key prefix.
-	// For now this is a placeholder hook; logging-only.
-	// TODO: list, sort by LastModified, delete oldest beyond keep.
-	return nil
+	return ErrRetentionNotImplemented
 }
 
 // ─── DB helpers ─────────────────────────────────────────────────────────────
@@ -379,19 +428,63 @@ func (r *Runner) updateRunItem(ctx context.Context, itemID int64, status string,
 }
 
 func (r *Runner) markFinished(ctx context.Context, runID, status, errSummary string, results []NodeResult) {
+	// The run's own context is already past its deadline whenever the run hit
+	// the 4h timeout — exactly the case where a terminal status matters most.
+	// Writing it on that dead context leaves the row on 'running' forever, and
+	// DeleteRun refuses to remove in-flight runs, so it can never be cleared.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+
 	excerpt := ""
 	if len(results) > 0 {
-		b, _ := json.Marshal(results)
-		excerpt = string(b)
-		if len(excerpt) > 8192 {
-			excerpt = excerpt[:8192]
+		// Truncate the per-node error strings, not the encoded array. Cutting
+		// the JSON at a byte offset produced a document that never parses
+		// again, so the reader (handlers_backup.go) silently ended up with an
+		// empty item list: a partial run showed no detail at all and the S3
+		// keys of the archives that did land became unreachable.
+		trimmed := make([]NodeResult, len(results))
+		copy(trimmed, results)
+		for i := range trimmed {
+			if len(trimmed[i].Error) > 512 {
+				trimmed[i].Error = trimmed[i].Error[:512] + "… (truncated)"
+			}
+		}
+		b, err := json.Marshal(trimmed)
+		if err != nil {
+			slog.Warn("backup: encoding run results failed", "run", runID, "err", err)
+		} else {
+			excerpt = string(b)
 		}
 	}
-	_, _ = r.db.ExecContext(ctx, `
+	if _, err := r.db.ExecContext(ctx, `
 		UPDATE backup_runs
 		   SET finished_at = ?, status = ?, error_summary = ?, log_excerpt = ?
 		 WHERE id = ?
-	`, time.Now().Unix(), status, errSummary, excerpt, runID)
+	`, time.Now().Unix(), status, errSummary, excerpt, runID); err != nil {
+		slog.Error("backup: writing terminal run status failed",
+			"run", runID, "status", status, "err", err)
+	}
+}
+
+// ReconcileStaleRuns fails every run still marked in-flight. Called once at
+// leader startup: a run whose leader died mid-flight has no one left to write
+// its terminal status, and such a row is neither deletable nor cleanable
+// through the API.
+func (r *Runner) ReconcileStaleRuns(ctx context.Context) {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE backup_runs
+		   SET status = 'failed',
+		       finished_at = ?,
+		       error_summary = 'leader restarted while the run was in flight'
+		 WHERE status IN ('pending', 'running')
+	`, time.Now().Unix())
+	if err != nil {
+		slog.Warn("backup: reconciling stale runs failed", "err", err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		slog.Warn("backup: marked stale in-flight runs as failed", "count", n)
+	}
 }
 
 func (r *Runner) publish(topic string, data any) {
@@ -433,6 +526,11 @@ func (r *Runner) notify(ctx context.Context, p plan, status, errSummary, planNam
 
 func (r *Runner) fireWebhook(ctx context.Context, p plan, status, errSummary, planName, runID string,
 	bytes uint64, dur time.Duration, results []NodeResult) {
+	// Same reason as markFinished: a run that hit its 4h deadline arrives here
+	// with a dead context, and that is precisely a run worth announcing.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+
 	var url string
 	if err := r.db.QueryRowContext(ctx,
 		`SELECT url FROM webhook_configs WHERE id = ? AND enabled = 1`, p.WebhookID).Scan(&url); err != nil {

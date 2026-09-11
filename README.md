@@ -10,6 +10,11 @@ A Docker Swarm-native infrastructure + monitoring tool. Single Go binary deploye
 - **Alerts + webhooks** — threshold rules with hysteresis (CPU > 80% for 60s on any node → Discord). Recovery posts too.
 - **Auth** — SQLite users, Argon2id, opaque sessions, CSRF. Setup wizard on first boot.
 - **SSE** — UI updates without polling.
+- **Browser terminal** — a root shell on any node's host, admin-only and
+  audit-logged, capped at one hour. The agent starts a privileged helper
+  container that `nsenter`s into the host namespaces (no sshd, no keys); the
+  browser reaches it over a WebSocket on the leader. Anyone who can reach this
+  is root on that host — treat admin accounts accordingly and put 2FA on them.
 
 ## What's planned (phases 9–14)
 
@@ -64,8 +69,10 @@ UI receives delta-computed rates (bps) — the leader does the math, the browser
 | `BPM_LOG_RETENTION_HOURS` | `0` (cap only) | Optional time-based prune. |
 | `BPM_METRIC_RETENTION_HOURS` | `24` (Docker stack: `168` = 7d) | 1-min bucket retention. |
 | `BPM_DOCKER_SOCKET` | autodetect | Host Docker socket path inside container. |
+| `BPM_TRUSTED_PROXIES` | — | Comma-separated IPs/CIDRs whose `X-Forwarded-For` is believed. Empty trusts nobody and uses the TCP peer address. Set it to your reverse proxy, never to a range reaching clients. |
 | `BPM_ALLOW_EXEC` | `false` | Enable generic ExecReq command (not recommended). |
 | `BPM_PORTAINER_SERVICE` | `portainer_agent` | Swarm service the sidebar "Restart Portainer" button force-updates (runs on the leader's manager socket). |
+| `BPM_SHELL_IMAGE` | the agent's own image | Image the browser terminal's privileged `nsenter` helper container runs. The default is already on the node and ships `nsenter`; a replacement must do both. |
 
 ## Dev loop
 

@@ -3,6 +3,7 @@ package leader
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/Bartis-Dev/LabExtend/internal/auth"
@@ -29,11 +30,46 @@ func (d *AccountDeps) TOTPStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// TOTPBegin creates a fresh secret + QR + recovery codes (enabled=0).
+// reauth re-verifies the caller's password. Enrolling a second factor and
+// removing one are both account-takeover primitives once a session is stolen,
+// so neither may rest on the session cookie alone.
+func (d *AccountDeps) reauth(r *http.Request, userID int64, password string) error {
+	if password == "" {
+		return errors.New("current password required")
+	}
+	var hash string
+	if err := d.AuthDeps.DB.QueryRowContext(r.Context(),
+		`SELECT password_hash FROM users WHERE id = ?`, userID).Scan(&hash); err != nil {
+		return errors.New("current password incorrect")
+	}
+	ok, err := auth.VerifyPassword(password, hash)
+	if err != nil || !ok {
+		return errors.New("current password incorrect")
+	}
+	return nil
+}
+
+// passwordBody is the re-authentication payload for the 2FA enrol/disable
+// endpoints.
+type passwordBody struct {
+	Password string `json:"password"`
+}
+
+// TOTPBegin creates a fresh secret + QR + recovery codes as a *pending*
+// enrollment; the active factor is untouched until TOTPConfirm promotes it.
 func (d *AccountDeps) TOTPBegin(w http.ResponseWriter, r *http.Request) {
 	sess, _ := r.Context().Value(authCtxKey{}).(*auth.Session)
 	if sess == nil {
 		writeErr(w, http.StatusUnauthorized, nil)
+		return
+	}
+	var body passwordBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := d.reauth(r, sess.UserID, body.Password); err != nil {
+		writeErr(w, http.StatusUnauthorized, err)
 		return
 	}
 	var email string
@@ -75,6 +111,15 @@ func (d *AccountDeps) TOTPDisable(w http.ResponseWriter, r *http.Request) {
 	sess, _ := r.Context().Value(authCtxKey{}).(*auth.Session)
 	if sess == nil {
 		writeErr(w, http.StatusUnauthorized, nil)
+		return
+	}
+	var body passwordBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := d.reauth(r, sess.UserID, body.Password); err != nil {
+		writeErr(w, http.StatusUnauthorized, err)
 		return
 	}
 	if err := d.TOTP.Disable(r.Context(), sess.UserID); err != nil {
@@ -124,6 +169,15 @@ func (d *AccountDeps) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		`UPDATE users SET password_hash = ? WHERE id = ?`, newHash, sess.UserID); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
+	}
+	// Changing the password is the one remediation a user has for a stolen
+	// cookie, so every other session has to go — otherwise the thief keeps
+	// their access for the rest of the session TTL. The caller's own session
+	// survives so they are not logged out by their own action.
+	if _, err := d.AuthDeps.DB.ExecContext(r.Context(),
+		`DELETE FROM sessions WHERE user_id = ? AND id != ?`, sess.UserID, sess.ID); err != nil {
+		slog.Error("revoking other sessions after password change failed",
+			"user", sess.UserID, "err", err)
 	}
 	d.Audit.Log(r.Context(), r, "user.password_change", "user", emailString("", sess.UserID), nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Box, RotateCcw } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { ChevronDown, ChevronRight, Layers, RotateCcw, Server } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useSSE } from '@/lib/sse';
 import type { ContainerView } from '@/lib/types';
@@ -18,17 +19,54 @@ export default function ContainersPage() {
 }
 
 type Filter = 'all' | 'running' | 'stopped' | 'crashed';
+type GroupBy = 'node' | 'stack' | 'none';
+
+const GROUP_STORAGE_KEY = 'labextend.containers.groupBy';
+
+/**
+ * stackOf derives the deployment a container belongs to.
+ *
+ * Swarm sets com.docker.stack.namespace, plain Compose sets
+ * com.docker.compose.project. Anything started by hand has neither and lands in
+ * a single "no stack" bucket rather than one bucket per container.
+ */
+function stackOf(c: ContainerView): string | null {
+  const l = c.labels ?? {};
+  return l['com.docker.stack.namespace'] || l['com.docker.compose.project'] || null;
+}
 
 function Containers() {
   const [items, setItems] = useState<ContainerView[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
+  const [groupBy, setGroupBy] = useState<GroupBy>('node');
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [err, setErr] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  // Remember the grouping choice per browser; it is a view preference, not
+  // state anyone else needs to see.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(GROUP_STORAGE_KEY);
+      if (saved === 'node' || saved === 'stack' || saved === 'none') setGroupBy(saved);
+    } catch { /* private mode / blocked storage */ }
+  }, []);
+  const chooseGroup = (g: GroupBy) => {
+    setGroupBy(g);
+    try { localStorage.setItem(GROUP_STORAGE_KEY, g); } catch { /* ignore */ }
+  };
 
   const load = async () => {
     try {
       const r = await api<{ containers: ContainerView[] }>('/api/containers');
       setItems(r.containers ?? []);
-    } catch {/* */}
+      setErr(null);
+    } catch (e: unknown) {
+      setErr((e as { body?: { error?: string } })?.body?.error ?? 'Could not load containers.');
+    } finally {
+      setLoaded(true);
+    }
   };
 
   useEffect(() => {
@@ -54,51 +92,167 @@ function Containers() {
       if (filter === 'running' && c.state !== 'running') return false;
       if (filter === 'stopped' && c.state === 'running') return false;
       if (filter === 'crashed' && !c.crashed_loop) return false;
-      if (q && !(c.name.toLowerCase().includes(q) || c.image.toLowerCase().includes(q) || c.node_id.toLowerCase().includes(q))) return false;
+      if (q) {
+        const stack = stackOf(c) ?? '';
+        const hay = `${c.name} ${c.image} ${c.node_id} ${stack}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
       return true;
     });
   }, [items, filter, search]);
 
+  const groups = useMemo(() => {
+    const sortRows = (rows: ContainerView[]) =>
+      [...rows].sort((a, b) => {
+        // Restart loops first because they need attention, then the live
+        // containers, and anything stopped last — a deliberately stopped
+        // container is not a problem and should not outrank a running one.
+        const rank = (c: ContainerView) => (c.crashed_loop ? 0 : c.state === 'running' ? 1 : 2);
+        return rank(a) - rank(b) || a.name.localeCompare(b.name);
+      });
+
+    if (groupBy === 'none') return [{ key: '', label: '', rows: sortRows(filtered) }];
+
+    const buckets = new Map<string, ContainerView[]>();
+    for (const c of filtered) {
+      const key = groupBy === 'node' ? c.node_id : (stackOf(c) ?? '￿no stack');
+      const arr = buckets.get(key);
+      if (arr) arr.push(c);
+      else buckets.set(key, [c]);
+    }
+    // The ￿ prefix keeps the "no stack" bucket last without a special case.
+    return Array.from(buckets.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([key, rows]) => ({
+        key,
+        label: key.startsWith('￿') ? key.slice(1) : key,
+        rows: sortRows(rows),
+      }));
+  }, [filtered, groupBy]);
+
+  const nodeCount = new Set(items.map((c) => c.node_id)).size;
+  const stackCount = new Set(items.map((c) => stackOf(c)).filter(Boolean)).size;
+
   return (
     <div className="mx-auto max-w-7xl px-6 py-8">
-      <header className="mb-4 flex items-end justify-between">
+      <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Containers</h1>
-          <p className="text-xs text-zinc-500">{items.length} across {new Set(items.map((c) => c.node_id)).size} nodes</p>
+          <p className="text-xs text-zinc-500">
+            {items.length} across {nodeCount} node{nodeCount === 1 ? '' : 's'}
+            {stackCount > 0 && ` · ${stackCount} stack${stackCount === 1 ? '' : 's'}`}
+          </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <input
-            placeholder="filter…"
+            placeholder="filter name, image, node, stack…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="input w-56"
+            className="input w-64"
+            aria-label="Filter containers"
           />
-          <div className="flex overflow-hidden rounded-md border border-zinc-300 text-xs dark:border-zinc-700">
-            {(['all','running','stopped','crashed'] as Filter[]).map((f) => (
+          <div className="seg" role="group" aria-label="State filter">
+            {(['all', 'running', 'stopped', 'crashed'] as Filter[]).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
-                className={
-                  f === filter
-                    ? 'bg-zinc-900 px-2 py-1 text-white dark:bg-zinc-100 dark:text-zinc-900'
-                    : 'px-2 py-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                }
+                aria-pressed={f === filter}
+                className={f === filter ? 'seg-item-active' : 'seg-item'}
               >{f}</button>
             ))}
+          </div>
+          <div className="seg" role="group" aria-label="Grouping">
+            <button onClick={() => chooseGroup('node')} aria-pressed={groupBy === 'node'}
+              className={groupBy === 'node' ? 'seg-item-active' : 'seg-item'}>by node</button>
+            <button onClick={() => chooseGroup('stack')} aria-pressed={groupBy === 'stack'}
+              className={groupBy === 'stack' ? 'seg-item-active' : 'seg-item'}>by stack</button>
+            <button onClick={() => chooseGroup('none')} aria-pressed={groupBy === 'none'}
+              className={groupBy === 'none' ? 'seg-item-active' : 'seg-item'}>all</button>
           </div>
         </div>
       </header>
 
-      {filtered.length === 0 ? (
-        <div className="card py-12 text-center text-sm text-zinc-500">No containers match.</div>
+      {err && (
+        <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {err}
+        </div>
+      )}
+
+      {!loaded ? (
+        <SkeletonList />
+      ) : filtered.length === 0 ? (
+        <div className="card py-12 text-center text-sm text-zinc-500">
+          {items.length === 0 ? 'No containers reported yet.' : 'No containers match the current filter.'}
+        </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((c) => (
-            <ContainerCard key={c.node_id + c.container_id} c={c} />
-          ))}
+        <div className="card overflow-hidden p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead className="border-b border-zinc-200 dark:border-zinc-800">
+                <tr>
+                  <th className="th">Container</th>
+                  <th className="th">Image</th>
+                  {groupBy !== 'node' && <th className="th">Node</th>}
+                  <th className="th">State</th>
+                  <th className="th text-right">CPU</th>
+                  <th className="th text-right">RAM</th>
+                  <th className="th text-right">Network</th>
+                  <th className="th text-right">Uptime</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+                {groups.map((g) => (
+                  <GroupBlock
+                    key={g.key || 'flat'}
+                    groupBy={groupBy}
+                    label={g.label}
+                    rows={g.rows}
+                    collapsed={!!collapsed[g.key]}
+                    onToggle={() => setCollapsed((c) => ({ ...c, [g.key]: !c[g.key] }))}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
+  );
+}
+
+function GroupBlock({ groupBy, label, rows, collapsed, onToggle }: {
+  groupBy: GroupBy;
+  label: string;
+  rows: ContainerView[];
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  const cols = groupBy !== 'node' ? 8 : 7;
+  const problems = rows.filter((c) => c.crashed_loop).length;
+
+  return (
+    <>
+      {groupBy !== 'none' && (
+        <tr className="bg-zinc-50/80 dark:bg-zinc-900/50">
+          <td colSpan={cols} className="px-3 py-1.5">
+            <button
+              onClick={onToggle}
+              aria-expanded={!collapsed}
+              className="flex w-full items-center gap-1.5 rounded text-left text-[11px] font-medium uppercase tracking-wide text-zinc-600 transition hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-zinc-400 dark:hover:text-zinc-100"
+            >
+              {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              {groupBy === 'node' ? <Server className="h-3.5 w-3.5 text-zinc-400" /> : <Layers className="h-3.5 w-3.5 text-zinc-400" />}
+              <span className="font-mono normal-case">{label}</span>
+              <span className="font-normal text-zinc-400">{rows.length}</span>
+              {problems > 0 && <span className="badge-red ml-1 normal-case">{problems} crashed</span>}
+            </button>
+          </td>
+        </tr>
+      )}
+      {!collapsed && rows.map((c) => (
+        <ContainerRow key={c.node_id + c.container_id} c={c} showNode={groupBy !== 'node'} />
+      ))}
+    </>
   );
 }
 
@@ -127,8 +281,11 @@ function parseImage(image: string): { namespace: string; name: string; tag: stri
   return { namespace, name, tag, pinned };
 }
 
-function ContainerCard({ c }: { c: ContainerView }) {
+function ContainerRow({ c, showNode }: { c: ContainerView; showNode: boolean }) {
+  const router = useRouter();
   const img = parseImage(c.image);
+  const href = `/container?node=${encodeURIComponent(c.node_id)}&id=${encodeURIComponent(c.container_id)}`;
+
   const badgeCls =
     c.crashed_loop ? 'badge-red' :
     c.state === 'running' && c.health === 'unhealthy' ? 'badge-amber' :
@@ -138,67 +295,73 @@ function ContainerCard({ c }: { c: ContainerView }) {
   const badgeLabel = c.crashed_loop ? `crashed ×${c.recent_restarts}` : (c.health || c.state || 'unknown');
 
   return (
-    <Link
-      href={`/container?node=${encodeURIComponent(c.node_id)}&id=${encodeURIComponent(c.container_id)}`}
-      className="card group flex flex-col gap-3 transition hover:border-accent/50 hover:shadow-md"
-    >
-      {/* header: name + node + state */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="truncate font-medium leading-tight transition group-hover:text-accent">{c.name}</div>
-          <div className="mt-0.5 truncate text-[11px] text-zinc-500">{c.node_id}</div>
-        </div>
-        <span className={`${badgeCls} shrink-0`}>{badgeLabel}</span>
-      </div>
+    <tr className="row-link" onClick={() => router.push(href)}>
+      <td className="td max-w-[18rem]">
+        <Link
+          href={href}
+          onClick={(e) => e.stopPropagation()}
+          className="block truncate font-medium hover:text-accent focus:outline-none focus-visible:underline"
+        >
+          {c.name}
+        </Link>
+      </td>
 
-      {/* image — the visual anchor of the card */}
-      <div className="flex items-center gap-2.5 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-950/40">
-        <Box className="h-4 w-4 shrink-0 text-zinc-400" />
-        <div className="min-w-0 flex-1">
-          {img.namespace && (
-            <div className="truncate font-mono text-[10px] leading-tight text-zinc-400">{img.namespace}/</div>
-          )}
-          <div className="truncate font-mono text-[13px] font-semibold text-zinc-800 dark:text-zinc-100">{img.name || '—'}</div>
-        </div>
-        {img.tag ? (
-          <span className="badge shrink-0 bg-accent/10 font-mono text-accent">{img.tag}</span>
-        ) : img.pinned ? (
-          <span className="badge-zinc shrink-0 font-mono" title="pinned by digest">digest</span>
-        ) : (
-          <span className="badge-zinc shrink-0 font-mono text-zinc-400">latest</span>
-        )}
-      </div>
-
-      {/* live metrics */}
-      <div className="grid grid-cols-3 gap-2 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
-        <Metric label="CPU" value={fmtPct(c.cpu_percent, 1)} />
-        <Metric
-          label="RAM"
-          value={fmtBytes(c.mem_used_bytes)}
-          sub={c.mem_limit_bytes > 0 ? `/ ${fmtBytes(c.mem_limit_bytes)}` : undefined}
-        />
-        <Metric label="Net" value={`↓ ${fmtBps(c.net_rx_bps)}`} sub={`↑ ${fmtBps(c.net_tx_bps)}`} />
-      </div>
-
-      {/* footer: uptime + restarts */}
-      <div className="mt-auto flex items-center justify-between text-[11px] text-zinc-500">
-        <span>{c.state === 'running' ? 'up' : c.state} · {fmtRelative(c.started_at_ms)}</span>
-        {c.restart_count > 0 && (
-          <span className="inline-flex items-center gap-1" title={`${c.restart_count} restarts total`}>
-            <RotateCcw className="h-3 w-3" />{c.restart_count}
+      <td className="td max-w-[20rem]">
+        <div className="flex items-baseline gap-1.5">
+          <span className="truncate font-mono text-[12px]" title={c.image}>
+            {img.namespace && <span className="text-zinc-400">{img.namespace}/</span>}
+            {img.name || '—'}
           </span>
+          {img.tag ? (
+            <span className="badge shrink-0 bg-accent/10 font-mono text-accent">{img.tag}</span>
+          ) : img.pinned ? (
+            <span className="badge-zinc shrink-0 font-mono" title="pinned by digest">digest</span>
+          ) : (
+            <span className="badge-zinc shrink-0 font-mono text-zinc-400">latest</span>
+          )}
+        </div>
+      </td>
+
+      {showNode && <td className="td truncate font-mono text-[11px] text-zinc-500">{c.node_id}</td>}
+
+      <td className="td"><span className={badgeCls}>{badgeLabel}</span></td>
+
+      <td className="td text-right font-mono text-[12px]">{fmtPct(c.cpu_percent, 1)}</td>
+
+      <td className="td text-right font-mono text-[12px]">
+        {fmtBytes(c.mem_used_bytes)}
+        {c.mem_limit_bytes > 0 && <span className="text-zinc-400"> / {fmtBytes(c.mem_limit_bytes)}</span>}
+      </td>
+
+      <td className="td text-right font-mono text-[11px] text-zinc-500">
+        <div>↓ {fmtBps(c.net_rx_bps)}</div>
+        <div>↑ {fmtBps(c.net_tx_bps)}</div>
+      </td>
+
+      <td className="td text-right text-[11px] text-zinc-500">
+        <div>{c.state === 'running' ? fmtRelative(c.started_at_ms) : c.state}</div>
+        {c.restart_count > 0 && (
+          <div className="inline-flex items-center gap-1" title={`${c.restart_count} restarts total`}>
+            <RotateCcw className="h-3 w-3" />{c.restart_count}
+          </div>
         )}
-      </div>
-    </Link>
+      </td>
+    </tr>
   );
 }
 
-function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function SkeletonList() {
   return (
-    <div className="min-w-0">
-      <div className="text-[10px] uppercase tracking-wide text-zinc-400">{label}</div>
-      <div className="truncate font-mono text-xs font-medium">{value}</div>
-      {sub && <div className="truncate font-mono text-[10px] text-zinc-400">{sub}</div>}
+    <div className="card overflow-hidden p-0">
+      <div className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="flex items-center gap-4 px-3 py-3">
+            <div className="h-3 w-40 rounded bg-zinc-200 motion-safe:animate-pulse dark:bg-zinc-800" />
+            <div className="h-3 w-56 rounded bg-zinc-200 motion-safe:animate-pulse dark:bg-zinc-800" />
+            <div className="ml-auto h-3 w-16 rounded bg-zinc-200 motion-safe:animate-pulse dark:bg-zinc-800" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

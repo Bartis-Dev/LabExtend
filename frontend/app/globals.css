@@ -49,6 +49,55 @@
   .badge-zinc {
     @apply badge bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300;
   }
+  .badge-outline {
+    @apply badge border border-zinc-200 bg-transparent font-mono text-zinc-600
+           dark:border-zinc-700 dark:text-zinc-400;
+  }
+
+  /* Dense list views: one row per node/container instead of a card grid. */
+  .th {
+    @apply px-3 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-zinc-500;
+  }
+  .td {
+    @apply px-3 py-2 align-middle;
+  }
+  .row-link {
+    @apply cursor-pointer transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/60;
+  }
+  /* Segmented control used for the list filters. */
+  .seg {
+    @apply flex overflow-hidden rounded-md border border-zinc-300 text-xs dark:border-zinc-700;
+  }
+  .seg-item {
+    @apply px-2.5 py-1 text-zinc-500 transition hover:bg-zinc-100 focus:outline-none
+           focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent
+           dark:hover:bg-zinc-800;
+  }
+  .seg-item-active {
+    @apply bg-zinc-900 px-2.5 py-1 text-white focus:outline-none focus-visible:ring-2
+           focus-visible:ring-inset focus-visible:ring-accent dark:bg-zinc-100 dark:text-zinc-900;
+  }
+
+  .modal-panel {
+    animation: modal-in 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-panel {
+    animation: none;
+  }
 }
 
 /* Subtle scrollbar in the log viewer */

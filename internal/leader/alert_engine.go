@@ -3,6 +3,7 @@ package leader
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -74,6 +75,11 @@ type AlertEngine struct {
 	mu       sync.RWMutex
 	state    map[string]*ruleState // key = ruleID + "|" + targetKey
 	webhooks map[string]string     // id → decoded URL (cached)
+
+	// started bounds how long the engine claims a node has been gone: after a
+	// leader restart every node's last_seen is as old as the outage, and each
+	// would alert at once although its agent reconnects seconds later.
+	started time.Time
 }
 
 func newAlertEngine(db *sql.DB, m *metricsStore, c *containerStore, reg *AgentRegistry, hub *Hub) *AlertEngine {
@@ -90,6 +96,7 @@ func newAlertEngine(db *sql.DB, m *metricsStore, c *containerStore, reg *AgentRe
 
 // Run loops every 5s evaluating all enabled rules.
 func (e *AlertEngine) Run(ctx context.Context) {
+	e.started = time.Now()
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 	for {
@@ -168,16 +175,65 @@ func (e *AlertEngine) evalNodeMetric(ctx context.Context, r AlertRule) {
 }
 
 func (e *AlertEngine) evalNodeOffline(ctx context.Context, r AlertRule) {
-	// Iterate all known agents; for each, last_seen drives the breach.
-	for _, c := range e.reg.List() {
-		since := time.Since(c.LastSeen).Seconds()
-		breach := compare(since, r.Threshold, r.Comparator)
-		if !ruleAppliesToNode(r.Scope, c.ID, e.reg) {
+	// Not the registry: it only holds connected agents, and a node leaves it
+	// the moment its stream ends — so iterating it could never find an
+	// offline node, and this rule never fired. The nodes table remembers every
+	// node and when it was last heard from.
+	nodes, err := e.knownNodes(ctx)
+	if err != nil {
+		slog.Warn("alert: load nodes failed", "err", err)
+		return
+	}
+	now := time.Now()
+	for _, n := range nodes {
+		if !scopeMatches(r.Scope, n.id, n.labels) {
 			continue
 		}
-		e.processBreach(ctx, r, "node:"+c.ID, c.ID, "", since, breach,
-			fmt.Sprintf("node %s last seen %.0fs ago", c.ID, since))
+		since := 0.0
+		if _, online := e.reg.Get(n.id); !online {
+			seen := time.Unix(n.lastSeen, 0)
+			if seen.Before(e.started) {
+				seen = e.started
+			}
+			since = now.Sub(seen).Seconds()
+		}
+		breach := compare(since, r.Threshold, r.Comparator)
+		e.processBreach(ctx, r, "node:"+n.id, n.id, "", since, breach,
+			fmt.Sprintf("node %s last seen %.0fs ago", n.id, since))
 	}
+}
+
+type knownNode struct {
+	id       string
+	lastSeen int64
+	labels   map[string]string
+}
+
+func (e *AlertEngine) knownNodes(ctx context.Context) ([]knownNode, error) {
+	if e.db == nil {
+		return nil, nil
+	}
+	rows, err := e.db.QueryContext(ctx, `SELECT id, last_seen, labels_json FROM nodes`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []knownNode
+	for rows.Next() {
+		var n knownNode
+		var labelsJSON sql.NullString
+		if err := rows.Scan(&n.id, &n.lastSeen, &labelsJSON); err != nil {
+			return nil, err
+		}
+		if labelsJSON.String != "" {
+			if err := json.Unmarshal([]byte(labelsJSON.String), &n.labels); err != nil {
+				// Only label-scoped rules lose this node; the rest still see it.
+				slog.Debug("alert: bad labels_json", "node", n.id, "err", err)
+			}
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
 }
 
 func (e *AlertEngine) evalContainerCrashed(ctx context.Context, r AlertRule) {
@@ -369,6 +425,16 @@ func compare(value, threshold float64, op string) bool {
 //	"node:<hostname>" — exact match
 //	"label:k=v"       — node labels (looked up via the AgentRegistry)
 func ruleAppliesToNode(scope, nodeID string, reg *AgentRegistry) bool {
+	var labels map[string]string
+	if conn, ok := reg.Get(nodeID); ok {
+		labels = conn.Labels
+	}
+	return scopeMatches(scope, nodeID, labels)
+}
+
+// scopeMatches is ruleAppliesToNode for a node whose labels are already known
+// — including an offline one, which the registry no longer holds.
+func scopeMatches(scope, nodeID string, labels map[string]string) bool {
 	scope = strings.TrimSpace(scope)
 	if scope == "" || scope == "all" {
 		return true
@@ -377,16 +443,12 @@ func ruleAppliesToNode(scope, nodeID string, reg *AgentRegistry) bool {
 		return strings.TrimPrefix(scope, "node:") == nodeID
 	}
 	if strings.HasPrefix(scope, "label:") {
-		want := strings.TrimPrefix(scope, "label:")
-		k, v, ok := strings.Cut(want, "=")
+		k, v, ok := strings.Cut(strings.TrimPrefix(scope, "label:"), "=")
 		if !ok {
 			return false
 		}
-		conn, found := reg.Get(nodeID)
-		if !found {
-			return false
-		}
-		return conn.Labels[k] == v
+		got, present := labels[k]
+		return present && got == v
 	}
 	return false
 }

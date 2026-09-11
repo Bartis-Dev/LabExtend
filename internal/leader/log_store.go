@@ -223,12 +223,12 @@ func (s *logStore) Subscribe(nodeID, containerID string, buffer int) (<-chan *Lo
 			}
 		}
 		s.mu.Unlock()
-		// Drain after unregister to unblock any fanout in flight.
-		go func() {
-			for range ch {
-			}
-		}()
-		close(ch)
+		// Deliberately not closed. fanout copies the channel set out from
+		// under the read lock and sends after releasing it, so a close here
+		// races with that send and panics the gRPC handler goroutine — which
+		// takes the whole leader process down. The subscriber loop exits on
+		// its request context instead, and the channel is garbage once it is
+		// out of the map.
 	}
 	return ch, cancel
 }
@@ -248,7 +248,7 @@ func (s *logStore) RunRetentionLoop(ctx context.Context, retentionHours int) {
 			if s.db == nil {
 				continue
 			}
-			cutoff := time.Now().Add(-time.Duration(retentionHours)*time.Hour).UnixMilli()
+			cutoff := time.Now().Add(-time.Duration(retentionHours) * time.Hour).UnixMilli()
 			if _, err := s.db.ExecContext(ctx,
 				`DELETE FROM container_log_lines WHERE ts_ms < ?`, cutoff); err != nil {
 				slog.Warn("log retention prune failed", "err", err)

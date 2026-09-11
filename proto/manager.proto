@@ -95,6 +95,15 @@ message Command {
     // Swarm service control (force-redeploy a service via the manager socket).
     ServiceUpdateReq service_update = 32;
 
+    // Swarm topology (manager socket only): node roles + Spec.Labels.
+    SwarmNodesReq    swarm_nodes    = 33;
+
+    // Interactive host shell (see PtyOpenReq).
+    PtyOpenReq       pty_open       = 34;
+    PtyDataReq       pty_data       = 35;
+    PtyResizeReq     pty_resize     = 36;
+    PtyCloseReq      pty_close      = 37;
+
     // Monitoring control (rarely used; agents stream proactively).
     EnableLogsReq   enable_logs   = 50;
     DisableLogsReq  disable_logs  = 51;
@@ -124,6 +133,12 @@ message CommandResult {
     CancelBackupResp cancel_backup = 41;
 
     ServiceUpdateResp service_update = 42;
+    SwarmNodesResp    swarm_nodes    = 43;
+
+    PtyOpenResp       pty_open       = 44;
+    PtyDataResp       pty_data       = 45;
+    PtyResizeResp     pty_resize     = 46;
+    PtyCloseResp      pty_close      = 47;
 
     EnableLogsResp   enable_logs   = 60;
     DisableLogsResp  disable_logs  = 61;
@@ -141,6 +156,7 @@ message Event {
     CronChanged     cron_changed     = 3;
     ContainerReport container_report = 4;  // every ~5s
     LogBatch        log_batch        = 5;  // every ~1-2s when logs available
+    PtyOutput       pty_output       = 6;  // terminal bytes, as they arrive
   }
 }
 
@@ -274,6 +290,69 @@ message LookupUserResp {
   uint32 uid  = 2;
   uint32 gid  = 3;
   string home = 4;
+}
+
+// ─── swarm topology ─────────────────────────────────────────────
+
+// SwarmNodesReq asks an agent that sits on a manager node for the cluster's
+// node list. GET /nodes is manager-only, so this is answered by the leader's
+// own in-process agent and fails elsewhere.
+message SwarmNodesReq  {}
+message SwarmNodesResp { repeated SwarmNode nodes = 1; }
+
+message SwarmNode {
+  string id           = 1;  // swarm node id (not the agent's host id)
+  string hostname     = 2;  // Description.Hostname
+  string role         = 3;  // manager | worker
+  string availability = 4;  // active | pause | drain
+  string state        = 5;  // ready | down | disconnected
+  bool   leader       = 6;  // raft leader among the managers
+  map<string,string> labels = 7;  // Spec.Labels — what placement constraints match
+}
+
+// ─── interactive terminal ───────────────────────────────────────────────────
+
+// PtyOpenReq asks the agent for a root shell ON THE HOST. The agent has no
+// host privileges itself, so it uses the Docker socket it already holds to
+// start a short-lived privileged helper container that nsenters into PID 1's
+// namespaces. That container IS the session: closing it ends the shell.
+//
+// Terminal traffic does not fit the request/response shape in both directions:
+// input arrives as PtyDataReq commands, output comes back as unsolicited
+// PtyOutput events keyed by the same session_id.
+message PtyOpenReq {
+  uint32 cols = 1;
+  uint32 rows = 2;
+  // max_seconds caps the session's lifetime; the agent kills the helper
+  // container when it expires even if the browser never disconnects.
+  uint32 max_seconds = 3;
+  // session_id is assigned by the LEADER, not the agent: the leader has to
+  // subscribe to the output stream before the shell produces its first prompt,
+  // and it cannot do that for an id it does not know yet.
+  string session_id = 4;
+}
+message PtyOpenResp {
+  string session_id   = 1;
+  string container_id = 2;
+  string image        = 3;
+}
+
+message PtyDataReq  { string session_id = 1; bytes data = 2; }
+message PtyDataResp {}
+
+message PtyResizeReq  { string session_id = 1; uint32 cols = 2; uint32 rows = 3; }
+message PtyResizeResp {}
+
+message PtyCloseReq  { string session_id = 1; }
+message PtyCloseResp {}
+
+// PtyOutput carries raw terminal bytes (Tty=true, so no docker demux header).
+// The final message for a session has closed=true and an optional reason.
+message PtyOutput {
+  string session_id = 1;
+  bytes  data       = 2;
+  bool   closed     = 3;
+  string reason     = 4;
 }
 
 // ─── cron ───────────────────────────────────────────────────────────────────

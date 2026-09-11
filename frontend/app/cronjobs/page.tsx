@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { AuthShell } from '@/components/auth-shell';
 import type { NodeView } from '@/lib/types';
 import { SchedulePicker } from '@/components/schedule-picker';
+import { Toast } from '@/components/toast';
 
 interface CronJob {
   id: string;
@@ -18,6 +19,14 @@ interface CronJob {
   updated_at: number;
 }
 
+/** Create, update and delete answer with whether the node actually took the change. */
+interface ApplyResult {
+  applied?: boolean;
+  apply_error?: string;
+}
+
+const errMsg = (e: unknown) => (e as { body?: { error?: string } })?.body?.error ?? String(e);
+
 export default function CronJobsPage() {
   return <AuthShell><Cron /></AuthShell>;
 }
@@ -27,6 +36,10 @@ function Cron() {
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [editing, setEditing] = useState<Partial<CronJob> | null>(null);
   const [filterNode, setFilterNode] = useState('');
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [formErr, setFormErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
 
   const load = async () => {
     try {
@@ -35,28 +48,65 @@ function Cron() {
       const url = filterNode ? `/api/nodes/${encodeURIComponent(filterNode)}/cronjobs` : '/api/cronjobs';
       const j = await api<{ jobs: CronJob[] }>(url);
       setJobs(j.jobs ?? []);
-    } catch { /* */ }
+      setLoadErr(null);
+    } catch (e) {
+      setLoadErr(errMsg(e));
+    }
   };
   useEffect(() => { load(); }, [filterNode]);
+
+  const openEditor = (j: Partial<CronJob>) => {
+    setFormErr(null);
+    setEditing(j);
+  };
+
+  // The job is stored even when its node could not take it, so "saved" alone
+  // would claim something the host is not doing.
+  const reportApply = (r: ApplyResult, node: string, done: string) => {
+    if (r.applied === false) {
+      setToast({ tone: 'error', message: `${done}, but not applied to ${node}: ${r.apply_error ?? 'unknown error'}` });
+    } else {
+      setToast({ tone: 'success', message: `${done} and applied to ${node}.` });
+    }
+  };
 
   const save = async (j: Partial<CronJob>) => {
     const payload = {
       node_id: j.node_id ?? '', schedule: j.schedule ?? '', command: j.command ?? '',
       run_as: j.run_as || 'root', comment: j.comment ?? '', enabled: j.enabled ?? true,
     };
-    if (j.id) await api(`/api/cronjobs/${j.id}`, { method: 'PUT', body: payload });
-    else await api('/api/cronjobs', { method: 'POST', body: payload });
-    setEditing(null);
-    load();
+    setSaving(true);
+    setFormErr(null);
+    try {
+      const r = j.id
+        ? await api<ApplyResult>(`/api/cronjobs/${j.id}`, { method: 'PUT', body: payload })
+        : await api<ApplyResult>('/api/cronjobs', { method: 'POST', body: payload });
+      setEditing(null);
+      reportApply(r, payload.node_id, 'Saved');
+      load();
+    } catch (e) {
+      setFormErr(errMsg(e));
+    } finally {
+      setSaving(false);
+    }
   };
-  const remove = async (id: string) => {
+  const remove = async (j: CronJob) => {
     if (!confirm('Delete cronjob?')) return;
-    await api(`/api/cronjobs/${id}`, { method: 'DELETE' });
-    load();
+    try {
+      const r = await api<ApplyResult>(`/api/cronjobs/${j.id}`, { method: 'DELETE' });
+      reportApply(r, j.node_id, 'Deleted');
+      load();
+    } catch (e) {
+      setToast({ tone: 'error', message: errMsg(e) });
+    }
   };
   const apply = async (node_id: string) => {
-    await api(`/api/nodes/${encodeURIComponent(node_id)}/cronjobs/apply`, { method: 'POST' });
-    alert(`Applied to ${node_id}.`);
+    try {
+      await api(`/api/nodes/${encodeURIComponent(node_id)}/cronjobs/apply`, { method: 'POST' });
+      setToast({ tone: 'success', message: `Applied to ${node_id}.` });
+    } catch (e) {
+      setToast({ tone: 'error', message: `Not applied to ${node_id}: ${errMsg(e)}` });
+    }
   };
 
   return (
@@ -71,9 +121,15 @@ function Cron() {
             <option value="">— all nodes —</option>
             {nodes.map((n) => <option key={n.id} value={n.id}>{n.hostname}</option>)}
           </select>
-          <button onClick={() => setEditing({ enabled: true, run_as: 'root' })} className="btn-primary">New job</button>
+          <button onClick={() => openEditor({ enabled: true, run_as: 'root' })} className="btn-primary">New job</button>
         </div>
       </header>
+
+      {loadErr && (
+        <p className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {loadErr}
+        </p>
+      )}
 
       <div className="card overflow-hidden p-0">
         <table className="w-full text-sm">
@@ -97,8 +153,8 @@ function Cron() {
                 <td className="px-4 py-2"><span className={j.enabled ? 'badge-green' : 'badge-zinc'}>{j.enabled ? 'enabled' : 'disabled'}</span></td>
                 <td className="px-4 py-2 text-right">
                   <button onClick={() => apply(j.node_id)} className="btn-ghost" title="re-apply to host">apply</button>
-                  <button onClick={() => setEditing(j)} className="btn-ghost">edit</button>
-                  <button onClick={() => remove(j.id)} className="btn-ghost text-red-600">delete</button>
+                  <button onClick={() => openEditor(j)} className="btn-ghost">edit</button>
+                  <button onClick={() => remove(j)} className="btn-ghost text-red-600">delete</button>
                 </td>
               </tr>
             ))}
@@ -148,12 +204,28 @@ function Cron() {
                 Enabled
               </label>
             </div>
+            {formErr && (
+              <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                {formErr}
+              </p>
+            )}
             <div className="mt-4 flex justify-end gap-2">
               <button onClick={() => setEditing(null)} className="btn-ghost">Cancel</button>
-              <button onClick={() => save(editing)} className="btn-primary">Save</button>
+              <button onClick={() => save(editing)} disabled={saving} className="btn-primary">
+                {saving ? 'Saving…' : 'Save'}
+              </button>
             </div>
           </div>
         </div>
+      )}
+
+      {toast && (
+        <Toast
+          message={toast.message}
+          tone={toast.tone}
+          timeoutMs={toast.tone === 'error' ? 10_000 : 4000}
+          onDone={() => setToast(null)}
+        />
       )}
     </div>
   );

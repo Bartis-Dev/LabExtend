@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"net"
 	"net/http"
 	"time"
 )
@@ -115,9 +116,9 @@ func (s *SessionStore) Get(ctx context.Context, r *http.Request) (*Session, erro
 	`, c.Value)
 
 	var (
-		sess                                 Session
-		createdAt, expiresAt, lastSeen       int64
-		pending2FA                           int
+		sess                           Session
+		createdAt, expiresAt, lastSeen int64
+		pending2FA                     int
 	)
 	if err := row.Scan(
 		&sess.ID, &sess.UserID, &createdAt, &expiresAt, &lastSeen,
@@ -207,24 +208,18 @@ func NewCSRFToken() (string, error) {
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
+// clientIP returns the peer address recorded on the session row.
+//
+// X-Forwarded-For is deliberately not consulted: the leader's realIP middleware
+// folds it into RemoteAddr only when the direct peer is a configured trusted
+// proxy, and strips it otherwise. Trusting it again here let any client choose
+// the IP stored against its own session.
 func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// Take the first IP in the list (the original client).
-		for i := 0; i < len(xff); i++ {
-			if xff[i] == ',' {
-				return xff[:i]
-			}
-		}
-		return xff
-	}
 	if r.RemoteAddr == "" {
 		return ""
 	}
-	// Strip port.
-	for i := len(r.RemoteAddr) - 1; i >= 0; i-- {
-		if r.RemoteAddr[i] == ':' {
-			return r.RemoteAddr[:i]
-		}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
 	}
 	return r.RemoteAddr
 }

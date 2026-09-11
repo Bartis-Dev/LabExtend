@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { SquareTerminal } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useSSE } from '@/lib/sse';
 import { fmtBytes, fmtBps, fmtPct, fmtRelative, fmtUptime } from '@/lib/format';
@@ -137,7 +138,14 @@ function NodeDetail() {
               : ' · last seen ' + fmtRelative(node.last_seen)}
           </p>
         </div>
-        <span className={node.status === 'online' ? 'badge-green' : 'badge-zinc'}>{node.status}</span>
+        <div className="flex items-center gap-3">
+          {node.status === 'online' && (
+            <Link href={`/terminal?node=${encodeURIComponent(node.id)}`} className="btn-ghost h-8 px-2.5 text-xs">
+              <SquareTerminal className="h-3.5 w-3.5" /> terminal
+            </Link>
+          )}
+          <span className={node.status === 'online' ? 'badge-green' : 'badge-zinc'}>{node.status}</span>
+        </div>
       </header>
 
       <div className="card">

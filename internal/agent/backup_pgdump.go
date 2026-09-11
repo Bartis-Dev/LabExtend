@@ -116,9 +116,15 @@ func (h *Handler) runPgDump(
 		}
 
 		// Upload. Key gets a per-source suffix when there are multiple sources.
+		// The suffix carries the source index as well as the database name:
+		// two hosts commonly expose the same database name (the default
+		// "postgres" being the obvious case), and a name-only suffix made the
+		// second dump overwrite the first while the response still reported
+		// both as uploaded, with a checksum over the concatenation that matched
+		// neither object.
 		key := req.S3Key
 		if len(req.Sources) > 1 {
-			key = appendKeySuffix(key, fmt.Sprintf(".%s", dsnParsed.DBName))
+			key = appendKeySuffix(key, fmt.Sprintf(".%d.%s", i, dsnParsed.DBName))
 		}
 		f, err := os.Open(dumpPath)
 		if err != nil {
@@ -152,6 +158,23 @@ type pgDSN struct {
 	DBName         string
 	Password       string // resolved from password_secret OR password=
 	PasswordSecret string
+}
+
+// validSecretName reports whether s is usable as a bare /run/secrets entry:
+// letters, digits, dot, dash, underscore — no separators, no traversal.
+func validSecretName(s string) bool {
+	if s == "" || s == "." || s == ".." {
+		return false
+	}
+	for _, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '.' || c == '-' || c == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // parsePGDSN reads libpq-style key=value pairs. Recognized keys:
@@ -192,6 +215,13 @@ func parsePGDSN(s string) (pgDSN, error) {
 		return d, fmt.Errorf("DSN missing dbname=")
 	}
 	if d.PasswordSecret != "" {
+		// A Docker secret name, not a path. Without this check any backup plan
+		// author could point it at an arbitrary host file ("../../etc/shadow")
+		// and have its contents shipped as PGPASSWORD to a host= of their
+		// choosing.
+		if !validSecretName(d.PasswordSecret) {
+			return d, fmt.Errorf("invalid password_secret %q: expected a secret name, not a path", d.PasswordSecret)
+		}
 		raw, err := os.ReadFile("/run/secrets/" + d.PasswordSecret)
 		if err != nil {
 			return d, fmt.Errorf("read password_secret %q: %w", d.PasswordSecret, err)

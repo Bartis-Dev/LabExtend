@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -103,6 +105,36 @@ type planReq struct {
 	Enabled          bool     `json:"enabled"`
 }
 
+// validateKeyTemplate refuses a plan whose object key is the same for every
+// node it backs up.
+//
+// The runner renders the template once per in-scope node and each node uploads
+// under its own rendered key. Without {host} or {node_id} in a multi-node plan
+// they all write to the same object concurrently: the last completed multipart
+// upload wins, every other node's archive is gone, and the run still reports
+// success with a per-node byte count and checksum for each of them. Nothing
+// downstream can notice, which is why this has to be caught at write time.
+func validateKeyTemplate(scopeType, scopeValue, tmpl string) error {
+	if strings.Contains(tmpl, "{host}") || strings.Contains(tmpl, "{node_id}") {
+		return nil
+	}
+	// scope_type "node" carries a comma-separated list, so it is only
+	// single-target when exactly one entry is named.
+	if scopeType == "node" {
+		n := 0
+		for _, v := range strings.Split(scopeValue, ",") {
+			if strings.TrimSpace(v) != "" {
+				n++
+			}
+		}
+		if n == 1 {
+			return nil
+		}
+	}
+	return errors.New("key_template must contain {host} or {node_id} when the plan covers more than one node, " +
+		"otherwise every node overwrites the same object")
+}
+
 func (d *BackupDeps) CreatePlan(w http.ResponseWriter, r *http.Request) {
 	var req planReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -136,6 +168,10 @@ func (d *BackupDeps) CreatePlan(w http.ResponseWriter, r *http.Request) {
 		} else {
 			req.KeyTemplate = "backups/{host}/{date}/{plan}.tar.gz"
 		}
+	}
+	if err := validateKeyTemplate(req.ScopeType, req.ScopeValue, req.KeyTemplate); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
 	}
 	sourcesJSON, _ := json.Marshal(req.Sources)
 	id := uuid.NewString()
@@ -191,6 +227,10 @@ func (d *BackupDeps) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 	if req.Engine == "" {
 		req.Engine = "tar"
 	}
+	if err := validateKeyTemplate(req.ScopeType, req.ScopeValue, req.KeyTemplate); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
 	res, err := d.DB.ExecContext(r.Context(), `
 		UPDATE backup_plans SET
 			name = ?, sources_json = ?, scope_type = ?, scope_value = ?,
@@ -241,6 +281,10 @@ func (d *BackupDeps) TriggerPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runID, err := d.Scheduler.Trigger(r.Context(), id, "manual:"+actor)
+	if errors.Is(err, backup.ErrPlanRunning) {
+		writeErr(w, http.StatusConflict, err)
+		return
+	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -299,7 +343,12 @@ func (d *BackupDeps) ListRuns(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if excerpt != "" {
-			_ = json.Unmarshal([]byte(excerpt), &b.Items)
+			// A discarded error here is how the byte-truncated excerpt used to
+			// vanish without trace: Items stayed nil and the run looked like it
+			// simply had no per-node detail.
+			if err := json.Unmarshal([]byte(excerpt), &b.Items); err != nil {
+				slog.Warn("backup: run log excerpt is not valid JSON", "run", b.ID, "err", err)
+			}
 		}
 		out = append(out, b)
 	}

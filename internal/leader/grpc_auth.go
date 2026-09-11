@@ -6,7 +6,9 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -38,7 +40,44 @@ func (a *authInterceptor) validate(ctx context.Context) error {
 	if subtle.ConstantTimeCompare([]byte(vals[0]), []byte(a.token)) != 1 {
 		return status.Errorf(codes.Unauthenticated, "invalid x-agent-token")
 	}
-	return nil
+	return verifyAgentIdentity(ctx)
+}
+
+// verifyAgentIdentity binds the claimed node identity to the client
+// certificate whenever mTLS is in use.
+//
+// The "agent-id" metadata key is chosen by the agent, and the token is one
+// secret shared by the whole cluster, so on a token-only channel any agent can
+// claim any node's ID — taking over that node's registry slot and receiving
+// the S3 credentials the leader decrypts for its backups. A per-node client
+// certificate is the only thing here that a peer cannot forge, so where one
+// exists we require it to cover the ID. Deployments without mTLS keep the old
+// behavior and remain vulnerable to impersonation by design; issue per-node
+// certs (scripts/gen-mtls.sh) to close it.
+func verifyAgentIdentity(ctx context.Context) error {
+	p, ok := peer.FromContext(ctx)
+	if !ok || p.AuthInfo == nil {
+		return nil
+	}
+	tlsInfo, ok := p.AuthInfo.(credentials.TLSInfo)
+	if !ok || len(tlsInfo.State.PeerCertificates) == 0 {
+		return nil // plaintext or server-only TLS — nothing to bind against
+	}
+	id := agentIDFromContext(ctx)
+	if id == "" {
+		return status.Error(codes.Unauthenticated, "missing agent-id")
+	}
+	cert := tlsInfo.State.PeerCertificates[0]
+	if cert.Subject.CommonName == id {
+		return nil
+	}
+	for _, name := range cert.DNSNames {
+		if name == id {
+			return nil
+		}
+	}
+	return status.Errorf(codes.PermissionDenied,
+		"agent-id %q is not covered by the client certificate (CN=%q)", id, cert.Subject.CommonName)
 }
 
 func (a *authInterceptor) unary(

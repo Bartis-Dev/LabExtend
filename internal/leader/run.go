@@ -54,6 +54,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	bucketRetention := intEnv("BPM_METRIC_RETENTION_HOURS", 24)
 	sampleRetention := intEnv("BPM_SAMPLE_RETENTION_HOURS", 2)
 	logs := newLogStore(database, maxLogLines)
+	ptys := newPtyHub()
 	alerts := newAlertEngine(database, metrics, containers, registry, hub)
 	audit := newAuditLogger(database, cfg.DisableAudit)
 
@@ -83,7 +84,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	errs := make(chan error, 2)
 
 	go func() {
-		if err := startGRPCServer(ctx, cfg, registry, hub, database, metrics, containers, logs); err != nil {
+		if err := startGRPCServer(ctx, cfg, registry, hub, database, metrics, containers, logs, ptys); err != nil {
 			errs <- fmt.Errorf("grpc: %w", err)
 		}
 	}()
@@ -96,6 +97,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			Metrics:    metrics,
 			Containers: containers,
 			Logs:       logs,
+			Ptys:       ptys,
 			Alerts:     alerts,
 			Audit:      audit,
 			TOTP:       totpMgr,

@@ -6,6 +6,8 @@ import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import type { NodeView } from '@/lib/types';
 import { AuthShell } from '@/components/auth-shell';
+import { ChownModal } from '@/components/chown-modal';
+import { Toast } from '@/components/toast';
 import { fmtBytes, fmtAbsTime } from '@/lib/format';
 import { Folder, File as FileIcon, ChevronRight, RefreshCw, Trash2, FolderPlus, UserCog, ShieldAlert, HardDrive } from 'lucide-react';
 
@@ -27,10 +29,12 @@ interface FileEntry {
   size: number;
   mtime_ms: number;
   mode: number;
-  uid: number;
-  gid: number;
-  owner_name: string;
-  group_name: string;
+  // proto3 JSON omits zero values, so a root-owned entry (uid 0) arrives
+  // without these fields at all. Absent means 0.
+  uid?: number;
+  gid?: number;
+  owner_name?: string;
+  group_name?: string;
   symlink_target: string;
 }
 
@@ -73,6 +77,8 @@ function Files() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [fixTarget, setFixTarget] = useState<FileEntry | null>(null);
+  const [chownTarget, setChownTarget] = useState<FileEntry | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -151,28 +157,6 @@ function Files() {
     } catch (er) { alert('delete failed: ' + String(er)); }
   };
 
-  const onChown = async (e: FileEntry) => {
-    const owner = prompt('uid:gid (e.g. 1000:1000) — empty = use default');
-    if (owner === null) return;
-    let uid = 0, gid = 0;
-    if (owner) {
-      const m = owner.match(/^(\d+):(\d+)$/);
-      if (!m) { alert('format: uid:gid'); return; }
-      uid = parseInt(m[1]); gid = parseInt(m[2]);
-    } else {
-      const r = paths.find((p) => p.path === root);
-      if (!r) return;
-      uid = r.default_uid; gid = r.default_gid;
-    }
-    const recursive = e.is_dir && confirm('Recursive?');
-    try {
-      const res = await api<{ changed_count: number }>(`/api/nodes/${encodeURIComponent(nodeID)}/files/chown`, {
-        method: 'POST', body: { path: fullPath(e.name), uid, gid, recursive },
-      });
-      alert(`Changed ${res.changed_count} entries.`);
-      loadEntries();
-    } catch (er) { alert('chown failed: ' + String(er)); }
-  };
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-8">
@@ -288,11 +272,11 @@ function Files() {
                         </span>
                       </td>
                       <td className="px-4 py-2 font-mono text-[12px] text-zinc-500">{e.is_dir ? '—' : fmtBytes(e.size)}</td>
-                      <td className="px-4 py-2 font-mono text-[12px] text-zinc-500">{e.owner_name || e.uid}:{e.gid}</td>
+                      <td className="px-4 py-2 font-mono text-[12px] text-zinc-500">{e.owner_name || (e.uid ?? 0)}:{e.group_name || (e.gid ?? 0)}</td>
                       <td className="px-4 py-2 text-[11px] text-zinc-500">{fmtAbsTime(e.mtime_ms)}</td>
                       <td className="px-4 py-2 text-right">
                         <button onClick={() => setFixTarget(e)} className="btn-ghost text-amber-600" title="fix permissions to match surrounding files"><ShieldAlert className="h-3.5 w-3.5" /></button>
-                        <button onClick={() => onChown(e)} className="btn-ghost" title="manual chown"><UserCog className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => setChownTarget(e)} className="btn-ghost" title="change owner"><UserCog className="h-3.5 w-3.5" /></button>
                         <button onClick={() => onDelete(e)} className="btn-ghost text-red-600" title="delete"><Trash2 className="h-3.5 w-3.5" /></button>
                       </td>
                     </tr>
@@ -320,6 +304,26 @@ function Files() {
           onDone={() => { setFixTarget(null); loadEntries(); }}
         />
       )}
+
+      {chownTarget && (
+        <ChownModal
+          nodeID={nodeID}
+          path={fullPath(chownTarget.name)}
+          file={chownTarget}
+          defaultOwner={(() => {
+            const r = paths.find((p) => p.path === root);
+            return r ? { uid: r.default_uid, gid: r.default_gid, label: r.default_user_label } : null;
+          })()}
+          onClose={() => setChownTarget(null)}
+          onDone={(changed) => {
+            setChownTarget(null);
+            setToast(`Owner changed on ${changed} ${changed === 1 ? 'entry' : 'entries'}.`);
+            loadEntries();
+          }}
+        />
+      )}
+
+      {toast && <Toast message={toast} onDone={() => setToast(null)} />}
     </div>
   );
 }

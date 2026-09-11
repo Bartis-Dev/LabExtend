@@ -30,7 +30,6 @@ type AgentConn struct {
 	Arch        string
 	Labels      map[string]string
 	ConnectedAt time.Time
-	LastSeen    time.Time
 
 	// stream is the bidi gRPC stream used to push commands to the agent.
 	stream pb.ManagerAgent_ChannelServer
@@ -145,6 +144,7 @@ type ManagerAgentServer struct {
 	metrics    *metricsStore
 	containers *containerStore
 	logs       *logStore
+	ptys       *ptyHub
 }
 
 // Channel handles a single agent's persistent bidi stream.
@@ -178,7 +178,6 @@ func (s *ManagerAgentServer) Channel(stream pb.ManagerAgent_ChannelServer) error
 		Arch:        hello.Arch,
 		Labels:      hello.Labels,
 		ConnectedAt: time.Now(),
-		LastSeen:    time.Now(),
 		stream:      stream,
 		pending:     make(map[string]chan *pb.AgentMessage),
 	}
@@ -226,7 +225,6 @@ func (s *ManagerAgentServer) Channel(stream pb.ManagerAgent_ChannelServer) error
 			}
 			return err // EOF or transport error → unregister
 		}
-		conn.LastSeen = time.Now()
 
 		switch k := msg.Kind.(type) {
 		case *pb.AgentMessage_Heartbeat:
@@ -287,6 +285,10 @@ func (s *ManagerAgentServer) handleEvent(c *AgentConn, ev *pb.Event) {
 		if s.logs != nil {
 			s.logs.Apply(context.Background(), c.ID, k.LogBatch)
 		}
+	case *pb.Event_PtyOutput:
+		if s.ptys != nil {
+			s.ptys.deliver(k.PtyOutput)
+		}
 	case *pb.Event_BackupProgress, *pb.Event_BackupLog, *pb.Event_CronChanged:
 		// Routed in later phases.
 		slog.Debug("event from agent", "agent_id", c.ID, "kind", fmt.Sprintf("%T", k))
@@ -338,7 +340,7 @@ func (s *ManagerAgentServer) upsertNode(ctx context.Context, c *AgentConn) error
 }
 
 // startGRPCServer binds and serves the gRPC listener until ctx is canceled.
-func startGRPCServer(ctx context.Context, cfg *config.Config, reg *AgentRegistry, hub *Hub, database *sql.DB, metrics *metricsStore, cnts *containerStore, logs *logStore) error {
+func startGRPCServer(ctx context.Context, cfg *config.Config, reg *AgentRegistry, hub *Hub, database *sql.DB, metrics *metricsStore, cnts *containerStore, logs *logStore, ptys *ptyHub) error {
 	reg.SetHub(hub)
 	reg.SetMetrics(metrics)
 	reg.SetContainers(cnts)
@@ -353,6 +355,8 @@ func startGRPCServer(ctx context.Context, cfg *config.Config, reg *AgentRegistry
 	opts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(authInt.unary),
 		grpc.StreamInterceptor(authInt.stream),
+		grpc.MaxRecvMsgSize(config.GRPCMaxMsgBytes),
+		grpc.MaxSendMsgSize(config.GRPCMaxMsgBytes),
 		// Keepalive — server pings idle clients every 30s; without this an
 		// idle overlay-network connection can be dropped by intermediate
 		// load-balancers / NAT after a few minutes, causing the "agent
@@ -385,6 +389,7 @@ func startGRPCServer(ctx context.Context, cfg *config.Config, reg *AgentRegistry
 		metrics:    metrics,
 		containers: cnts,
 		logs:       logs,
+		ptys:       ptys,
 	})
 
 	go func() {

@@ -16,19 +16,30 @@ import (
 // ever touch ONE file (`/etc/cron.d/bpm`) so labextend never collides with
 // system cronjobs or other tools.
 type cronManager struct {
-	path string
-	mu   sync.Mutex
+	path  string
+	shell string
+	mu    sync.Mutex
 }
 
-func newCronManager(path string) *cronManager {
-	return &cronManager{path: path}
+func newCronManager(path, shell string) *cronManager {
+	return &cronManager{path: path, shell: shell}
 }
 
-const cronHeader = "# Managed by labextend — DO NOT EDIT MANUALLY\n" +
-	"# Entries are written from the labextend UI / API.\n" +
-	"# Re-edit via: https://<leader>/cronjobs\n\n" +
-	"SHELL=/bin/bash\n" +
-	"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n\n"
+func cronHeader(shell string) string {
+	return "# Managed by labextend — DO NOT EDIT MANUALLY\n" +
+		"# Entries are written from the labextend UI / API.\n" +
+		"# Re-edit via: https://<leader>/cronjobs\n\n" +
+		"SHELL=" + shell + "\n" +
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n\n"
+}
+
+// escapeCronPercent protects % from crontab(5), which turns every unescaped %
+// in a command into a newline and feeds the rest to the command's stdin.
+// `date +%Y%m%d` would otherwise run as `date +`: no error anywhere, just a
+// job doing something other than what the UI shows.
+func escapeCronPercent(cmd string) string { return strings.ReplaceAll(cmd, "%", `\%`) }
+
+func unescapeCronPercent(cmd string) string { return strings.ReplaceAll(cmd, `\%`, "%") }
 
 // Apply writes the given entries atomically to /etc/cron.d/bpm. Entries with
 // enabled=false are commented out so the operator can see them in the file
@@ -43,7 +54,7 @@ func (c *cronManager) Apply(entries []*pb.CronEntry) (uint32, error) {
 	}
 
 	var buf strings.Builder
-	buf.WriteString(cronHeader)
+	buf.WriteString(cronHeader(c.shell))
 
 	var installed uint32
 	for _, e := range entries {
@@ -59,7 +70,7 @@ func (c *cronManager) Apply(entries []*pb.CronEntry) (uint32, error) {
 		if user == "" {
 			user = "root"
 		}
-		line := fmt.Sprintf("%s %s %s\n", e.Schedule, user, e.Command)
+		line := fmt.Sprintf("%s %s %s\n", e.Schedule, user, escapeCronPercent(e.Command))
 		if !e.Enabled {
 			line = "# DISABLED " + line
 		} else {
@@ -139,7 +150,7 @@ func parseCronLine(line string, e *pb.CronEntry) {
 	}
 	e.Schedule = strings.Join(fields[:5], " ")
 	e.User = fields[5]
-	e.Command = strings.Join(fields[6:], " ")
+	e.Command = unescapeCronPercent(strings.Join(fields[6:], " "))
 }
 
 // looksLikeMetaComment ignores the header/marker comments we generate.

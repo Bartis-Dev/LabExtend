@@ -49,6 +49,9 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		<-stopCtx.Done()
 	})
 
+	// Runs the previous leader left behind have no owner any more.
+	s.runner.ReconcileStaleRuns(ctx)
+
 	if err := s.Refresh(ctx); err != nil {
 		slog.Warn("backup scheduler: initial refresh failed", "err", err)
 	}
@@ -116,7 +119,11 @@ func (s *Scheduler) Refresh(ctx context.Context) error {
 		}
 		planID, planName := p.ID, p.Name
 		eid, err := s.cron.AddFunc(p.Schedule, func() {
-			s.runner.RunPlan(context.Background(), planID, planName, "schedule")
+			if _, err := s.runner.RunPlan(context.Background(), planID, planName, "schedule"); err != nil {
+				// Most likely the previous run of this plan is still going.
+				slog.Warn("backup scheduler: skipping scheduled run",
+					"plan", planID, "err", err)
+			}
 		})
 		if err != nil {
 			slog.Warn("backup scheduler: invalid schedule", "plan", id, "spec", p.Schedule, "err", err)
@@ -134,7 +141,7 @@ func (s *Scheduler) Trigger(ctx context.Context, planID, triggeredBy string) (st
 	if err := s.db.QueryRowContext(ctx, `SELECT name FROM backup_plans WHERE id = ?`, planID).Scan(&name); err != nil {
 		return "", err
 	}
-	return s.runner.RunPlan(ctx, planID, name, triggeredBy), nil
+	return s.runner.RunPlan(ctx, planID, name, triggeredBy)
 }
 
 // slogLogger adapts slog to cron's logger interface so panic recovery output

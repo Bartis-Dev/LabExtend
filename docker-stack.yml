@@ -78,10 +78,11 @@ services:
         published: 8080
         protocol: tcp
         mode: ingress
-      - target: 9090
-        published: 9090
-        protocol: tcp
-        mode: ingress
+      # gRPC :9090 is deliberately NOT published. Agents reach the leader over
+      # labextend-net (LEADER_ADDR: labextend-leader:9090); publishing it on
+      # the ingress mesh put the agent channel on every node's public
+      # interface, guarded by nothing but the shared token. Publish it only
+      # for agents outside the swarm, and then behind mTLS.
     volumes:
       - /:/host:rslave
       - /var/run/docker.sock:/host/var/run/docker.sock:ro

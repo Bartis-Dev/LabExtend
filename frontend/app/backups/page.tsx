@@ -266,7 +266,11 @@ function Backups() {
               </div>
               <Field label="Key template"><input className="input font-mono text-[12px]" value={editing.key_template ?? ''} onChange={(e) => setEditing({ ...editing, key_template: e.target.value })} /></Field>
               <div className="grid grid-cols-3 gap-3">
-                <Field label="Retention keep"><input type="number" className="input" value={editing.retention_keep ?? 7} onChange={(e) => setEditing({ ...editing, retention_keep: +e.target.value })} /></Field>
+                <Field label="Retention keep">
+                  <input type="number" className="input" value={editing.retention_keep ?? 7} onChange={(e) => setEditing({ ...editing, retention_keep: +e.target.value })} />
+                  {/* Pruning is not implemented server-side; saying so beats a field that looks like it works. */}
+                  <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">Not enforced yet — old objects are never deleted.</p>
+                </Field>
                 <Field label="Compression">
                   <select className="input" value={editing.compression ?? 'gzip'} onChange={(e) => setEditing({ ...editing, compression: e.target.value })}>
                     <option value="gzip">gzip</option>

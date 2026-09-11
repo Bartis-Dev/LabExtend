@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -107,11 +108,11 @@ type inspect struct {
 // stats is the slim shape we need from /containers/{id}/stats?stream=0.
 // Field set matches https://docs.docker.com/engine/api/v1.41/#tag/Container/operation/ContainerStats
 type stats struct {
-	CPUStats    statsCPU      `json:"cpu_stats"`
-	PreCPUStats statsCPU      `json:"precpu_stats"`
-	MemoryStats statsMemory   `json:"memory_stats"`
+	CPUStats    statsCPU         `json:"cpu_stats"`
+	PreCPUStats statsCPU         `json:"precpu_stats"`
+	MemoryStats statsMemory      `json:"memory_stats"`
 	Networks    map[string]netIO `json:"networks"`
-	BlkIOStats  statsBlkIO    `json:"blkio_stats"`
+	BlkIOStats  statsBlkIO       `json:"blkio_stats"`
 }
 
 type statsCPU struct {
@@ -395,4 +396,193 @@ func parseLogLine(b []byte) (time.Time, string) {
 		}
 	}
 	return time.Now(), s
+}
+
+// ─── swarm topology ─────────────────────────────────────────────────────────
+
+// swarmNodeJSON is the slim shape we need from GET /nodes. The full document
+// carries engine plugins and resource descriptions we have no use for.
+type swarmNodeJSON struct {
+	ID   string `json:"ID"`
+	Spec struct {
+		Labels       map[string]string `json:"Labels"`
+		Role         string            `json:"Role"`
+		Availability string            `json:"Availability"`
+	} `json:"Spec"`
+	Description struct {
+		Hostname string `json:"Hostname"`
+	} `json:"Description"`
+	Status struct {
+		State string `json:"State"`
+	} `json:"Status"`
+	ManagerStatus *struct {
+		Leader bool `json:"Leader"`
+	} `json:"ManagerStatus"`
+}
+
+// ListSwarmNodes returns the cluster's node list including Spec.Labels — the
+// labels placement constraints actually match, which are not the same thing as
+// the agent's own BPM_AGENT_LABELS.
+//
+// GET /nodes is manager-only; on a worker the engine answers 503 "This node is
+// not a swarm manager" and that error travels back to the caller unchanged.
+func (c *dockerClient) ListSwarmNodes(ctx context.Context) ([]swarmNodeJSON, error) {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker/nodes", nil)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("list swarm nodes: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return nil, fmt.Errorf("list swarm nodes: status %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	var out []swarmNodeJSON
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode swarm nodes: %w", err)
+	}
+	return out, nil
+}
+
+// ─── interactive host shell ─────────────────────────────────────────────────
+
+// CreateContainer POSTs a container spec and returns the new container ID.
+func (c *dockerClient) CreateContainer(ctx context.Context, name string, spec any) (string, error) {
+	body, err := json.Marshal(spec)
+	if err != nil {
+		return "", fmt.Errorf("encode container spec: %w", err)
+	}
+	u := "http://docker/containers/create"
+	if name != "" {
+		u += "?name=" + url.QueryEscape(name)
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("create container: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", fmt.Errorf("create container: status %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	var out struct {
+		ID string `json:"Id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("decode create response: %w", err)
+	}
+	return out.ID, nil
+}
+
+// StartContainer starts a created container.
+func (c *dockerClient) StartContainer(ctx context.Context, id string) error {
+	return c.postNoBody(ctx, "http://docker/containers/"+url.PathEscape(id)+"/start", "start container")
+}
+
+// ResizeTTY tells the engine the new terminal geometry. Without it the shell
+// keeps the size it was created with and full-screen programs (htop, vim) draw
+// into the wrong box.
+func (c *dockerClient) ResizeTTY(ctx context.Context, id string, cols, rows uint32) error {
+	u := fmt.Sprintf("http://docker/containers/%s/resize?w=%d&h=%d", url.PathEscape(id), cols, rows)
+	return c.postNoBody(ctx, u, "resize tty")
+}
+
+// RemoveContainer force-removes a container. Safe to call on one that already
+// went away (404 is not an error here).
+func (c *dockerClient) RemoveContainer(ctx context.Context, id string) error {
+	u := "http://docker/containers/" + url.PathEscape(id) + "?force=1&v=1"
+	req, _ := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("remove container: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusConflict {
+		return nil
+	}
+	if resp.StatusCode/100 != 2 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("remove container: status %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	return nil
+}
+
+func (c *dockerClient) postNoBody(ctx context.Context, u, what string) error {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("%s: %w", what, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("%s: status %d: %s", what, resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	return nil
+}
+
+// AttachTTY takes over the socket connection for a container's stdio.
+//
+// This is the one endpoint we cannot drive through net/http's client: after
+// the 101 the connection stops being HTTP and becomes the raw terminal stream,
+// which http.Client will not hand back. So we dial the socket ourselves, write
+// the request, parse the response head, and keep the connection.
+//
+// Reads MUST go through the returned bufio.Reader — http.ReadResponse may have
+// already pulled terminal bytes into it. Writes go to the conn.
+func (c *dockerClient) AttachTTY(ctx context.Context, id string) (net.Conn, *bufio.Reader, error) {
+	d := &net.Dialer{Timeout: 5 * time.Second}
+	conn, err := d.DialContext(ctx, "unix", c.socketPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("dial docker socket: %w", err)
+	}
+
+	u := "http://docker/containers/" + url.PathEscape(id) + "/attach?stream=1&stdin=1&stdout=1&stderr=1"
+	req, err := http.NewRequest(http.MethodPost, u, nil)
+	if err != nil {
+		conn.Close()
+		return nil, nil, fmt.Errorf("attach: build request: %w", err)
+	}
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "tcp")
+
+	if err := req.Write(conn); err != nil {
+		conn.Close()
+		return nil, nil, fmt.Errorf("attach: write request: %w", err)
+	}
+
+	br := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(br, req)
+	if err != nil {
+		conn.Close()
+		return nil, nil, fmt.Errorf("attach: read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusSwitchingProtocols && resp.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		resp.Body.Close()
+		conn.Close()
+		return nil, nil, fmt.Errorf("attach: status %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	return conn, br, nil
+}
+
+// SelfImageID returns the image ID of the container this process runs in,
+// resolved via the hostname Docker assigns (which is the container ID).
+// Used as the default helper image: it is by definition already pulled on
+// this node, so opening a shell never has to wait on a registry.
+func (c *dockerClient) SelfImageID(ctx context.Context) (string, error) {
+	host, err := os.Hostname()
+	if err != nil {
+		return "", fmt.Errorf("hostname: %w", err)
+	}
+	insp, err := c.Inspect(ctx, host)
+	if err != nil {
+		return "", fmt.Errorf("inspect self (%s): %w", host, err)
+	}
+	if insp.Image == "" {
+		return "", errors.New("inspect self: no image id")
+	}
+	return insp.Image, nil
 }

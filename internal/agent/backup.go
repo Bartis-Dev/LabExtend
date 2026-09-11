@@ -93,10 +93,20 @@ func (h *Handler) RunBackup(ctx context.Context, req *pb.RunBackupReq) (*pb.RunB
 	stopProgress := startProgressEmitter(runCtx, emit, req.RunId, &bytesProcessed, &filesDone)
 	defer stopProgress()
 
-	// Writer side: walk sources, write to tar, count.
-	var walkErr error
+	// Writer side: walk sources, write to tar, count. The result travels back
+	// over a buffered channel rather than a shared variable: on an upload
+	// error the uploader returns while this goroutine is still running, so
+	// reading a plain variable here would be a data race.
+	walkErrc := make(chan error, 1)
 	go func() {
-		defer pw.Close()
+		var walkErr error
+		// CloseWithError, not Close: a plain Close hands the uploader a clean
+		// EOF, so a half-written archive gets its multipart upload COMPLETED
+		// and overwrites the previous good object at the same key.
+		defer func() {
+			walkErrc <- walkErr
+			_ = pw.CloseWithError(walkErr)
+		}()
 
 		var w io.Writer = pw
 
@@ -117,15 +127,20 @@ func (h *Handler) RunBackup(ctx context.Context, req *pb.RunBackupReq) (*pb.RunB
 				break
 			}
 		}
-		_ = tw.Close()
-		_ = gzw.Close()
+		// These carry the sticky errors archive/tar and gzip accumulate — a
+		// discarded one turns a truncated archive into a reported success.
+		if err := tw.Close(); err != nil && walkErr == nil {
+			walkErr = fmt.Errorf("tar close: %w", err)
+		}
+		if err := gzw.Close(); err != nil && walkErr == nil {
+			walkErr = fmt.Errorf("gzip close: %w", err)
+		}
 	}()
 
 	// Reader side: stream to S3 in chunks (multipart upload).
 	slog.Info("backup: opening uploader",
 		"run_id", req.RunId, "endpoint", req.S3Endpoint, "region", req.S3Region,
-		"bucket", req.S3Bucket, "key", req.S3Key, "path_style", req.S3PathStyle,
-		"access_key", req.S3AccessKey)
+		"bucket", req.S3Bucket, "key", req.S3Key, "path_style", req.S3PathStyle)
 	uploader, err := s3.NewUploader(s3.UploaderConfig{
 		Endpoint:  req.S3Endpoint,
 		Region:    req.S3Region,
@@ -142,6 +157,19 @@ func (h *Handler) RunBackup(ctx context.Context, req *pb.RunBackupReq) (*pb.RunB
 	}
 
 	uploaded, uploadErr := uploader.Upload(runCtx, req.S3Key, pr)
+
+	// The uploader abandons the body on error without draining it, so the
+	// walker would stay blocked in pw.Write forever (leaking the goroutine and
+	// its open file). Closing the read end unblocks it.
+	_ = pr.CloseWithError(io.ErrClosedPipe)
+	walkErr := <-walkErrc
+
+	// When the upload dies first, tearing the pipe down makes the walker fail
+	// too — with our own sentinel. Reporting that would bury the real cause
+	// ("connection refused", "403") under a tar error naming an innocent file.
+	if uploadErr != nil && errors.Is(walkErr, io.ErrClosedPipe) {
+		walkErr = nil
+	}
 
 	if walkErr != nil {
 		slog.Warn("backup: walk failed", "run_id", req.RunId, "err", walkErr)
@@ -215,6 +243,11 @@ func copyExactly(dst io.Writer, src io.Reader, size int64) (int64, error) {
 	return n, nil
 }
 
+// openFile is os.Open everywhere but in tests, which swap it to reproduce the
+// window this function has to survive: the walk stats a file, the file is gone
+// by the time we open it.
+var openFile = os.Open
+
 // tarOneRoot walks `root` (file or dir), writing every entry into tw as a
 // path relative to root's parent. Counters are bumped per file.
 func tarOneRoot(
@@ -262,12 +295,16 @@ func tarOneRoot(
 			return err
 		}
 		hdr.Name = relName
-		if err := tw.WriteHeader(hdr); err != nil {
-			return err
-		}
 
+		// Open before writing the header. archive/tar demands exactly
+		// hdr.Size bytes once a header is out, so skipping the body of a
+		// vanished file after the header leaves the writer permanently short:
+		// a sticky error that fails every later entry, or — if this was the
+		// last entry — an archive that ends without its end-of-archive marker
+		// while the run still reports success.
+		var f *os.File
 		if info.Mode().IsRegular() {
-			f, err := os.Open(p)
+			f, err = openFile(p)
 			if err != nil {
 				// The tree keeps changing while we archive it, so a file named
 				// by the walk can already be gone. That is not a reason to
@@ -278,8 +315,15 @@ func tarOneRoot(
 				}
 				return err
 			}
+			defer f.Close()
+		}
+
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+
+		if f != nil {
 			n, err := copyExactly(tw, f, hdr.Size)
-			_ = f.Close()
 			if err != nil {
 				return fmt.Errorf("%s: %w", p, err)
 			}

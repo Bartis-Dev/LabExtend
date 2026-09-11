@@ -3,7 +3,7 @@
 # ─── stage 1: regenerate proto stubs ────────────────────────────────────────
 # Done in Docker so the build doesn't depend on the developer's local
 # protoc installation. Outputs go into /src/internal/grpc/pb.
-FROM golang:1.24-alpine AS protogen
+FROM golang:1.27-alpine AS protogen
 RUN apk add --no-cache git protoc protobuf-dev \
  && go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2 \
  && go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
@@ -23,11 +23,13 @@ WORKDIR /web
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci --legacy-peer-deps; else npm install --legacy-peer-deps; fi
 COPY frontend/ ./
-# Produces ./out (Next.js static export).
-RUN npm run build || (mkdir -p out && echo '<!doctype html><title>bpm placeholder</title>' > out/index.html)
+# Produces ./out (Next.js static export). No fallback on purpose: the old
+# `|| echo placeholder` turned a TypeScript error into an image that built,
+# passed CI, was pushed as :latest and served every user a blank page.
+RUN npm run build
 
 # ─── stage 3: build Go binary ───────────────────────────────────────────────
-FROM golang:1.24-alpine AS gobuild
+FROM golang:1.27-alpine AS gobuild
 RUN apk add --no-cache git ca-certificates
 WORKDIR /src
 

@@ -100,6 +100,18 @@ func VerifyPassword(password, encoded string) (bool, error) {
 		return false, fmt.Errorf("hash b64: %w", err)
 	}
 
+	// argon2id is deliberately memory-hard — the stored parameters ask for
+	// 64 MiB per call — which makes unbounded concurrency a memory amplifier
+	// rather than just slow: a few hundred parallel login attempts, which
+	// nothing in front of this rate-limits by itself, are enough to OOM the
+	// leader. Callers queue instead of all allocating at once.
+	kdfSlots <- struct{}{}
+	defer func() { <-kdfSlots }()
+
 	got := argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(want)))
 	return subtle.ConstantTimeCompare(want, got) == 1, nil
 }
+
+// kdfSlots caps concurrent argon2 derivations. Logins are rare in this tool, so
+// a small bound costs nothing in practice.
+var kdfSlots = make(chan struct{}, 4)

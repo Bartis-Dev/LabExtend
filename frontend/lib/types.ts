@@ -39,7 +39,12 @@ export interface NodeView {
   arch: string;
   version: string;
   status: 'online' | 'offline';
+  /** From BPM_AGENT_LABELS in the agent's environment — not swarm labels. */
   labels: Record<string, string>;
+  /** From the Docker API on the manager (Spec.Labels); absent if unavailable. */
+  swarm_labels?: Record<string, string>;
+  swarm_role?: string;
+  swarm_availability?: string;
   first_seen: number;
   last_seen: number;
   metrics?: MetricsSample;

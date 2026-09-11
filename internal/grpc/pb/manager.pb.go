@@ -582,6 +582,11 @@ type Command struct {
 	//	*Command_RunBackup
 	//	*Command_CancelBackup
 	//	*Command_ServiceUpdate
+	//	*Command_SwarmNodes
+	//	*Command_PtyOpen
+	//	*Command_PtyData
+	//	*Command_PtyResize
+	//	*Command_PtyClose
 	//	*Command_EnableLogs
 	//	*Command_DisableLogs
 	//	*Command_Exec
@@ -753,6 +758,51 @@ func (x *Command) GetServiceUpdate() *ServiceUpdateReq {
 	return nil
 }
 
+func (x *Command) GetSwarmNodes() *SwarmNodesReq {
+	if x != nil {
+		if x, ok := x.Op.(*Command_SwarmNodes); ok {
+			return x.SwarmNodes
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetPtyOpen() *PtyOpenReq {
+	if x != nil {
+		if x, ok := x.Op.(*Command_PtyOpen); ok {
+			return x.PtyOpen
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetPtyData() *PtyDataReq {
+	if x != nil {
+		if x, ok := x.Op.(*Command_PtyData); ok {
+			return x.PtyData
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetPtyResize() *PtyResizeReq {
+	if x != nil {
+		if x, ok := x.Op.(*Command_PtyResize); ok {
+			return x.PtyResize
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetPtyClose() *PtyCloseReq {
+	if x != nil {
+		if x, ok := x.Op.(*Command_PtyClose); ok {
+			return x.PtyClose
+		}
+	}
+	return nil
+}
+
 func (x *Command) GetEnableLogs() *EnableLogsReq {
 	if x != nil {
 		if x, ok := x.Op.(*Command_EnableLogs); ok {
@@ -841,6 +891,28 @@ type Command_ServiceUpdate struct {
 	ServiceUpdate *ServiceUpdateReq `protobuf:"bytes,32,opt,name=service_update,json=serviceUpdate,proto3,oneof"`
 }
 
+type Command_SwarmNodes struct {
+	// Swarm topology (manager socket only): node roles + Spec.Labels.
+	SwarmNodes *SwarmNodesReq `protobuf:"bytes,33,opt,name=swarm_nodes,json=swarmNodes,proto3,oneof"`
+}
+
+type Command_PtyOpen struct {
+	// Interactive host shell (see PtyOpenReq).
+	PtyOpen *PtyOpenReq `protobuf:"bytes,34,opt,name=pty_open,json=ptyOpen,proto3,oneof"`
+}
+
+type Command_PtyData struct {
+	PtyData *PtyDataReq `protobuf:"bytes,35,opt,name=pty_data,json=ptyData,proto3,oneof"`
+}
+
+type Command_PtyResize struct {
+	PtyResize *PtyResizeReq `protobuf:"bytes,36,opt,name=pty_resize,json=ptyResize,proto3,oneof"`
+}
+
+type Command_PtyClose struct {
+	PtyClose *PtyCloseReq `protobuf:"bytes,37,opt,name=pty_close,json=ptyClose,proto3,oneof"`
+}
+
 type Command_EnableLogs struct {
 	// Monitoring control (rarely used; agents stream proactively).
 	EnableLogs *EnableLogsReq `protobuf:"bytes,50,opt,name=enable_logs,json=enableLogs,proto3,oneof"`
@@ -882,6 +954,16 @@ func (*Command_CancelBackup) isCommand_Op() {}
 
 func (*Command_ServiceUpdate) isCommand_Op() {}
 
+func (*Command_SwarmNodes) isCommand_Op() {}
+
+func (*Command_PtyOpen) isCommand_Op() {}
+
+func (*Command_PtyData) isCommand_Op() {}
+
+func (*Command_PtyResize) isCommand_Op() {}
+
+func (*Command_PtyClose) isCommand_Op() {}
+
 func (*Command_EnableLogs) isCommand_Op() {}
 
 func (*Command_DisableLogs) isCommand_Op() {}
@@ -908,6 +990,11 @@ type CommandResult struct {
 	//	*CommandResult_RunBackup
 	//	*CommandResult_CancelBackup
 	//	*CommandResult_ServiceUpdate
+	//	*CommandResult_SwarmNodes
+	//	*CommandResult_PtyOpen
+	//	*CommandResult_PtyData
+	//	*CommandResult_PtyResize
+	//	*CommandResult_PtyClose
 	//	*CommandResult_EnableLogs
 	//	*CommandResult_DisableLogs
 	//	*CommandResult_Exec
@@ -1093,6 +1180,51 @@ func (x *CommandResult) GetServiceUpdate() *ServiceUpdateResp {
 	return nil
 }
 
+func (x *CommandResult) GetSwarmNodes() *SwarmNodesResp {
+	if x != nil {
+		if x, ok := x.Payload.(*CommandResult_SwarmNodes); ok {
+			return x.SwarmNodes
+		}
+	}
+	return nil
+}
+
+func (x *CommandResult) GetPtyOpen() *PtyOpenResp {
+	if x != nil {
+		if x, ok := x.Payload.(*CommandResult_PtyOpen); ok {
+			return x.PtyOpen
+		}
+	}
+	return nil
+}
+
+func (x *CommandResult) GetPtyData() *PtyDataResp {
+	if x != nil {
+		if x, ok := x.Payload.(*CommandResult_PtyData); ok {
+			return x.PtyData
+		}
+	}
+	return nil
+}
+
+func (x *CommandResult) GetPtyResize() *PtyResizeResp {
+	if x != nil {
+		if x, ok := x.Payload.(*CommandResult_PtyResize); ok {
+			return x.PtyResize
+		}
+	}
+	return nil
+}
+
+func (x *CommandResult) GetPtyClose() *PtyCloseResp {
+	if x != nil {
+		if x, ok := x.Payload.(*CommandResult_PtyClose); ok {
+			return x.PtyClose
+		}
+	}
+	return nil
+}
+
 func (x *CommandResult) GetEnableLogs() *EnableLogsResp {
 	if x != nil {
 		if x, ok := x.Payload.(*CommandResult_EnableLogs); ok {
@@ -1180,6 +1312,26 @@ type CommandResult_ServiceUpdate struct {
 	ServiceUpdate *ServiceUpdateResp `protobuf:"bytes,42,opt,name=service_update,json=serviceUpdate,proto3,oneof"`
 }
 
+type CommandResult_SwarmNodes struct {
+	SwarmNodes *SwarmNodesResp `protobuf:"bytes,43,opt,name=swarm_nodes,json=swarmNodes,proto3,oneof"`
+}
+
+type CommandResult_PtyOpen struct {
+	PtyOpen *PtyOpenResp `protobuf:"bytes,44,opt,name=pty_open,json=ptyOpen,proto3,oneof"`
+}
+
+type CommandResult_PtyData struct {
+	PtyData *PtyDataResp `protobuf:"bytes,45,opt,name=pty_data,json=ptyData,proto3,oneof"`
+}
+
+type CommandResult_PtyResize struct {
+	PtyResize *PtyResizeResp `protobuf:"bytes,46,opt,name=pty_resize,json=ptyResize,proto3,oneof"`
+}
+
+type CommandResult_PtyClose struct {
+	PtyClose *PtyCloseResp `protobuf:"bytes,47,opt,name=pty_close,json=ptyClose,proto3,oneof"`
+}
+
 type CommandResult_EnableLogs struct {
 	EnableLogs *EnableLogsResp `protobuf:"bytes,60,opt,name=enable_logs,json=enableLogs,proto3,oneof"`
 }
@@ -1220,6 +1372,16 @@ func (*CommandResult_CancelBackup) isCommandResult_Payload() {}
 
 func (*CommandResult_ServiceUpdate) isCommandResult_Payload() {}
 
+func (*CommandResult_SwarmNodes) isCommandResult_Payload() {}
+
+func (*CommandResult_PtyOpen) isCommandResult_Payload() {}
+
+func (*CommandResult_PtyData) isCommandResult_Payload() {}
+
+func (*CommandResult_PtyResize) isCommandResult_Payload() {}
+
+func (*CommandResult_PtyClose) isCommandResult_Payload() {}
+
 func (*CommandResult_EnableLogs) isCommandResult_Payload() {}
 
 func (*CommandResult_DisableLogs) isCommandResult_Payload() {}
@@ -1235,6 +1397,7 @@ type Event struct {
 	//	*Event_CronChanged
 	//	*Event_ContainerReport
 	//	*Event_LogBatch
+	//	*Event_PtyOutput
 	Kind          isEvent_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1322,6 +1485,15 @@ func (x *Event) GetLogBatch() *LogBatch {
 	return nil
 }
 
+func (x *Event) GetPtyOutput() *PtyOutput {
+	if x != nil {
+		if x, ok := x.Kind.(*Event_PtyOutput); ok {
+			return x.PtyOutput
+		}
+	}
+	return nil
+}
+
 type isEvent_Kind interface {
 	isEvent_Kind()
 }
@@ -1346,6 +1518,10 @@ type Event_LogBatch struct {
 	LogBatch *LogBatch `protobuf:"bytes,5,opt,name=log_batch,json=logBatch,proto3,oneof"` // every ~1-2s when logs available
 }
 
+type Event_PtyOutput struct {
+	PtyOutput *PtyOutput `protobuf:"bytes,6,opt,name=pty_output,json=ptyOutput,proto3,oneof"` // terminal bytes, as they arrive
+}
+
 func (*Event_BackupProgress) isEvent_Kind() {}
 
 func (*Event_BackupLog) isEvent_Kind() {}
@@ -1355,6 +1531,8 @@ func (*Event_CronChanged) isEvent_Kind() {}
 func (*Event_ContainerReport) isEvent_Kind() {}
 
 func (*Event_LogBatch) isEvent_Kind() {}
+
+func (*Event_PtyOutput) isEvent_Kind() {}
 
 type BackupProgress struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
@@ -3071,6 +3249,656 @@ func (x *LookupUserResp) GetHome() string {
 	return ""
 }
 
+// SwarmNodesReq asks an agent that sits on a manager node for the cluster's
+// node list. GET /nodes is manager-only, so this is answered by the leader's
+// own in-process agent and fails elsewhere.
+type SwarmNodesReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SwarmNodesReq) Reset() {
+	*x = SwarmNodesReq{}
+	mi := &file_manager_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SwarmNodesReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SwarmNodesReq) ProtoMessage() {}
+
+func (x *SwarmNodesReq) ProtoReflect() protoreflect.Message {
+	mi := &file_manager_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SwarmNodesReq.ProtoReflect.Descriptor instead.
+func (*SwarmNodesReq) Descriptor() ([]byte, []int) {
+	return file_manager_proto_rawDescGZIP(), []int{39}
+}
+
+type SwarmNodesResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Nodes         []*SwarmNode           `protobuf:"bytes,1,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SwarmNodesResp) Reset() {
+	*x = SwarmNodesResp{}
+	mi := &file_manager_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SwarmNodesResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SwarmNodesResp) ProtoMessage() {}
+
+func (x *SwarmNodesResp) ProtoReflect() protoreflect.Message {
+	mi := &file_manager_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SwarmNodesResp.ProtoReflect.Descriptor instead.
+func (*SwarmNodesResp) Descriptor() ([]byte, []int) {
+	return file_manager_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *SwarmNodesResp) GetNodes() []*SwarmNode {
+	if x != nil {
+		return x.Nodes
+	}
+	return nil
+}
+
+type SwarmNode struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`                                                                                   // swarm node id (not the agent's host id)
+	Hostname      string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`                                                                       // Description.Hostname
+	Role          string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`                                                                               // manager | worker
+	Availability  string                 `protobuf:"bytes,4,opt,name=availability,proto3" json:"availability,omitempty"`                                                               // active | pause | drain
+	State         string                 `protobuf:"bytes,5,opt,name=state,proto3" json:"state,omitempty"`                                                                             // ready | down | disconnected
+	Leader        bool                   `protobuf:"varint,6,opt,name=leader,proto3" json:"leader,omitempty"`                                                                          // raft leader among the managers
+	Labels        map[string]string      `protobuf:"bytes,7,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Spec.Labels — what placement constraints match
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SwarmNode) Reset() {
+	*x = SwarmNode{}
+	mi := &file_manager_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SwarmNode) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SwarmNode) ProtoMessage() {}
+
+func (x *SwarmNode) ProtoReflect() protoreflect.Message {
+	mi := &file_manager_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SwarmNode.ProtoReflect.Descriptor instead.
+func (*SwarmNode) Descriptor() ([]byte, []int) {
+	return file_manager_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *SwarmNode) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *SwarmNode) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
+func (x *SwarmNode) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *SwarmNode) GetAvailability() string {
+	if x != nil {
+		return x.Availability
+	}
+	return ""
+}
+
+func (x *SwarmNode) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *SwarmNode) GetLeader() bool {
+	if x != nil {
+		return x.Leader
+	}
+	return false
+}
+
+func (x *SwarmNode) GetLabels() map[string]string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+// PtyOpenReq asks the agent for a root shell ON THE HOST. The agent has no
+// host privileges itself, so it uses the Docker socket it already holds to
+// start a short-lived privileged helper container that nsenters into PID 1's
+// namespaces. That container IS the session: closing it ends the shell.
+//
+// Terminal traffic does not fit the request/response shape in both directions:
+// input arrives as PtyDataReq commands, output comes back as unsolicited
+// PtyOutput events keyed by the same session_id.
+type PtyOpenReq struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Cols  uint32                 `protobuf:"varint,1,opt,name=cols,proto3" json:"cols,omitempty"`
+	Rows  uint32                 `protobuf:"varint,2,opt,name=rows,proto3" json:"rows,omitempty"`
+	// max_seconds caps the session's lifetime; the agent kills the helper
+	// container when it expires even if the browser never disconnects.
+	MaxSeconds uint32 `protobuf:"varint,3,opt,name=max_seconds,json=maxSeconds,proto3" json:"max_seconds,omitempty"`
+	// session_id is assigned by the LEADER, not the agent: the leader has to
+	// subscribe to the output stream before the shell produces its first prompt,
+	// and it cannot do that for an id it does not know yet.
+	SessionId     string `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PtyOpenReq) Reset() {
+	*x = PtyOpenReq{}
+	mi := &file_manager_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PtyOpenReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PtyOpenReq) ProtoMessage() {}
+
+func (x *PtyOpenReq) ProtoReflect() protoreflect.Message {
+	mi := &file_manager_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PtyOpenReq.ProtoReflect.Descriptor instead.
+func (*PtyOpenReq) Descriptor() ([]byte, []int) {
+	return file_manager_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *PtyOpenReq) GetCols() uint32 {
+	if x != nil {
+		return x.Cols
+	}
+	return 0
+}
+
+func (x *PtyOpenReq) GetRows() uint32 {
+	if x != nil {
+		return x.Rows
+	}
+	return 0
+}
+
+func (x *PtyOpenReq) GetMaxSeconds() uint32 {
+	if x != nil {
+		return x.MaxSeconds
+	}
+	return 0
+}
+
+func (x *PtyOpenReq) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+type PtyOpenResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	ContainerId   string                 `protobuf:"bytes,2,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
+	Image         string                 `protobuf:"bytes,3,opt,name=image,proto3" json:"image,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PtyOpenResp) Reset() {
+	*x = PtyOpenResp{}
+	mi := &file_manager_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PtyOpenResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PtyOpenResp) ProtoMessage() {}
+
+func (x *PtyOpenResp) ProtoReflect() protoreflect.Message {
+	mi := &file_manager_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PtyOpenResp.ProtoReflect.Descriptor instead.
+func (*PtyOpenResp) Descriptor() ([]byte, []int) {
+	return file_manager_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *PtyOpenResp) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *PtyOpenResp) GetContainerId() string {
+	if x != nil {
+		return x.ContainerId
+	}
+	return ""
+}
+
+func (x *PtyOpenResp) GetImage() string {
+	if x != nil {
+		return x.Image
+	}
+	return ""
+}
+
+type PtyDataReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PtyDataReq) Reset() {
+	*x = PtyDataReq{}
+	mi := &file_manager_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PtyDataReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PtyDataReq) ProtoMessage() {}
+
+func (x *PtyDataReq) ProtoReflect() protoreflect.Message {
+	mi := &file_manager_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PtyDataReq.ProtoReflect.Descriptor instead.
+func (*PtyDataReq) Descriptor() ([]byte, []int) {
+	return file_manager_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *PtyDataReq) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *PtyDataReq) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+type PtyDataResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PtyDataResp) Reset() {
+	*x = PtyDataResp{}
+	mi := &file_manager_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PtyDataResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PtyDataResp) ProtoMessage() {}
+
+func (x *PtyDataResp) ProtoReflect() protoreflect.Message {
+	mi := &file_manager_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PtyDataResp.ProtoReflect.Descriptor instead.
+func (*PtyDataResp) Descriptor() ([]byte, []int) {
+	return file_manager_proto_rawDescGZIP(), []int{45}
+}
+
+type PtyResizeReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Cols          uint32                 `protobuf:"varint,2,opt,name=cols,proto3" json:"cols,omitempty"`
+	Rows          uint32                 `protobuf:"varint,3,opt,name=rows,proto3" json:"rows,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PtyResizeReq) Reset() {
+	*x = PtyResizeReq{}
+	mi := &file_manager_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PtyResizeReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PtyResizeReq) ProtoMessage() {}
+
+func (x *PtyResizeReq) ProtoReflect() protoreflect.Message {
+	mi := &file_manager_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PtyResizeReq.ProtoReflect.Descriptor instead.
+func (*PtyResizeReq) Descriptor() ([]byte, []int) {
+	return file_manager_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *PtyResizeReq) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *PtyResizeReq) GetCols() uint32 {
+	if x != nil {
+		return x.Cols
+	}
+	return 0
+}
+
+func (x *PtyResizeReq) GetRows() uint32 {
+	if x != nil {
+		return x.Rows
+	}
+	return 0
+}
+
+type PtyResizeResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PtyResizeResp) Reset() {
+	*x = PtyResizeResp{}
+	mi := &file_manager_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PtyResizeResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PtyResizeResp) ProtoMessage() {}
+
+func (x *PtyResizeResp) ProtoReflect() protoreflect.Message {
+	mi := &file_manager_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PtyResizeResp.ProtoReflect.Descriptor instead.
+func (*PtyResizeResp) Descriptor() ([]byte, []int) {
+	return file_manager_proto_rawDescGZIP(), []int{47}
+}
+
+type PtyCloseReq struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PtyCloseReq) Reset() {
+	*x = PtyCloseReq{}
+	mi := &file_manager_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PtyCloseReq) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PtyCloseReq) ProtoMessage() {}
+
+func (x *PtyCloseReq) ProtoReflect() protoreflect.Message {
+	mi := &file_manager_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PtyCloseReq.ProtoReflect.Descriptor instead.
+func (*PtyCloseReq) Descriptor() ([]byte, []int) {
+	return file_manager_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *PtyCloseReq) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+type PtyCloseResp struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PtyCloseResp) Reset() {
+	*x = PtyCloseResp{}
+	mi := &file_manager_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PtyCloseResp) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PtyCloseResp) ProtoMessage() {}
+
+func (x *PtyCloseResp) ProtoReflect() protoreflect.Message {
+	mi := &file_manager_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PtyCloseResp.ProtoReflect.Descriptor instead.
+func (*PtyCloseResp) Descriptor() ([]byte, []int) {
+	return file_manager_proto_rawDescGZIP(), []int{49}
+}
+
+// PtyOutput carries raw terminal bytes (Tty=true, so no docker demux header).
+// The final message for a session has closed=true and an optional reason.
+type PtyOutput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	Closed        bool                   `protobuf:"varint,3,opt,name=closed,proto3" json:"closed,omitempty"`
+	Reason        string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PtyOutput) Reset() {
+	*x = PtyOutput{}
+	mi := &file_manager_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PtyOutput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PtyOutput) ProtoMessage() {}
+
+func (x *PtyOutput) ProtoReflect() protoreflect.Message {
+	mi := &file_manager_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PtyOutput.ProtoReflect.Descriptor instead.
+func (*PtyOutput) Descriptor() ([]byte, []int) {
+	return file_manager_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *PtyOutput) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *PtyOutput) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *PtyOutput) GetClosed() bool {
+	if x != nil {
+		return x.Closed
+	}
+	return false
+}
+
+func (x *PtyOutput) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 type CronEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -3085,7 +3913,7 @@ type CronEntry struct {
 
 func (x *CronEntry) Reset() {
 	*x = CronEntry{}
-	mi := &file_manager_proto_msgTypes[39]
+	mi := &file_manager_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3097,7 +3925,7 @@ func (x *CronEntry) String() string {
 func (*CronEntry) ProtoMessage() {}
 
 func (x *CronEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[39]
+	mi := &file_manager_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3110,7 +3938,7 @@ func (x *CronEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CronEntry.ProtoReflect.Descriptor instead.
 func (*CronEntry) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{39}
+	return file_manager_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *CronEntry) GetId() string {
@@ -3163,7 +3991,7 @@ type ListCronReq struct {
 
 func (x *ListCronReq) Reset() {
 	*x = ListCronReq{}
-	mi := &file_manager_proto_msgTypes[40]
+	mi := &file_manager_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3175,7 +4003,7 @@ func (x *ListCronReq) String() string {
 func (*ListCronReq) ProtoMessage() {}
 
 func (x *ListCronReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[40]
+	mi := &file_manager_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3188,7 +4016,7 @@ func (x *ListCronReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCronReq.ProtoReflect.Descriptor instead.
 func (*ListCronReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{40}
+	return file_manager_proto_rawDescGZIP(), []int{52}
 }
 
 type ListCronResp struct {
@@ -3200,7 +4028,7 @@ type ListCronResp struct {
 
 func (x *ListCronResp) Reset() {
 	*x = ListCronResp{}
-	mi := &file_manager_proto_msgTypes[41]
+	mi := &file_manager_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3212,7 +4040,7 @@ func (x *ListCronResp) String() string {
 func (*ListCronResp) ProtoMessage() {}
 
 func (x *ListCronResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[41]
+	mi := &file_manager_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3225,7 +4053,7 @@ func (x *ListCronResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCronResp.ProtoReflect.Descriptor instead.
 func (*ListCronResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{41}
+	return file_manager_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *ListCronResp) GetEntries() []*CronEntry {
@@ -3244,7 +4072,7 @@ type ApplyCronReq struct {
 
 func (x *ApplyCronReq) Reset() {
 	*x = ApplyCronReq{}
-	mi := &file_manager_proto_msgTypes[42]
+	mi := &file_manager_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3256,7 +4084,7 @@ func (x *ApplyCronReq) String() string {
 func (*ApplyCronReq) ProtoMessage() {}
 
 func (x *ApplyCronReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[42]
+	mi := &file_manager_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3269,7 +4097,7 @@ func (x *ApplyCronReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyCronReq.ProtoReflect.Descriptor instead.
 func (*ApplyCronReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{42}
+	return file_manager_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *ApplyCronReq) GetEntries() []*CronEntry {
@@ -3288,7 +4116,7 @@ type ApplyCronResp struct {
 
 func (x *ApplyCronResp) Reset() {
 	*x = ApplyCronResp{}
-	mi := &file_manager_proto_msgTypes[43]
+	mi := &file_manager_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3300,7 +4128,7 @@ func (x *ApplyCronResp) String() string {
 func (*ApplyCronResp) ProtoMessage() {}
 
 func (x *ApplyCronResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[43]
+	mi := &file_manager_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3313,7 +4141,7 @@ func (x *ApplyCronResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyCronResp.ProtoReflect.Descriptor instead.
 func (*ApplyCronResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{43}
+	return file_manager_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *ApplyCronResp) GetInstalled() uint32 {
@@ -3357,7 +4185,7 @@ type RunBackupReq struct {
 
 func (x *RunBackupReq) Reset() {
 	*x = RunBackupReq{}
-	mi := &file_manager_proto_msgTypes[44]
+	mi := &file_manager_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3369,7 +4197,7 @@ func (x *RunBackupReq) String() string {
 func (*RunBackupReq) ProtoMessage() {}
 
 func (x *RunBackupReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[44]
+	mi := &file_manager_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3382,7 +4210,7 @@ func (x *RunBackupReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunBackupReq.ProtoReflect.Descriptor instead.
 func (*RunBackupReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{44}
+	return file_manager_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *RunBackupReq) GetPlanId() string {
@@ -3496,7 +4324,7 @@ type RunBackupResp struct {
 
 func (x *RunBackupResp) Reset() {
 	*x = RunBackupResp{}
-	mi := &file_manager_proto_msgTypes[45]
+	mi := &file_manager_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3508,7 +4336,7 @@ func (x *RunBackupResp) String() string {
 func (*RunBackupResp) ProtoMessage() {}
 
 func (x *RunBackupResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[45]
+	mi := &file_manager_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3521,7 +4349,7 @@ func (x *RunBackupResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunBackupResp.ProtoReflect.Descriptor instead.
 func (*RunBackupResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{45}
+	return file_manager_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *RunBackupResp) GetS3Key() string {
@@ -3568,7 +4396,7 @@ type CancelBackupReq struct {
 
 func (x *CancelBackupReq) Reset() {
 	*x = CancelBackupReq{}
-	mi := &file_manager_proto_msgTypes[46]
+	mi := &file_manager_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3580,7 +4408,7 @@ func (x *CancelBackupReq) String() string {
 func (*CancelBackupReq) ProtoMessage() {}
 
 func (x *CancelBackupReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[46]
+	mi := &file_manager_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3593,7 +4421,7 @@ func (x *CancelBackupReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelBackupReq.ProtoReflect.Descriptor instead.
 func (*CancelBackupReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{46}
+	return file_manager_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *CancelBackupReq) GetRunId() string {
@@ -3611,7 +4439,7 @@ type CancelBackupResp struct {
 
 func (x *CancelBackupResp) Reset() {
 	*x = CancelBackupResp{}
-	mi := &file_manager_proto_msgTypes[47]
+	mi := &file_manager_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3623,7 +4451,7 @@ func (x *CancelBackupResp) String() string {
 func (*CancelBackupResp) ProtoMessage() {}
 
 func (x *CancelBackupResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[47]
+	mi := &file_manager_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3636,7 +4464,7 @@ func (x *CancelBackupResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelBackupResp.ProtoReflect.Descriptor instead.
 func (*CancelBackupResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{47}
+	return file_manager_proto_rawDescGZIP(), []int{59}
 }
 
 type DownloadRequest struct {
@@ -3649,7 +4477,7 @@ type DownloadRequest struct {
 
 func (x *DownloadRequest) Reset() {
 	*x = DownloadRequest{}
-	mi := &file_manager_proto_msgTypes[48]
+	mi := &file_manager_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3661,7 +4489,7 @@ func (x *DownloadRequest) String() string {
 func (*DownloadRequest) ProtoMessage() {}
 
 func (x *DownloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[48]
+	mi := &file_manager_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3674,7 +4502,7 @@ func (x *DownloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadRequest.ProtoReflect.Descriptor instead.
 func (*DownloadRequest) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{48}
+	return file_manager_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *DownloadRequest) GetPath() string {
@@ -3701,7 +4529,7 @@ type FileChunk struct {
 
 func (x *FileChunk) Reset() {
 	*x = FileChunk{}
-	mi := &file_manager_proto_msgTypes[49]
+	mi := &file_manager_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3713,7 +4541,7 @@ func (x *FileChunk) String() string {
 func (*FileChunk) ProtoMessage() {}
 
 func (x *FileChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[49]
+	mi := &file_manager_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3726,7 +4554,7 @@ func (x *FileChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileChunk.ProtoReflect.Descriptor instead.
 func (*FileChunk) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{49}
+	return file_manager_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *FileChunk) GetData() []byte {
@@ -3756,7 +4584,7 @@ type UploadChunk struct {
 
 func (x *UploadChunk) Reset() {
 	*x = UploadChunk{}
-	mi := &file_manager_proto_msgTypes[50]
+	mi := &file_manager_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3768,7 +4596,7 @@ func (x *UploadChunk) String() string {
 func (*UploadChunk) ProtoMessage() {}
 
 func (x *UploadChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[50]
+	mi := &file_manager_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3781,7 +4609,7 @@ func (x *UploadChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadChunk.ProtoReflect.Descriptor instead.
 func (*UploadChunk) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{50}
+	return file_manager_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *UploadChunk) GetKind() isUploadChunk_Kind {
@@ -3837,7 +4665,7 @@ type UploadStart struct {
 
 func (x *UploadStart) Reset() {
 	*x = UploadStart{}
-	mi := &file_manager_proto_msgTypes[51]
+	mi := &file_manager_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3849,7 +4677,7 @@ func (x *UploadStart) String() string {
 func (*UploadStart) ProtoMessage() {}
 
 func (x *UploadStart) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[51]
+	mi := &file_manager_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3862,7 +4690,7 @@ func (x *UploadStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadStart.ProtoReflect.Descriptor instead.
 func (*UploadStart) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{51}
+	return file_manager_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *UploadStart) GetPath() string {
@@ -3902,7 +4730,7 @@ type UploadResult struct {
 
 func (x *UploadResult) Reset() {
 	*x = UploadResult{}
-	mi := &file_manager_proto_msgTypes[52]
+	mi := &file_manager_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3914,7 +4742,7 @@ func (x *UploadResult) String() string {
 func (*UploadResult) ProtoMessage() {}
 
 func (x *UploadResult) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[52]
+	mi := &file_manager_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3927,7 +4755,7 @@ func (x *UploadResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadResult.ProtoReflect.Descriptor instead.
 func (*UploadResult) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{52}
+	return file_manager_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *UploadResult) GetBytesWritten() uint64 {
@@ -3949,7 +4777,7 @@ type ServiceUpdateReq struct {
 
 func (x *ServiceUpdateReq) Reset() {
 	*x = ServiceUpdateReq{}
-	mi := &file_manager_proto_msgTypes[53]
+	mi := &file_manager_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3961,7 +4789,7 @@ func (x *ServiceUpdateReq) String() string {
 func (*ServiceUpdateReq) ProtoMessage() {}
 
 func (x *ServiceUpdateReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[53]
+	mi := &file_manager_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3974,7 +4802,7 @@ func (x *ServiceUpdateReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceUpdateReq.ProtoReflect.Descriptor instead.
 func (*ServiceUpdateReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{53}
+	return file_manager_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *ServiceUpdateReq) GetService() string {
@@ -3994,7 +4822,7 @@ type ServiceUpdateResp struct {
 
 func (x *ServiceUpdateResp) Reset() {
 	*x = ServiceUpdateResp{}
-	mi := &file_manager_proto_msgTypes[54]
+	mi := &file_manager_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4006,7 +4834,7 @@ func (x *ServiceUpdateResp) String() string {
 func (*ServiceUpdateResp) ProtoMessage() {}
 
 func (x *ServiceUpdateResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[54]
+	mi := &file_manager_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4019,7 +4847,7 @@ func (x *ServiceUpdateResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceUpdateResp.ProtoReflect.Descriptor instead.
 func (*ServiceUpdateResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{54}
+	return file_manager_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *ServiceUpdateResp) GetServiceId() string {
@@ -4047,7 +4875,7 @@ type ExecReq struct {
 
 func (x *ExecReq) Reset() {
 	*x = ExecReq{}
-	mi := &file_manager_proto_msgTypes[55]
+	mi := &file_manager_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4059,7 +4887,7 @@ func (x *ExecReq) String() string {
 func (*ExecReq) ProtoMessage() {}
 
 func (x *ExecReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[55]
+	mi := &file_manager_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4072,7 +4900,7 @@ func (x *ExecReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecReq.ProtoReflect.Descriptor instead.
 func (*ExecReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{55}
+	return file_manager_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *ExecReq) GetCmd() string {
@@ -4107,7 +4935,7 @@ type ExecResp struct {
 
 func (x *ExecResp) Reset() {
 	*x = ExecResp{}
-	mi := &file_manager_proto_msgTypes[56]
+	mi := &file_manager_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4119,7 +4947,7 @@ func (x *ExecResp) String() string {
 func (*ExecResp) ProtoMessage() {}
 
 func (x *ExecResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[56]
+	mi := &file_manager_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4132,7 +4960,7 @@ func (x *ExecResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecResp.ProtoReflect.Descriptor instead.
 func (*ExecResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{56}
+	return file_manager_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *ExecResp) GetExitCode() int32 {
@@ -4210,7 +5038,7 @@ const file_manager_proto_rawDesc = "" +
 	"\x0fdisk_read_bytes\x18\v \x01(\x04R\rdiskReadBytes\x12(\n" +
 	"\x10disk_write_bytes\x18\f \x01(\x04R\x0ediskWriteBytes\"\x1b\n" +
 	"\x04Ping\x12\x13\n" +
-	"\x05ts_ms\x18\x01 \x01(\x03R\x04tsMs\"\x80\a\n" +
+	"\x05ts_ms\x18\x01 \x01(\x03R\x04tsMs\"\x87\t\n" +
 	"\aCommand\x122\n" +
 	"\tlist_path\x18\x01 \x01(\v2\x13.bpm.v1.ListPathReqH\x00R\blistPath\x12%\n" +
 	"\x04stat\x18\x02 \x01(\v2\x0f.bpm.v1.StatReqH\x00R\x04stat\x122\n" +
@@ -4230,11 +5058,18 @@ const file_manager_proto_rawDesc = "" +
 	"run_backup\x18\x1e \x01(\v2\x14.bpm.v1.RunBackupReqH\x00R\trunBackup\x12>\n" +
 	"\rcancel_backup\x18\x1f \x01(\v2\x17.bpm.v1.CancelBackupReqH\x00R\fcancelBackup\x12A\n" +
 	"\x0eservice_update\x18  \x01(\v2\x18.bpm.v1.ServiceUpdateReqH\x00R\rserviceUpdate\x128\n" +
+	"\vswarm_nodes\x18! \x01(\v2\x15.bpm.v1.SwarmNodesReqH\x00R\n" +
+	"swarmNodes\x12/\n" +
+	"\bpty_open\x18\" \x01(\v2\x12.bpm.v1.PtyOpenReqH\x00R\aptyOpen\x12/\n" +
+	"\bpty_data\x18# \x01(\v2\x12.bpm.v1.PtyDataReqH\x00R\aptyData\x125\n" +
+	"\n" +
+	"pty_resize\x18$ \x01(\v2\x14.bpm.v1.PtyResizeReqH\x00R\tptyResize\x122\n" +
+	"\tpty_close\x18% \x01(\v2\x13.bpm.v1.PtyCloseReqH\x00R\bptyClose\x128\n" +
 	"\venable_logs\x182 \x01(\v2\x15.bpm.v1.EnableLogsReqH\x00R\n" +
 	"enableLogs\x12;\n" +
 	"\fdisable_logs\x183 \x01(\v2\x16.bpm.v1.DisableLogsReqH\x00R\vdisableLogs\x12%\n" +
 	"\x04exec\x18Z \x01(\v2\x0f.bpm.v1.ExecReqH\x00R\x04execB\x04\n" +
-	"\x02op\"\xc2\a\n" +
+	"\x02op\"\xce\t\n" +
 	"\rCommandResult\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x123\n" +
@@ -4257,18 +5092,27 @@ const file_manager_proto_rawDesc = "" +
 	"run_backup\x18( \x01(\v2\x15.bpm.v1.RunBackupRespH\x00R\trunBackup\x12?\n" +
 	"\rcancel_backup\x18) \x01(\v2\x18.bpm.v1.CancelBackupRespH\x00R\fcancelBackup\x12B\n" +
 	"\x0eservice_update\x18* \x01(\v2\x19.bpm.v1.ServiceUpdateRespH\x00R\rserviceUpdate\x129\n" +
+	"\vswarm_nodes\x18+ \x01(\v2\x16.bpm.v1.SwarmNodesRespH\x00R\n" +
+	"swarmNodes\x120\n" +
+	"\bpty_open\x18, \x01(\v2\x13.bpm.v1.PtyOpenRespH\x00R\aptyOpen\x120\n" +
+	"\bpty_data\x18- \x01(\v2\x13.bpm.v1.PtyDataRespH\x00R\aptyData\x126\n" +
+	"\n" +
+	"pty_resize\x18. \x01(\v2\x15.bpm.v1.PtyResizeRespH\x00R\tptyResize\x123\n" +
+	"\tpty_close\x18/ \x01(\v2\x14.bpm.v1.PtyCloseRespH\x00R\bptyClose\x129\n" +
 	"\venable_logs\x18< \x01(\v2\x16.bpm.v1.EnableLogsRespH\x00R\n" +
 	"enableLogs\x12<\n" +
 	"\fdisable_logs\x18= \x01(\v2\x17.bpm.v1.DisableLogsRespH\x00R\vdisableLogs\x12&\n" +
 	"\x04exec\x18Z \x01(\v2\x10.bpm.v1.ExecRespH\x00R\x04execB\t\n" +
-	"\apayload\"\xbb\x02\n" +
+	"\apayload\"\xef\x02\n" +
 	"\x05Event\x12A\n" +
 	"\x0fbackup_progress\x18\x01 \x01(\v2\x16.bpm.v1.BackupProgressH\x00R\x0ebackupProgress\x126\n" +
 	"\n" +
 	"backup_log\x18\x02 \x01(\v2\x15.bpm.v1.BackupLogLineH\x00R\tbackupLog\x128\n" +
 	"\fcron_changed\x18\x03 \x01(\v2\x13.bpm.v1.CronChangedH\x00R\vcronChanged\x12D\n" +
 	"\x10container_report\x18\x04 \x01(\v2\x17.bpm.v1.ContainerReportH\x00R\x0fcontainerReport\x12/\n" +
-	"\tlog_batch\x18\x05 \x01(\v2\x10.bpm.v1.LogBatchH\x00R\blogBatchB\x06\n" +
+	"\tlog_batch\x18\x05 \x01(\v2\x10.bpm.v1.LogBatchH\x00R\blogBatch\x122\n" +
+	"\n" +
+	"pty_output\x18\x06 \x01(\v2\x11.bpm.v1.PtyOutputH\x00R\tptyOutputB\x06\n" +
 	"\x04kind\"\x92\x01\n" +
 	"\x0eBackupProgress\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12'\n" +
@@ -4394,7 +5238,56 @@ const file_manager_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
 	"\x03uid\x18\x02 \x01(\rR\x03uid\x12\x10\n" +
 	"\x03gid\x18\x03 \x01(\rR\x03gid\x12\x12\n" +
-	"\x04home\x18\x04 \x01(\tR\x04home\"\x99\x01\n" +
+	"\x04home\x18\x04 \x01(\tR\x04home\"\x0f\n" +
+	"\rSwarmNodesReq\"9\n" +
+	"\x0eSwarmNodesResp\x12'\n" +
+	"\x05nodes\x18\x01 \x03(\v2\x11.bpm.v1.SwarmNodeR\x05nodes\"\x8f\x02\n" +
+	"\tSwarmNode\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
+	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x12\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\x12\"\n" +
+	"\favailability\x18\x04 \x01(\tR\favailability\x12\x14\n" +
+	"\x05state\x18\x05 \x01(\tR\x05state\x12\x16\n" +
+	"\x06leader\x18\x06 \x01(\bR\x06leader\x125\n" +
+	"\x06labels\x18\a \x03(\v2\x1d.bpm.v1.SwarmNode.LabelsEntryR\x06labels\x1a9\n" +
+	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"t\n" +
+	"\n" +
+	"PtyOpenReq\x12\x12\n" +
+	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x12\n" +
+	"\x04rows\x18\x02 \x01(\rR\x04rows\x12\x1f\n" +
+	"\vmax_seconds\x18\x03 \x01(\rR\n" +
+	"maxSeconds\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x04 \x01(\tR\tsessionId\"e\n" +
+	"\vPtyOpenResp\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12!\n" +
+	"\fcontainer_id\x18\x02 \x01(\tR\vcontainerId\x12\x14\n" +
+	"\x05image\x18\x03 \x01(\tR\x05image\"?\n" +
+	"\n" +
+	"PtyDataReq\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data\"\r\n" +
+	"\vPtyDataResp\"U\n" +
+	"\fPtyResizeReq\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
+	"\x04cols\x18\x02 \x01(\rR\x04cols\x12\x12\n" +
+	"\x04rows\x18\x03 \x01(\rR\x04rows\"\x0f\n" +
+	"\rPtyResizeResp\",\n" +
+	"\vPtyCloseReq\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"\x0e\n" +
+	"\fPtyCloseResp\"n\n" +
+	"\tPtyOutput\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data\x12\x16\n" +
+	"\x06closed\x18\x03 \x01(\bR\x06closed\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\"\x99\x01\n" +
 	"\tCronEntry\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\bschedule\x18\x02 \x01(\tR\bschedule\x12\x18\n" +
@@ -4487,7 +5380,7 @@ func file_manager_proto_rawDescGZIP() []byte {
 	return file_manager_proto_rawDescData
 }
 
-var file_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 59)
+var file_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 72)
 var file_manager_proto_goTypes = []any{
 	(*AgentMessage)(nil),      // 0: bpm.v1.AgentMessage
 	(*LeaderMessage)(nil),     // 1: bpm.v1.LeaderMessage
@@ -4528,26 +5421,39 @@ var file_manager_proto_goTypes = []any{
 	(*ChownResp)(nil),         // 36: bpm.v1.ChownResp
 	(*LookupUserReq)(nil),     // 37: bpm.v1.LookupUserReq
 	(*LookupUserResp)(nil),    // 38: bpm.v1.LookupUserResp
-	(*CronEntry)(nil),         // 39: bpm.v1.CronEntry
-	(*ListCronReq)(nil),       // 40: bpm.v1.ListCronReq
-	(*ListCronResp)(nil),      // 41: bpm.v1.ListCronResp
-	(*ApplyCronReq)(nil),      // 42: bpm.v1.ApplyCronReq
-	(*ApplyCronResp)(nil),     // 43: bpm.v1.ApplyCronResp
-	(*RunBackupReq)(nil),      // 44: bpm.v1.RunBackupReq
-	(*RunBackupResp)(nil),     // 45: bpm.v1.RunBackupResp
-	(*CancelBackupReq)(nil),   // 46: bpm.v1.CancelBackupReq
-	(*CancelBackupResp)(nil),  // 47: bpm.v1.CancelBackupResp
-	(*DownloadRequest)(nil),   // 48: bpm.v1.DownloadRequest
-	(*FileChunk)(nil),         // 49: bpm.v1.FileChunk
-	(*UploadChunk)(nil),       // 50: bpm.v1.UploadChunk
-	(*UploadStart)(nil),       // 51: bpm.v1.UploadStart
-	(*UploadResult)(nil),      // 52: bpm.v1.UploadResult
-	(*ServiceUpdateReq)(nil),  // 53: bpm.v1.ServiceUpdateReq
-	(*ServiceUpdateResp)(nil), // 54: bpm.v1.ServiceUpdateResp
-	(*ExecReq)(nil),           // 55: bpm.v1.ExecReq
-	(*ExecResp)(nil),          // 56: bpm.v1.ExecResp
-	nil,                       // 57: bpm.v1.Hello.LabelsEntry
-	nil,                       // 58: bpm.v1.ContainerSnapshot.LabelsEntry
+	(*SwarmNodesReq)(nil),     // 39: bpm.v1.SwarmNodesReq
+	(*SwarmNodesResp)(nil),    // 40: bpm.v1.SwarmNodesResp
+	(*SwarmNode)(nil),         // 41: bpm.v1.SwarmNode
+	(*PtyOpenReq)(nil),        // 42: bpm.v1.PtyOpenReq
+	(*PtyOpenResp)(nil),       // 43: bpm.v1.PtyOpenResp
+	(*PtyDataReq)(nil),        // 44: bpm.v1.PtyDataReq
+	(*PtyDataResp)(nil),       // 45: bpm.v1.PtyDataResp
+	(*PtyResizeReq)(nil),      // 46: bpm.v1.PtyResizeReq
+	(*PtyResizeResp)(nil),     // 47: bpm.v1.PtyResizeResp
+	(*PtyCloseReq)(nil),       // 48: bpm.v1.PtyCloseReq
+	(*PtyCloseResp)(nil),      // 49: bpm.v1.PtyCloseResp
+	(*PtyOutput)(nil),         // 50: bpm.v1.PtyOutput
+	(*CronEntry)(nil),         // 51: bpm.v1.CronEntry
+	(*ListCronReq)(nil),       // 52: bpm.v1.ListCronReq
+	(*ListCronResp)(nil),      // 53: bpm.v1.ListCronResp
+	(*ApplyCronReq)(nil),      // 54: bpm.v1.ApplyCronReq
+	(*ApplyCronResp)(nil),     // 55: bpm.v1.ApplyCronResp
+	(*RunBackupReq)(nil),      // 56: bpm.v1.RunBackupReq
+	(*RunBackupResp)(nil),     // 57: bpm.v1.RunBackupResp
+	(*CancelBackupReq)(nil),   // 58: bpm.v1.CancelBackupReq
+	(*CancelBackupResp)(nil),  // 59: bpm.v1.CancelBackupResp
+	(*DownloadRequest)(nil),   // 60: bpm.v1.DownloadRequest
+	(*FileChunk)(nil),         // 61: bpm.v1.FileChunk
+	(*UploadChunk)(nil),       // 62: bpm.v1.UploadChunk
+	(*UploadStart)(nil),       // 63: bpm.v1.UploadStart
+	(*UploadResult)(nil),      // 64: bpm.v1.UploadResult
+	(*ServiceUpdateReq)(nil),  // 65: bpm.v1.ServiceUpdateReq
+	(*ServiceUpdateResp)(nil), // 66: bpm.v1.ServiceUpdateResp
+	(*ExecReq)(nil),           // 67: bpm.v1.ExecReq
+	(*ExecResp)(nil),          // 68: bpm.v1.ExecResp
+	nil,                       // 69: bpm.v1.Hello.LabelsEntry
+	nil,                       // 70: bpm.v1.ContainerSnapshot.LabelsEntry
+	nil,                       // 71: bpm.v1.SwarmNode.LabelsEntry
 }
 var file_manager_proto_depIdxs = []int32{
 	2,  // 0: bpm.v1.AgentMessage.hello:type_name -> bpm.v1.Hello
@@ -4557,7 +5463,7 @@ var file_manager_proto_depIdxs = []int32{
 	3,  // 4: bpm.v1.LeaderMessage.welcome:type_name -> bpm.v1.Welcome
 	5,  // 5: bpm.v1.LeaderMessage.ping:type_name -> bpm.v1.Ping
 	6,  // 6: bpm.v1.LeaderMessage.command:type_name -> bpm.v1.Command
-	57, // 7: bpm.v1.Hello.labels:type_name -> bpm.v1.Hello.LabelsEntry
+	69, // 7: bpm.v1.Hello.labels:type_name -> bpm.v1.Hello.LabelsEntry
 	20, // 8: bpm.v1.Command.list_path:type_name -> bpm.v1.ListPathReq
 	23, // 9: bpm.v1.Command.stat:type_name -> bpm.v1.StatReq
 	25, // 10: bpm.v1.Command.read_file:type_name -> bpm.v1.ReadFileReq
@@ -4567,55 +5473,68 @@ var file_manager_proto_depIdxs = []int32{
 	33, // 14: bpm.v1.Command.delete:type_name -> bpm.v1.DeleteReq
 	35, // 15: bpm.v1.Command.chown:type_name -> bpm.v1.ChownReq
 	37, // 16: bpm.v1.Command.lookup_user:type_name -> bpm.v1.LookupUserReq
-	40, // 17: bpm.v1.Command.list_cron:type_name -> bpm.v1.ListCronReq
-	42, // 18: bpm.v1.Command.apply_cron:type_name -> bpm.v1.ApplyCronReq
-	44, // 19: bpm.v1.Command.run_backup:type_name -> bpm.v1.RunBackupReq
-	46, // 20: bpm.v1.Command.cancel_backup:type_name -> bpm.v1.CancelBackupReq
-	53, // 21: bpm.v1.Command.service_update:type_name -> bpm.v1.ServiceUpdateReq
-	16, // 22: bpm.v1.Command.enable_logs:type_name -> bpm.v1.EnableLogsReq
-	18, // 23: bpm.v1.Command.disable_logs:type_name -> bpm.v1.DisableLogsReq
-	55, // 24: bpm.v1.Command.exec:type_name -> bpm.v1.ExecReq
-	22, // 25: bpm.v1.CommandResult.list_path:type_name -> bpm.v1.ListPathResp
-	24, // 26: bpm.v1.CommandResult.stat:type_name -> bpm.v1.StatResp
-	26, // 27: bpm.v1.CommandResult.read_file:type_name -> bpm.v1.ReadFileResp
-	28, // 28: bpm.v1.CommandResult.write_file:type_name -> bpm.v1.WriteFileResp
-	30, // 29: bpm.v1.CommandResult.mkdir:type_name -> bpm.v1.MkdirResp
-	32, // 30: bpm.v1.CommandResult.rename:type_name -> bpm.v1.RenameResp
-	34, // 31: bpm.v1.CommandResult.delete:type_name -> bpm.v1.DeleteResp
-	36, // 32: bpm.v1.CommandResult.chown:type_name -> bpm.v1.ChownResp
-	38, // 33: bpm.v1.CommandResult.lookup_user:type_name -> bpm.v1.LookupUserResp
-	41, // 34: bpm.v1.CommandResult.list_cron:type_name -> bpm.v1.ListCronResp
-	43, // 35: bpm.v1.CommandResult.apply_cron:type_name -> bpm.v1.ApplyCronResp
-	45, // 36: bpm.v1.CommandResult.run_backup:type_name -> bpm.v1.RunBackupResp
-	47, // 37: bpm.v1.CommandResult.cancel_backup:type_name -> bpm.v1.CancelBackupResp
-	54, // 38: bpm.v1.CommandResult.service_update:type_name -> bpm.v1.ServiceUpdateResp
-	17, // 39: bpm.v1.CommandResult.enable_logs:type_name -> bpm.v1.EnableLogsResp
-	19, // 40: bpm.v1.CommandResult.disable_logs:type_name -> bpm.v1.DisableLogsResp
-	56, // 41: bpm.v1.CommandResult.exec:type_name -> bpm.v1.ExecResp
-	9,  // 42: bpm.v1.Event.backup_progress:type_name -> bpm.v1.BackupProgress
-	10, // 43: bpm.v1.Event.backup_log:type_name -> bpm.v1.BackupLogLine
-	11, // 44: bpm.v1.Event.cron_changed:type_name -> bpm.v1.CronChanged
-	13, // 45: bpm.v1.Event.container_report:type_name -> bpm.v1.ContainerReport
-	15, // 46: bpm.v1.Event.log_batch:type_name -> bpm.v1.LogBatch
-	58, // 47: bpm.v1.ContainerSnapshot.labels:type_name -> bpm.v1.ContainerSnapshot.LabelsEntry
-	12, // 48: bpm.v1.ContainerReport.containers:type_name -> bpm.v1.ContainerSnapshot
-	14, // 49: bpm.v1.LogBatch.lines:type_name -> bpm.v1.LogLine
-	21, // 50: bpm.v1.ListPathResp.entries:type_name -> bpm.v1.FileEntry
-	21, // 51: bpm.v1.StatResp.entry:type_name -> bpm.v1.FileEntry
-	39, // 52: bpm.v1.ListCronResp.entries:type_name -> bpm.v1.CronEntry
-	39, // 53: bpm.v1.ApplyCronReq.entries:type_name -> bpm.v1.CronEntry
-	51, // 54: bpm.v1.UploadChunk.start:type_name -> bpm.v1.UploadStart
-	0,  // 55: bpm.v1.ManagerAgent.Channel:input_type -> bpm.v1.AgentMessage
-	48, // 56: bpm.v1.ManagerAgent.DownloadFile:input_type -> bpm.v1.DownloadRequest
-	50, // 57: bpm.v1.ManagerAgent.UploadFile:input_type -> bpm.v1.UploadChunk
-	1,  // 58: bpm.v1.ManagerAgent.Channel:output_type -> bpm.v1.LeaderMessage
-	49, // 59: bpm.v1.ManagerAgent.DownloadFile:output_type -> bpm.v1.FileChunk
-	52, // 60: bpm.v1.ManagerAgent.UploadFile:output_type -> bpm.v1.UploadResult
-	58, // [58:61] is the sub-list for method output_type
-	55, // [55:58] is the sub-list for method input_type
-	55, // [55:55] is the sub-list for extension type_name
-	55, // [55:55] is the sub-list for extension extendee
-	0,  // [0:55] is the sub-list for field type_name
+	52, // 17: bpm.v1.Command.list_cron:type_name -> bpm.v1.ListCronReq
+	54, // 18: bpm.v1.Command.apply_cron:type_name -> bpm.v1.ApplyCronReq
+	56, // 19: bpm.v1.Command.run_backup:type_name -> bpm.v1.RunBackupReq
+	58, // 20: bpm.v1.Command.cancel_backup:type_name -> bpm.v1.CancelBackupReq
+	65, // 21: bpm.v1.Command.service_update:type_name -> bpm.v1.ServiceUpdateReq
+	39, // 22: bpm.v1.Command.swarm_nodes:type_name -> bpm.v1.SwarmNodesReq
+	42, // 23: bpm.v1.Command.pty_open:type_name -> bpm.v1.PtyOpenReq
+	44, // 24: bpm.v1.Command.pty_data:type_name -> bpm.v1.PtyDataReq
+	46, // 25: bpm.v1.Command.pty_resize:type_name -> bpm.v1.PtyResizeReq
+	48, // 26: bpm.v1.Command.pty_close:type_name -> bpm.v1.PtyCloseReq
+	16, // 27: bpm.v1.Command.enable_logs:type_name -> bpm.v1.EnableLogsReq
+	18, // 28: bpm.v1.Command.disable_logs:type_name -> bpm.v1.DisableLogsReq
+	67, // 29: bpm.v1.Command.exec:type_name -> bpm.v1.ExecReq
+	22, // 30: bpm.v1.CommandResult.list_path:type_name -> bpm.v1.ListPathResp
+	24, // 31: bpm.v1.CommandResult.stat:type_name -> bpm.v1.StatResp
+	26, // 32: bpm.v1.CommandResult.read_file:type_name -> bpm.v1.ReadFileResp
+	28, // 33: bpm.v1.CommandResult.write_file:type_name -> bpm.v1.WriteFileResp
+	30, // 34: bpm.v1.CommandResult.mkdir:type_name -> bpm.v1.MkdirResp
+	32, // 35: bpm.v1.CommandResult.rename:type_name -> bpm.v1.RenameResp
+	34, // 36: bpm.v1.CommandResult.delete:type_name -> bpm.v1.DeleteResp
+	36, // 37: bpm.v1.CommandResult.chown:type_name -> bpm.v1.ChownResp
+	38, // 38: bpm.v1.CommandResult.lookup_user:type_name -> bpm.v1.LookupUserResp
+	53, // 39: bpm.v1.CommandResult.list_cron:type_name -> bpm.v1.ListCronResp
+	55, // 40: bpm.v1.CommandResult.apply_cron:type_name -> bpm.v1.ApplyCronResp
+	57, // 41: bpm.v1.CommandResult.run_backup:type_name -> bpm.v1.RunBackupResp
+	59, // 42: bpm.v1.CommandResult.cancel_backup:type_name -> bpm.v1.CancelBackupResp
+	66, // 43: bpm.v1.CommandResult.service_update:type_name -> bpm.v1.ServiceUpdateResp
+	40, // 44: bpm.v1.CommandResult.swarm_nodes:type_name -> bpm.v1.SwarmNodesResp
+	43, // 45: bpm.v1.CommandResult.pty_open:type_name -> bpm.v1.PtyOpenResp
+	45, // 46: bpm.v1.CommandResult.pty_data:type_name -> bpm.v1.PtyDataResp
+	47, // 47: bpm.v1.CommandResult.pty_resize:type_name -> bpm.v1.PtyResizeResp
+	49, // 48: bpm.v1.CommandResult.pty_close:type_name -> bpm.v1.PtyCloseResp
+	17, // 49: bpm.v1.CommandResult.enable_logs:type_name -> bpm.v1.EnableLogsResp
+	19, // 50: bpm.v1.CommandResult.disable_logs:type_name -> bpm.v1.DisableLogsResp
+	68, // 51: bpm.v1.CommandResult.exec:type_name -> bpm.v1.ExecResp
+	9,  // 52: bpm.v1.Event.backup_progress:type_name -> bpm.v1.BackupProgress
+	10, // 53: bpm.v1.Event.backup_log:type_name -> bpm.v1.BackupLogLine
+	11, // 54: bpm.v1.Event.cron_changed:type_name -> bpm.v1.CronChanged
+	13, // 55: bpm.v1.Event.container_report:type_name -> bpm.v1.ContainerReport
+	15, // 56: bpm.v1.Event.log_batch:type_name -> bpm.v1.LogBatch
+	50, // 57: bpm.v1.Event.pty_output:type_name -> bpm.v1.PtyOutput
+	70, // 58: bpm.v1.ContainerSnapshot.labels:type_name -> bpm.v1.ContainerSnapshot.LabelsEntry
+	12, // 59: bpm.v1.ContainerReport.containers:type_name -> bpm.v1.ContainerSnapshot
+	14, // 60: bpm.v1.LogBatch.lines:type_name -> bpm.v1.LogLine
+	21, // 61: bpm.v1.ListPathResp.entries:type_name -> bpm.v1.FileEntry
+	21, // 62: bpm.v1.StatResp.entry:type_name -> bpm.v1.FileEntry
+	41, // 63: bpm.v1.SwarmNodesResp.nodes:type_name -> bpm.v1.SwarmNode
+	71, // 64: bpm.v1.SwarmNode.labels:type_name -> bpm.v1.SwarmNode.LabelsEntry
+	51, // 65: bpm.v1.ListCronResp.entries:type_name -> bpm.v1.CronEntry
+	51, // 66: bpm.v1.ApplyCronReq.entries:type_name -> bpm.v1.CronEntry
+	63, // 67: bpm.v1.UploadChunk.start:type_name -> bpm.v1.UploadStart
+	0,  // 68: bpm.v1.ManagerAgent.Channel:input_type -> bpm.v1.AgentMessage
+	60, // 69: bpm.v1.ManagerAgent.DownloadFile:input_type -> bpm.v1.DownloadRequest
+	62, // 70: bpm.v1.ManagerAgent.UploadFile:input_type -> bpm.v1.UploadChunk
+	1,  // 71: bpm.v1.ManagerAgent.Channel:output_type -> bpm.v1.LeaderMessage
+	61, // 72: bpm.v1.ManagerAgent.DownloadFile:output_type -> bpm.v1.FileChunk
+	64, // 73: bpm.v1.ManagerAgent.UploadFile:output_type -> bpm.v1.UploadResult
+	71, // [71:74] is the sub-list for method output_type
+	68, // [68:71] is the sub-list for method input_type
+	68, // [68:68] is the sub-list for extension type_name
+	68, // [68:68] is the sub-list for extension extendee
+	0,  // [0:68] is the sub-list for field type_name
 }
 
 func init() { file_manager_proto_init() }
@@ -4649,6 +5568,11 @@ func file_manager_proto_init() {
 		(*Command_RunBackup)(nil),
 		(*Command_CancelBackup)(nil),
 		(*Command_ServiceUpdate)(nil),
+		(*Command_SwarmNodes)(nil),
+		(*Command_PtyOpen)(nil),
+		(*Command_PtyData)(nil),
+		(*Command_PtyResize)(nil),
+		(*Command_PtyClose)(nil),
 		(*Command_EnableLogs)(nil),
 		(*Command_DisableLogs)(nil),
 		(*Command_Exec)(nil),
@@ -4668,6 +5592,11 @@ func file_manager_proto_init() {
 		(*CommandResult_RunBackup)(nil),
 		(*CommandResult_CancelBackup)(nil),
 		(*CommandResult_ServiceUpdate)(nil),
+		(*CommandResult_SwarmNodes)(nil),
+		(*CommandResult_PtyOpen)(nil),
+		(*CommandResult_PtyData)(nil),
+		(*CommandResult_PtyResize)(nil),
+		(*CommandResult_PtyClose)(nil),
 		(*CommandResult_EnableLogs)(nil),
 		(*CommandResult_DisableLogs)(nil),
 		(*CommandResult_Exec)(nil),
@@ -4678,8 +5607,9 @@ func file_manager_proto_init() {
 		(*Event_CronChanged)(nil),
 		(*Event_ContainerReport)(nil),
 		(*Event_LogBatch)(nil),
+		(*Event_PtyOutput)(nil),
 	}
-	file_manager_proto_msgTypes[50].OneofWrappers = []any{
+	file_manager_proto_msgTypes[62].OneofWrappers = []any{
 		(*UploadChunk_Start)(nil),
 		(*UploadChunk_Data)(nil),
 	}
@@ -4689,7 +5619,7 @@ func file_manager_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_manager_proto_rawDesc), len(file_manager_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   59,
+			NumMessages:   72,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

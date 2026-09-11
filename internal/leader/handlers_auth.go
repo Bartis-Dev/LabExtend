@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Bartis-Dev/LabExtend/internal/auth"
@@ -32,11 +33,28 @@ type userInfo struct {
 	Requires2FA bool   `json:"requires_2fa,omitempty"`
 }
 
+// dummyPasswordHash is verified against when the identifier does not exist, so
+// that branch costs the same Argon2 pass as a real one. Computed once, lazily,
+// because hashing is deliberately expensive.
+var dummyPasswordHash = sync.OnceValue(func() string {
+	h, err := auth.HashPassword("labextend-placeholder-for-timing-equalisation")
+	if err != nil {
+		return ""
+	}
+	return h
+})
+
 // AuthDeps groups the pieces every auth/setup handler needs.
 type AuthDeps struct {
 	DB       *sql.DB
 	Sessions *auth.SessionStore
 	TOTP     *auth.TOTPManager
+
+	// LoginLimiter throttles password guesses per source IP; TOTPLimiter
+	// throttles second-factor guesses per pending session. Both are set by
+	// startHTTPServer.
+	LoginLimiter *attemptLimiter
+	TOTPLimiter  *attemptLimiter
 }
 
 // Verify2FA accepts a TOTP / recovery code on a session that's currently
@@ -71,8 +89,23 @@ func (d *AuthDeps) Verify2FA(w http.ResponseWriter, r *http.Request) {
 		verr = d.TOTP.Verify(r.Context(), sess.UserID, body.Code)
 	}
 	if verr != nil {
+		// A pending session lives for the full session TTL (a week by default)
+		// and there are only 10^6 codes, so an unlimited guess budget makes the
+		// second factor decorative. Burn the session after a handful of misses;
+		// the user simply logs in again.
+		if d.TOTPLimiter != nil && !d.TOTPLimiter.allow(sess.ID) {
+			d.TOTPLimiter.reset(sess.ID)
+			if err := d.Sessions.Destroy(r.Context(), w, r); err != nil {
+				slog.Warn("destroying session after 2fa lockout failed", "err", err)
+			}
+			writeErr(w, http.StatusTooManyRequests, errors.New("too many 2fa attempts; log in again"))
+			return
+		}
 		writeErr(w, http.StatusUnauthorized, errors.New("invalid 2fa code"))
 		return
+	}
+	if d.TOTPLimiter != nil {
+		d.TOTPLimiter.reset(sess.ID)
 	}
 	if err := d.Sessions.PromoteFrom2FA(r.Context(), sess); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -206,6 +239,12 @@ func (d *AuthDeps) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	limitKey := clientIPFromRequest(r)
+	if d.LoginLimiter != nil && !d.LoginLimiter.allow(limitKey) {
+		writeErr(w, http.StatusTooManyRequests, errors.New("too many login attempts; try again later"))
+		return
+	}
+
 	var (
 		id       int64
 		email    string
@@ -225,21 +264,29 @@ func (d *AuthDeps) Login(w http.ResponseWriter, r *http.Request) {
 	`, ident, ident).Scan(&id, &email, &username, &display, &hash, &isAdmin, &isActive, &hasTOTP)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			// Spend the same Argon2 pass a real account would, then answer
+			// identically. Returning early here made "no such user" resolve in
+			// microseconds while a wrong password took a 64 MiB KDF run — a
+			// trivially measurable oracle for enumerating valid identifiers.
+			_, _ = auth.VerifyPassword(req.Password, dummyPasswordHash())
 			writeErr(w, http.StatusUnauthorized, errors.New("invalid credentials"))
 			return
 		}
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	if isActive != 1 {
-		writeErr(w, http.StatusForbidden, errors.New("account disabled"))
-		return
-	}
 
+	// The password is checked before the account state, and a disabled account
+	// answers exactly like a wrong password. The old order returned a distinct
+	// 403 "account disabled" without any password at all, which confirmed an
+	// address to anyone who asked.
 	ok, err := auth.VerifyPassword(req.Password, hash)
-	if err != nil || !ok {
+	if err != nil || !ok || isActive != 1 {
 		writeErr(w, http.StatusUnauthorized, errors.New("invalid credentials"))
 		return
+	}
+	if d.LoginLimiter != nil {
+		d.LoginLimiter.reset(limitKey)
 	}
 
 	sess, err := d.Sessions.Create(r.Context(), w, r, id, hasTOTP == 1)

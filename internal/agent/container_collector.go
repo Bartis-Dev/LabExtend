@@ -126,19 +126,7 @@ func (c *containerCollector) buildSnapshot(ctx context.Context, s containerSumma
 		health = insp.State.Health.Status
 	}
 
-	// Track restart count deltas so we can compute recent_restarts.
-	c.mu.Lock()
-	prev := c.lastCount[s.ID]
-	if insp.RestartCount > prev {
-		bumps := insp.RestartCount - prev
-		now := time.Now()
-		for i := 0; i < bumps; i++ {
-			c.restartLog[s.ID] = append(c.restartLog[s.ID], now)
-		}
-	}
-	c.lastCount[s.ID] = insp.RestartCount
-	recent := countRecent(c.restartLog[s.ID], time.Now(), 60*time.Second)
-	c.mu.Unlock()
+	recent := c.recordRestarts(s.ID, insp.RestartCount, time.Now())
 
 	snap := &pb.ContainerSnapshot{
 		ContainerId:    s.ID,
@@ -174,6 +162,24 @@ func (c *containerCollector) buildSnapshot(ctx context.Context, s containerSumma
 	}
 
 	return snap
+}
+
+// recordRestarts turns Docker's lifetime restart counter into restarts within
+// the last minute. The first sighting only sets the baseline: the counter
+// covers the container's whole life, and stamping all of it "now" made every
+// agent start report long-lived containers as crash-looping — a false
+// container_crashed alert on every rollout.
+func (c *containerCollector) recordRestarts(id string, count int, now time.Time) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	prev, seen := c.lastCount[id]
+	if seen && count > prev {
+		for i := 0; i < count-prev; i++ {
+			c.restartLog[id] = append(c.restartLog[id], now)
+		}
+	}
+	c.lastCount[id] = count
+	return countRecent(c.restartLog[id], now, 60*time.Second)
 }
 
 // pruneRestartLog drops timestamps older than 5 min so the map doesn't grow

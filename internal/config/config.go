@@ -58,6 +58,12 @@ type Config struct {
 	// Feature flags
 	AllowExec bool
 
+	// ShellImage is the image the agent starts for a browser terminal session.
+	// Empty means "the agent's own image", which is guaranteed to be present
+	// on the node and to ship nsenter — set this only to point at a different
+	// one.
+	ShellImage string
+
 	// Swarm service control. Default service force-updated by the "Restart
 	// Portainer Agent" button (leader-side, runs against the leader's manager
 	// socket). Override if the agent service has a different stack name.
@@ -76,6 +82,13 @@ type Config struct {
 	LogLevel     string
 	CORSOrigins  []string
 	DisableAudit bool
+
+	// TrustedProxies lists IPs/CIDRs whose X-Forwarded-For header may be
+	// believed. Empty (the default) means no peer is trusted and the TCP peer
+	// address is always used — set it to your reverse proxy when you run one,
+	// or every client can pick the IP that lands in the audit log and reset its
+	// own login rate limit at will.
+	TrustedProxies []string
 }
 
 // Load reads env vars, returning a populated Config or an error.
@@ -112,6 +125,7 @@ func Load() (*Config, error) {
 		TOTPKey:             os.Getenv("BPM_TOTP_KEY"),
 		TOTPIssuer:          stringEnv("BPM_TOTP_ISSUER", "labextend"),
 		AllowExec:           boolEnv("BPM_ALLOW_EXEC", false),
+		ShellImage:          os.Getenv("BPM_SHELL_IMAGE"),
 		PortainerService:    stringEnv("BPM_PORTAINER_SERVICE", "portainer_agent"),
 		FSMaxInlineBytes:    int64Env("BPM_FS_MAX_INLINE_BYTES", 5*1024*1024),
 		UploadMaxBytes:      int64Env("BPM_UPLOAD_MAX_BYTES", 2*1024*1024*1024),
@@ -120,6 +134,7 @@ func Load() (*Config, error) {
 		HeartbeatInterval:   durationEnv("BPM_HEARTBEAT_INTERVAL", 5*time.Second),
 		LogLevel:            stringEnv("BPM_LOG_LEVEL", "info"),
 		CORSOrigins:         splitCSV(os.Getenv("CORS_ORIGINS")),
+		TrustedProxies:      splitCSV(os.Getenv("BPM_TRUSTED_PROXIES")),
 		DisableAudit:        boolEnv("BPM_DISABLE_AUDIT", false),
 	}
 
@@ -145,7 +160,20 @@ func (c *Config) Role() Role {
 	return RoleInvalid
 }
 
+// GRPCMaxMsgBytes is the message limit on both ends of the agent channel.
+// grpc-go defaults to 4 MiB on receive — below the default inline file limit
+// and below one log batch after a leader outage (2000 lines of up to 4 KiB) —
+// and a message over it does not fail the one call, it kills the whole
+// stream: the node drops offline, loses its live state and reconnects.
+const GRPCMaxMsgBytes = 64 << 20
+
+// maxInlineBytesCap keeps a whole-file read comfortably inside one message.
+const maxInlineBytesCap = 32 << 20
+
 func (c *Config) validate() error {
+	if c.FSMaxInlineBytes <= 0 || c.FSMaxInlineBytes > maxInlineBytesCap {
+		return fmt.Errorf("BPM_FS_MAX_INLINE_BYTES must be between 1 and %d, got %d", maxInlineBytesCap, c.FSMaxInlineBytes)
+	}
 	switch c.Role() {
 	case RoleLeader:
 		// EnsureLeaderSecrets() in Load() auto-generates these on first boot.

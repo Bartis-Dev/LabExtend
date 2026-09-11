@@ -20,6 +20,9 @@ function Account() {
   const [setup, setSetup] = useState<TOTPSetup | null>(null);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+  // Enrolling and disabling both re-authenticate; the server rejects them
+  // without the current password.
+  const [pw, setPw] = useState('');
 
   const refresh = async () => {
     try {
@@ -32,9 +35,9 @@ function Account() {
   const begin = async () => {
     setBusy(true);
     try {
-      const s = await api<TOTPSetup>('/api/account/totp/begin', { method: 'POST' });
-      setSetup(s);
-    } catch (e) { alert('failed: ' + String(e)); }
+      const s = await api<TOTPSetup>('/api/account/totp/begin', { method: 'POST', body: { password: pw } });
+      setSetup(s); setPw('');
+    } catch (e: unknown) { alert((e as { body?: { error?: string } })?.body?.error ?? 'failed'); }
     finally { setBusy(false); }
   };
   const confirm = async () => {
@@ -49,10 +52,13 @@ function Account() {
   };
   const disable = async () => {
     if (!window.confirm('Disable 2FA?')) return;
+    setBusy(true);
     try {
-      await api('/api/account/totp/disable', { method: 'POST' });
+      await api('/api/account/totp/disable', { method: 'POST', body: { password: pw } });
+      setPw('');
       refresh();
-    } catch (e) { alert('failed: ' + String(e)); }
+    } catch (e: unknown) { alert((e as { body?: { error?: string } })?.body?.error ?? 'failed'); }
+    finally { setBusy(false); }
   };
 
   return (
@@ -62,9 +68,13 @@ function Account() {
       <section className="card mt-6">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">Two-factor authentication (TOTP)</h2>
         {!enabled && !setup && (
-          <div>
-            <p className="mb-3 text-sm text-zinc-500">Scan a QR with Google Authenticator / 1Password / Authy. Required on every login.</p>
-            <button onClick={begin} disabled={busy} className="btn-primary">Enable 2FA</button>
+          <div className="space-y-3">
+            <p className="text-sm text-zinc-500">Scan a QR with Google Authenticator / 1Password / Authy. Required on every login.</p>
+            <label className="block max-w-xs">
+              <span className="text-xs text-zinc-500">Confirm your current password</span>
+              <input className="input mt-1" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" />
+            </label>
+            <button onClick={begin} disabled={busy || !pw} className="btn-primary">Enable 2FA</button>
           </div>
         )}
         {setup && (
@@ -92,7 +102,11 @@ function Account() {
         {enabled && (
           <div className="space-y-3">
             <p className="text-sm text-emerald-700 dark:text-emerald-300">2FA is enabled on this account.</p>
-            <button onClick={disable} className="btn-danger">Disable 2FA</button>
+            <label className="block max-w-xs">
+              <span className="text-xs text-zinc-500">Confirm your current password</span>
+              <input className="input mt-1" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" />
+            </label>
+            <button onClick={disable} disabled={busy || !pw} className="btn-danger">Disable 2FA</button>
           </div>
         )}
       </section>

@@ -26,28 +26,38 @@ type MonitoringDeps struct {
 	Containers *containerStore
 	Logs       *logStore
 	Alerts     *AlertEngine
+	Swarm      *swarmTopology
 }
 
 // ─── nodes ──────────────────────────────────────────────────────────────────
 
 // NodeView is the JSON shape returned by /api/nodes.
 type NodeView struct {
-	ID           string            `json:"id"`
-	Hostname     string            `json:"hostname"`
-	OS           string            `json:"os"`
-	Arch         string            `json:"arch"`
-	Version      string            `json:"version"`
-	Status       string            `json:"status"` // online | offline
-	Labels       map[string]string `json:"labels"`
-	FirstSeen    int64             `json:"first_seen"`
-	LastSeen     int64             `json:"last_seen"`
-	Metrics      *MetricsSample    `json:"metrics,omitempty"`
+	ID       string `json:"id"`
+	Hostname string `json:"hostname"`
+	OS       string `json:"os"`
+	Arch     string `json:"arch"`
+	Version  string `json:"version"`
+	Status   string `json:"status"` // online | offline
+
+	// Labels comes from BPM_AGENT_LABELS in the agent's own environment.
+	// SwarmLabels comes from the Docker API (Spec.Labels) and is what
+	// placement constraints actually match — the two are unrelated, so they
+	// are reported separately rather than merged.
+	Labels      map[string]string `json:"labels"`
+	SwarmLabels map[string]string `json:"swarm_labels,omitempty"`
+	SwarmRole   string            `json:"swarm_role,omitempty"`
+	SwarmAvail  string            `json:"swarm_availability,omitempty"`
+
+	FirstSeen int64          `json:"first_seen"`
+	LastSeen  int64          `json:"last_seen"`
+	Metrics   *MetricsSample `json:"metrics,omitempty"`
 }
 
 // ListNodes returns every known node (live + historical) joined with current
 // metrics.
 func (d *MonitoringDeps) ListNodes(w http.ResponseWriter, r *http.Request) {
-	views, err := loadNodeViews(r.Context(), d.DB, d.Registry, d.Metrics)
+	views, err := loadNodeViews(r.Context(), d.DB, d.Registry, d.Metrics, d.Swarm)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -57,7 +67,7 @@ func (d *MonitoringDeps) ListNodes(w http.ResponseWriter, r *http.Request) {
 
 func (d *MonitoringDeps) GetNode(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	views, err := loadNodeViews(r.Context(), d.DB, d.Registry, d.Metrics)
+	views, err := loadNodeViews(r.Context(), d.DB, d.Registry, d.Metrics, d.Swarm)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -82,7 +92,8 @@ func (d *MonitoringDeps) GetNode(w http.ResponseWriter, r *http.Request) {
 // S3 backup objects are untouched).
 //
 // Body: {"older_than_hours": 24}  →  delete offline nodes idle ≥24h
-//       {"older_than_hours": 0}   →  delete ALL offline nodes
+//
+//	{"older_than_hours": 0}   →  delete ALL offline nodes
 func (d *MonitoringDeps) CleanupNodes(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		OlderThanHours int `json:"older_than_hours"`
@@ -241,7 +252,7 @@ func (d *MonitoringDeps) NodeHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 // loadNodeViews joins DB nodes with live registry + metrics state.
-func loadNodeViews(ctx context.Context, db *sql.DB, reg *AgentRegistry, metrics *metricsStore) ([]*NodeView, error) {
+func loadNodeViews(ctx context.Context, db *sql.DB, reg *AgentRegistry, metrics *metricsStore, swarm *swarmTopology) ([]*NodeView, error) {
 	if db == nil {
 		return nil, nil
 	}
@@ -273,6 +284,14 @@ func loadNodeViews(ctx context.Context, db *sql.DB, reg *AgentRegistry, metrics 
 		}
 		if m := metrics.Current(v.ID); m != nil {
 			v.Metrics = m
+		}
+		if sn := swarm.lookup(ctx, v.ID, v.Hostname); sn != nil {
+			v.SwarmLabels = sn.GetLabels()
+			v.SwarmRole = sn.GetRole()
+			v.SwarmAvail = sn.GetAvailability()
+			if sn.GetLeader() {
+				v.SwarmRole = "manager (leader)"
+			}
 		}
 		out = append(out, &v)
 	}

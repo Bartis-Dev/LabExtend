@@ -1,9 +1,11 @@
 package leader
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -137,17 +139,42 @@ func (d *UsersDeps) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Demoting or deactivating the only remaining admin leaves nobody who can
+	// reach /api/users — requireAdmin re-reads the flag per request — and the
+	// setup wizard is closed, so recovery means editing the SQLite file on the
+	// volume by hand. Delete already refused this; the other two paths did not.
+	if (req.IsAdmin != nil && !*req.IsAdmin) || (req.IsActive != nil && !*req.IsActive) {
+		last, err := isLastActiveAdmin(r.Context(), d.DB, id)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		if last {
+			writeErr(w, http.StatusBadRequest, errors.New("refusing to demote or deactivate the last admin"))
+			return
+		}
+	}
+
 	if req.IsAdmin != nil {
-		_, _ = d.DB.ExecContext(r.Context(),
-			`UPDATE users SET is_admin = ?, updated_at = ? WHERE id = ?`, boolI(*req.IsAdmin), now, id)
+		if _, err := d.DB.ExecContext(r.Context(),
+			`UPDATE users SET is_admin = ?, updated_at = ? WHERE id = ?`, boolI(*req.IsAdmin), now, id); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	if req.IsActive != nil {
-		_, _ = d.DB.ExecContext(r.Context(),
-			`UPDATE users SET is_active = ?, updated_at = ? WHERE id = ?`, boolI(*req.IsActive), now, id)
+		if _, err := d.DB.ExecContext(r.Context(),
+			`UPDATE users SET is_active = ?, updated_at = ? WHERE id = ?`, boolI(*req.IsActive), now, id); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
 		// If disabling, revoke all sessions.
 		if !*req.IsActive {
-			_, _ = d.DB.ExecContext(r.Context(),
-				`DELETE FROM sessions WHERE user_id = ?`, id)
+			if _, err := d.DB.ExecContext(r.Context(),
+				`DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
+				writeErr(w, http.StatusInternalServerError, err)
+				return
+			}
 		}
 	}
 	if req.NewPassword != "" {
@@ -160,24 +187,61 @@ func (d *UsersDeps) Update(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
-		_, _ = d.DB.ExecContext(r.Context(),
-			`UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`, hash, now, id)
+		// A discarded error here answered 200 while the password was unchanged.
+		if _, err := d.DB.ExecContext(r.Context(),
+			`UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`, hash, now, id); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		// An admin reset is usually a response to a compromise, so the old
+		// sessions must not survive it.
+		if _, err := d.DB.ExecContext(r.Context(),
+			`DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
+			slog.Error("revoking sessions after admin password reset failed", "user", id, "err", err)
+		}
 	}
 
 	d.Audit.Log(r.Context(), r, "user.update", "user", id, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// isLastActiveAdmin reports whether id is the only account left that can still
+// administer the instance. Phrased as "does anyone else qualify" rather than
+// counting and comparing, because the old form ignored the target's own
+// is_active flag: with one active and one deactivated admin it refused to
+// delete the deactivated one, and it silently allowed the delete whenever the
+// count query failed (the discarded Scan error left adminCount at 0).
+func isLastActiveAdmin(ctx context.Context, db *sql.DB, id string) (bool, error) {
+	var others int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM users
+		 WHERE is_admin = 1 AND is_active = 1 AND id != ?
+	`, id).Scan(&others); err != nil {
+		return false, err
+	}
+	if others > 0 {
+		return false, nil
+	}
+	var isAdmin, isActive int
+	err := db.QueryRowContext(ctx,
+		`SELECT is_admin, is_active FROM users WHERE id = ?`, id).Scan(&isAdmin, &isActive)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return isAdmin == 1 && isActive == 1, nil
+}
+
 func (d *UsersDeps) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	// Refuse to delete the last admin.
-	var adminCount int
-	_ = d.DB.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM users WHERE is_admin = 1 AND is_active = 1`).Scan(&adminCount)
-	var isAdmin int
-	_ = d.DB.QueryRowContext(r.Context(),
-		`SELECT is_admin FROM users WHERE id = ?`, id).Scan(&isAdmin)
-	if adminCount <= 1 && isAdmin == 1 {
+	last, err := isLastActiveAdmin(r.Context(), d.DB, id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if last {
 		writeErr(w, http.StatusBadRequest, errors.New("refusing to delete the last admin"))
 		return
 	}

@@ -76,6 +76,27 @@ func (h *Handler) HandleCommand(ctx context.Context, cmd *pb.Command) *pb.Comman
 		r, err := h.ServiceUpdate(ctx, op.ServiceUpdate)
 		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_ServiceUpdate{ServiceUpdate: r}})
 
+	case *pb.Command_SwarmNodes:
+		r, err := h.SwarmNodes(ctx, op.SwarmNodes)
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_SwarmNodes{SwarmNodes: r}})
+
+	// ── interactive terminal ──────────────────────────────────────────────
+	case *pb.Command_PtyOpen:
+		r, err := h.pty.Open(ctx, op.PtyOpen, h.monitor.eventEmitter())
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_PtyOpen{PtyOpen: r}})
+
+	case *pb.Command_PtyData:
+		err := h.pty.Write(op.PtyData.GetSessionId(), op.PtyData.GetData())
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_PtyData{PtyData: &pb.PtyDataResp{}}})
+
+	case *pb.Command_PtyResize:
+		err := h.pty.Resize(ctx, op.PtyResize.GetSessionId(), op.PtyResize.GetCols(), op.PtyResize.GetRows())
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_PtyResize{PtyResize: &pb.PtyResizeResp{}}})
+
+	case *pb.Command_PtyClose:
+		err := h.pty.Close(op.PtyClose.GetSessionId())
+		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_PtyClose{PtyClose: &pb.PtyCloseResp{}}})
+
 	// ── monitoring control ────────────────────────────────────────────────
 	case *pb.Command_EnableLogs:
 		h.monitor.SetLogsEnabled(op.EnableLogs.GetContainerId(), true)
