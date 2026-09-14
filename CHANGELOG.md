@@ -128,7 +128,9 @@
   inline CPU/RAM/disk/network bars, online first; one row per container. The
   container list groups by node by default and can group by stack or show
   everything flat, the choice is remembered, groups collapse, and a group header
-  carries the count of crash-looping containers inside it. Stack membership
+  carries the count of crash-looping containers inside it. Each node or stack is
+  its own bordered block with a prominent name, and the columns stay aligned
+  from block to block. Stack membership
   comes from the `com.docker.stack.namespace` / `com.docker.compose.project`
   labels the containers already carried.
 

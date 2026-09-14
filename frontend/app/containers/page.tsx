@@ -185,35 +185,17 @@ function Containers() {
           {items.length === 0 ? 'No containers reported yet.' : 'No containers match the current filter.'}
         </div>
       ) : (
-        <div className="card overflow-hidden p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm">
-              <thead className="border-b border-zinc-200 dark:border-zinc-800">
-                <tr>
-                  <th className="th">Container</th>
-                  <th className="th">Image</th>
-                  {groupBy !== 'node' && <th className="th">Node</th>}
-                  <th className="th">State</th>
-                  <th className="th text-right">CPU</th>
-                  <th className="th text-right">RAM</th>
-                  <th className="th text-right">Network</th>
-                  <th className="th text-right">Uptime</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
-                {groups.map((g) => (
-                  <GroupBlock
-                    key={g.key || 'flat'}
-                    groupBy={groupBy}
-                    label={g.label}
-                    rows={g.rows}
-                    collapsed={!!collapsed[g.key]}
-                    onToggle={() => setCollapsed((c) => ({ ...c, [g.key]: !c[g.key] }))}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div className="space-y-5">
+          {groups.map((g) => (
+            <GroupBlock
+              key={g.key || 'flat'}
+              groupBy={groupBy}
+              label={g.label}
+              rows={g.rows}
+              collapsed={!!collapsed[g.key]}
+              onToggle={() => setCollapsed((c) => ({ ...c, [g.key]: !c[g.key] }))}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -227,32 +209,59 @@ function GroupBlock({ groupBy, label, rows, collapsed, onToggle }: {
   collapsed: boolean;
   onToggle: () => void;
 }) {
-  const cols = groupBy !== 'node' ? 8 : 7;
+  const showNode = groupBy !== 'node';
   const problems = rows.filter((c) => c.crashed_loop).length;
 
   return (
-    <>
+    <section className="card overflow-hidden p-0">
       {groupBy !== 'none' && (
-        <tr className="bg-zinc-50/80 dark:bg-zinc-900/50">
-          <td colSpan={cols} className="px-3 py-1.5">
-            <button
-              onClick={onToggle}
-              aria-expanded={!collapsed}
-              className="flex w-full items-center gap-1.5 rounded text-left text-[11px] font-medium uppercase tracking-wide text-zinc-600 transition hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-zinc-400 dark:hover:text-zinc-100"
-            >
-              {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-              {groupBy === 'node' ? <Server className="h-3.5 w-3.5 text-zinc-400" /> : <Layers className="h-3.5 w-3.5 text-zinc-400" />}
-              <span className="font-mono normal-case">{label}</span>
-              <span className="font-normal text-zinc-400">{rows.length}</span>
-              {problems > 0 && <span className="badge-red ml-1 normal-case">{problems} crashed</span>}
-            </button>
-          </td>
-        </tr>
+        <button
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+          className={`flex w-full items-center gap-2 px-4 py-3 text-left transition hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent dark:hover:bg-zinc-800/40 ${collapsed ? '' : 'border-b border-zinc-200 dark:border-zinc-800'}`}
+        >
+          {collapsed ? <ChevronRight className="h-4 w-4 text-zinc-400" /> : <ChevronDown className="h-4 w-4 text-zinc-400" />}
+          {groupBy === 'node' ? <Server className="h-4 w-4 text-zinc-500" /> : <Layers className="h-4 w-4 text-zinc-500" />}
+          <h2 className="text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">{label}</h2>
+          <span className="badge-zinc">{rows.length}</span>
+          {problems > 0 && <span className="badge-red">{problems} crashed</span>}
+        </button>
       )}
-      {!collapsed && rows.map((c) => (
-        <ContainerRow key={c.node_id + c.container_id} c={c} showNode={groupBy !== 'node'} />
-      ))}
-    </>
+      {!collapsed && (
+        <div className="overflow-x-auto">
+          {/* Fixed layout with shared widths keeps the columns aligned from one block to the next. */}
+          <table className="w-full min-w-[900px] table-fixed text-sm">
+            <colgroup>
+              <col className="w-[22%]" />
+              <col className="w-[26%]" />
+              {showNode && <col className="w-[12%]" />}
+              <col className="w-[11%]" />
+              <col className="w-[7%]" />
+              <col className="w-[12%]" />
+              <col className="w-[10%]" />
+              <col className="w-[8%]" />
+            </colgroup>
+            <thead className="border-b border-zinc-100 dark:border-zinc-800/80">
+              <tr>
+                <th className="th">Container</th>
+                <th className="th">Image</th>
+                {showNode && <th className="th">Node</th>}
+                <th className="th">State</th>
+                <th className="th text-right">CPU</th>
+                <th className="th text-right">RAM</th>
+                <th className="th text-right">Network</th>
+                <th className="th text-right">Uptime</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+              {rows.map((c) => (
+                <ContainerRow key={c.node_id + c.container_id} c={c} showNode={showNode} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
