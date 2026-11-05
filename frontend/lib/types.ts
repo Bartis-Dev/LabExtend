@@ -130,3 +130,29 @@ export interface UserInfo {
   is_admin: boolean;
   csrf_token: string;
 }
+
+// ─── Web Analytics ──────────────────────────────────────────────────────────
+
+export interface WebHost {
+  host: string;
+  last_day: string;
+  pageviews_30d: number;
+}
+
+export interface WebCount {
+  value: string;
+  count: number;
+}
+
+export interface WebReport {
+  host: string;
+  range: string;
+  bucket: 'hour' | 'day';
+  totals: { requests: number; pageviews: number; visitors: number; bot_hits: number };
+  series: { ts: number; pageviews: number; visitors: number }[];
+  paths: WebCount[];
+  referrers: WebCount[];
+  browsers: WebCount[];
+  os: WebCount[];
+  status: WebCount[];
+}

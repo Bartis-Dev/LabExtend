@@ -89,6 +89,11 @@ type Config struct {
 	// or every client can pick the IP that lands in the audit log and reset its
 	// own login rate limit at will.
 	TrustedProxies []string
+
+	// Web Analytics (leader only): log lines of containers whose image name
+	// starts with AnalyticsImagePrefix are read as Traefik JSON access logs.
+	AnalyticsImagePrefix   string
+	AnalyticsRetentionDays int
 }
 
 // Load reads env vars, returning a populated Config or an error.
@@ -136,6 +141,9 @@ func Load() (*Config, error) {
 		CORSOrigins:         splitCSV(os.Getenv("CORS_ORIGINS")),
 		TrustedProxies:      splitCSV(os.Getenv("BPM_TRUSTED_PROXIES")),
 		DisableAudit:        boolEnv("BPM_DISABLE_AUDIT", false),
+
+		AnalyticsImagePrefix:   stringEnv("BPM_ANALYTICS_IMAGE_PREFIX", "traefik"),
+		AnalyticsRetentionDays: intEnv("BPM_ANALYTICS_RETENTION_DAYS", 400),
 	}
 
 	if c.AgentHostID == "" {

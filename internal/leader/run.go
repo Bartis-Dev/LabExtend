@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/Bartis-Dev/LabExtend/internal/auth"
 	"github.com/Bartis-Dev/LabExtend/internal/backup"
@@ -55,6 +56,18 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	sampleRetention := intEnv("BPM_SAMPLE_RETENTION_HOURS", 2)
 	logs := newLogStore(database, maxLogLines)
 	ptys := newPtyHub()
+	analytics := newWebAnalytics(database, containers.imageOf, cfg.AnalyticsImagePrefix, cfg.AnalyticsRetentionDays)
+	if err := analytics.Load(ctx); err != nil {
+		return fmt.Errorf("web analytics: %w", err)
+	}
+	// Registered after the DB close defer, so it runs before it.
+	defer func() {
+		fctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := analytics.Flush(fctx); err != nil {
+			slog.Warn("web analytics: final flush failed", "err", err)
+		}
+	}()
 	alerts := newAlertEngine(database, metrics, containers, registry, hub)
 	audit := newAuditLogger(database, cfg.DisableAudit)
 
@@ -75,6 +88,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	go metrics.RunPruneLoop(ctx, bucketRetention, sampleRetention)
 	go logs.RunRetentionLoop(ctx, logRetention)
 	go alerts.Run(ctx)
+	go analytics.Run(ctx, 30*time.Second)
 	go func() {
 		if err := backupScheduler.Run(ctx); err != nil {
 			slog.Warn("backup scheduler exited", "err", err)
@@ -84,7 +98,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	errs := make(chan error, 2)
 
 	go func() {
-		if err := startGRPCServer(ctx, cfg, registry, hub, database, metrics, containers, logs, ptys); err != nil {
+		if err := startGRPCServer(ctx, cfg, registry, hub, database, metrics, containers, logs, analytics, ptys); err != nil {
 			errs <- fmt.Errorf("grpc: %w", err)
 		}
 	}()
@@ -97,6 +111,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			Metrics:    metrics,
 			Containers: containers,
 			Logs:       logs,
+			Analytics:  analytics,
 			Ptys:       ptys,
 			Alerts:     alerts,
 			Audit:      audit,

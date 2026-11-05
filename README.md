@@ -16,6 +16,64 @@ A Docker Swarm-native infrastructure + monitoring tool. Single Go binary deploye
   browser reaches it over a WebSocket on the leader. Anyone who can reach this
   is root on that host — treat admin accounts accordingly and put 2FA on them.
 
+## Web Analytics
+
+Page-view statistics for every website behind Traefik, computed from Traefik's
+own JSON access log. Nothing is added to the websites: no script, no pixel, no
+third party. The page is **Web Analytics** in the sidebar.
+
+**Source.** The leader already receives every container's log lines. Lines from
+containers whose image name (the part after the last `/`) starts with
+`BPM_ANALYTICS_IMAGE_PREFIX` (default `traefik`) are parsed as access records.
+Traefik must log access as JSON to stdout and keep the `User-Agent` and
+`Referer` headers:
+
+```yaml
+command:
+  - --accesslog=true
+  - --accesslog.format=json
+  - --accesslog.fields.headers.names.User-Agent=keep
+  - --accesslog.fields.headers.names.Referer=keep
+```
+
+Traefik's own log lines, lines that are not JSON, and requests no router matched
+(scanners with made-up `Host` headers) or that a `@internal` router answered
+(entrypoint redirects, dashboard, ping) are skipped. Unparseable lines are
+counted, never logged one by one, and the count is returned by
+`GET /api/analytics/hosts`.
+
+**What it counts, per host (`RequestHost`, lower-cased, port stripped):**
+
+| Number | Meaning |
+|---|---|
+| Requests | every routed request, including assets and bots |
+| Page views | `GET`/`HEAD`, status 200-399, a path without a file extension (or `.html`), not under `/_next`, `/api`, `/static`, `/assets`, `/favicon`, `/robots.txt`, `/sitemap`, `/.well-known`, `/icon`, `/apple-icon`, `/opengraph-image` |
+| Bot hits | an empty User-Agent or one naming a crawler, monitor, preview fetcher or HTTP library; never in page views or visitors |
+| Visitors | distinct visitors per UTC day (see privacy); over several days the sum of the daily counts |
+
+Breakdowns per host and day: top pages, referrer domains (external only, the
+site itself excluded, `direct` without a referrer), browsers, operating systems
+and status classes, each capped at the top 50 once the day is over.
+
+**Privacy.** No IP address is written anywhere: not to the database, not to a
+log. A visitor is `sha256(day_salt || ClientHost || 0x00 || User-Agent)`, where
+`day_salt` is 32 random bytes per UTC day. On the first flush of a new day the
+previous day's salt and every hash of that day are deleted, and only the number
+of distinct hashes stays. The same person therefore cannot be recognised from
+one day to the next, not even by someone holding the database. Within a day the
+salt is stored so a leader restart does not count everyone twice.
+
+**Storage and retention.** Counts are aggregated in memory and written to SQLite
+every 30 seconds, so the page lags by up to that much. Daily totals and
+breakdowns are kept `BPM_ANALYTICS_RETENTION_DAYS` (default 400) days, hourly
+totals for the 24h chart 48 hours.
+
+**Limits to know.** The agent ships at most 200 log lines per second per
+container and drops the rest, so a Traefik serving more than that is
+undercounted. `ClientHost` is the address Traefik sees: behind a CDN or another
+proxy it is that proxy unless Traefik's `forwardedHeaders.trustedIPs` is set,
+and visitors are then undercounted.
+
 ## What's planned (phases 9–14)
 
 Filebrowser per-node, cron management, S3 browser, **backup engine** (the original headline), TOTP 2FA, admin user management, mTLS hardening.
@@ -72,6 +130,8 @@ UI receives delta-computed rates (bps) — the leader does the math, the browser
 | `BPM_TRUSTED_PROXIES` | — | Comma-separated IPs/CIDRs whose `X-Forwarded-For` is believed. Empty trusts nobody and uses the TCP peer address. Set it to your reverse proxy, never to a range reaching clients. |
 | `BPM_ALLOW_EXEC` | `false` | Enable generic ExecReq command (not recommended). |
 | `BPM_PORTAINER_SERVICE` | `portainer_agent` | Swarm service the sidebar "Restart Portainer" button force-updates (runs on the leader's manager socket). |
+| `BPM_ANALYTICS_IMAGE_PREFIX` | `traefik` | Web Analytics reads the access log of containers whose image name starts with this. |
+| `BPM_ANALYTICS_RETENTION_DAYS` | `400` | Days of daily Web Analytics totals and breakdowns to keep. |
 | `BPM_SHELL_IMAGE` | the agent's own image | Image the browser terminal's privileged `nsenter` helper container runs. The default is already on the node and ships `nsenter`; a replacement must do both. |
 
 ## Dev loop

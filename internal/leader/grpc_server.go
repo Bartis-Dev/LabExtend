@@ -144,6 +144,7 @@ type ManagerAgentServer struct {
 	metrics    *metricsStore
 	containers *containerStore
 	logs       *logStore
+	analytics  *webAnalytics
 	ptys       *ptyHub
 }
 
@@ -285,6 +286,9 @@ func (s *ManagerAgentServer) handleEvent(c *AgentConn, ev *pb.Event) {
 		if s.logs != nil {
 			s.logs.Apply(context.Background(), c.ID, k.LogBatch)
 		}
+		if s.analytics != nil {
+			s.analytics.Ingest(c.ID, k.LogBatch)
+		}
 	case *pb.Event_PtyOutput:
 		if s.ptys != nil {
 			s.ptys.deliver(k.PtyOutput)
@@ -340,7 +344,7 @@ func (s *ManagerAgentServer) upsertNode(ctx context.Context, c *AgentConn) error
 }
 
 // startGRPCServer binds and serves the gRPC listener until ctx is canceled.
-func startGRPCServer(ctx context.Context, cfg *config.Config, reg *AgentRegistry, hub *Hub, database *sql.DB, metrics *metricsStore, cnts *containerStore, logs *logStore, ptys *ptyHub) error {
+func startGRPCServer(ctx context.Context, cfg *config.Config, reg *AgentRegistry, hub *Hub, database *sql.DB, metrics *metricsStore, cnts *containerStore, logs *logStore, analytics *webAnalytics, ptys *ptyHub) error {
 	reg.SetHub(hub)
 	reg.SetMetrics(metrics)
 	reg.SetContainers(cnts)
@@ -389,6 +393,7 @@ func startGRPCServer(ctx context.Context, cfg *config.Config, reg *AgentRegistry
 		metrics:    metrics,
 		containers: cnts,
 		logs:       logs,
+		analytics:  analytics,
 		ptys:       ptys,
 	})
 

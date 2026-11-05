@@ -289,6 +289,17 @@ func (s *containerStore) All(ctx context.Context) ([]*ContainerView, error) {
 	return out, nil
 }
 
+// imageOf returns a container's image from memory only. It sits on the log
+// ingest path, so it must never fall back to SQLite the way Get does.
+func (s *containerStore) imageOf(nodeID, containerID string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if v, ok := s.state[key(nodeID, containerID)]; ok {
+		return v.Image
+	}
+	return ""
+}
+
 // Get returns the view for one specific container.
 func (s *containerStore) Get(ctx context.Context, nodeID, containerID string) *ContainerView {
 	s.mu.RLock()

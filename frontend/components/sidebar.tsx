@@ -6,13 +6,14 @@ import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import {
   Server, Boxes, Bell, Webhook, FolderOpen, Clock,
-  HardDrive, Database, LogOut, Users, ScrollText, UserCircle, RefreshCw,
+  HardDrive, Database, LogOut, Users, ScrollText, UserCircle, RefreshCw, ChartColumn,
 } from 'lucide-react';
 import { api, setCSRFToken, type ApiError } from '@/lib/api';
 
 const NAV = [
   { href: '/nodes',      label: 'Nodes',     icon: Server },
   { href: '/containers', label: 'Containers',icon: Boxes },
+  { href: '/analytics',  label: 'Web Analytics', icon: ChartColumn },
   { href: '/alerts',     label: 'Alerts',    icon: Bell },
   { href: '/webhooks',   label: 'Webhooks',  icon: Webhook },
   { href: '/files',      label: 'Files',     icon: FolderOpen },

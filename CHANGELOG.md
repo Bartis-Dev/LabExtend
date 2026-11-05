@@ -103,6 +103,18 @@
 
 ### Added
 
+- **Web Analytics: page views for every site behind Traefik, without a script
+  on the sites.** The leader reads the JSON access log of every container whose
+  image starts with `traefik` (`BPM_ANALYTICS_IMAGE_PREFIX`) from the log stream
+  it already receives, and counts per host: requests, page views, bot hits and
+  unique visitors, with top pages, referrer domains, browsers, operating systems
+  and status classes. No IP address is stored: a visitor is a SHA-256 of a
+  random per-day salt, the client address and the User-Agent, and the salt and
+  hashes of a day are deleted once it ends, keeping only the count. Daily totals
+  stay 400 days (`BPM_ANALYTICS_RETENTION_DAYS`), hourly ones 48 hours. Counts
+  are aggregated in memory and written every 30 seconds. Migration
+  `0007_web_analytics.sql`.
+
 - **A root shell on any node, in the browser.** Every online node has a
   terminal button that opens a full xterm.js session against the host itself —
   host mounts, host network, host processes — with no sshd, no key and no

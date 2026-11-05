@@ -27,6 +27,7 @@ type leaderDeps struct {
 	Metrics    *metricsStore
 	Containers *containerStore
 	Logs       *logStore
+	Analytics  *webAnalytics
 	Ptys       *ptyHub
 	Alerts     *AlertEngine
 	Audit      *AuditLogger
@@ -140,6 +141,11 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 			authed.Get("/containers/{node}/{id}", monDeps.GetContainer)
 			authed.Get("/containers/{node}/{id}/logs", monDeps.ContainerLogTail)
 			authed.Get("/containers/{node}/{id}/logs/stream", monDeps.ContainerLogStream)
+
+			// Read-only, aggregated and IP-free; same audience as the
+			// container logs it is computed from.
+			authed.Get("/analytics/hosts", analyticsHosts(deps.Analytics))
+			authed.Get("/analytics/report", analyticsReport(deps.Analytics))
 
 			authed.Get("/alert-rules", monDeps.ListAlertRules)
 			authed.Post("/alert-rules", monDeps.CreateAlertRule)
