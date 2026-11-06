@@ -69,16 +69,31 @@ func (c *containerCollector) sampleOnce(
 		return
 	}
 
-	snaps := make([]*pb.ContainerSnapshot, 0, len(summaries))
 	summaryMap := make(map[string]containerSummary, len(summaries))
-
-	for _, s := range summaries {
+	built := make([]*pb.ContainerSnapshot, len(summaries))
+	// Docker answers stats?stream=0 only after two samples, about a second
+	// each. One after another, the budget above covered three or four
+	// containers and every later one went unreported, so they run in parallel.
+	// ponytail: fixed width, a host with hundreds of containers can still run
+	// out of budget for stats (it is still reported, without fresh stats).
+	sem := make(chan struct{}, 16)
+	var wg sync.WaitGroup
+	for i, s := range summaries {
 		summaryMap[s.ID] = s
-		snap := c.buildSnapshot(sampleCtx, s)
-		if snap == nil {
-			continue
+		wg.Add(1)
+		go func(i int, s containerSummary) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			built[i] = c.buildSnapshot(ctx, sampleCtx, s)
+		}(i, s)
+	}
+	wg.Wait()
+	snaps := make([]*pb.ContainerSnapshot, 0, len(built))
+	for _, snap := range built {
+		if snap != nil {
+			snaps = append(snaps, snap)
 		}
-		snaps = append(snaps, snap)
 	}
 
 	if onSnapshot != nil {
@@ -105,8 +120,12 @@ func (c *containerCollector) sampleOnce(
 
 // buildSnapshot inspects one container and grabs a stats snapshot. Returns
 // nil if the container disappeared between list and inspect (race).
-func (c *containerCollector) buildSnapshot(ctx context.Context, s containerSummary) *pb.ContainerSnapshot {
-	insp, err := c.docker.Inspect(ctx, s.ID)
+// The inspect gets its own short deadline rather than the sample's, so a
+// container is never dropped only because the stats of others ate the budget.
+func (c *containerCollector) buildSnapshot(ctx, statsCtx context.Context, s containerSummary) *pb.ContainerSnapshot {
+	ictx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	insp, err := c.docker.Inspect(ictx, s.ID)
 	if err != nil {
 		return nil
 	}
@@ -146,7 +165,7 @@ func (c *containerCollector) buildSnapshot(ctx context.Context, s containerSumma
 
 	// Stats only for running containers (others return errors / zeros).
 	if insp.State.Status == "running" {
-		if st, err := c.docker.Stats(ctx, s.ID); err == nil {
+		if st, err := c.docker.Stats(statsCtx, s.ID); err == nil {
 			snap.CpuPercent = st.CPUPercent()
 			snap.MemUsedBytes = st.MemoryStats.Usage
 			if snap.MemLimitBytes == 0 {
