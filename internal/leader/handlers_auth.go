@@ -55,6 +55,11 @@ type AuthDeps struct {
 	// startHTTPServer.
 	LoginLimiter *attemptLimiter
 	TOTPLimiter  *attemptLimiter
+
+	// PasswordLoginDisabled is set only when BPM_PASSWORD_LOGIN=false and OIDC
+	// is enabled; SSOName names the provider in the refusal.
+	PasswordLoginDisabled bool
+	SSOName               string
 }
 
 // Verify2FA accepts a TOTP / recovery code on a session that's currently
@@ -225,6 +230,11 @@ type loginReq struct {
 // Login validates credentials, creates a session, and returns the user info.
 // Returns 401 on invalid credentials; never reveals whether the identifier exists.
 func (d *AuthDeps) Login(w http.ResponseWriter, r *http.Request) {
+	if d.PasswordLoginDisabled {
+		writeErr(w, http.StatusForbidden,
+			fmt.Errorf("password login is disabled on this instance; sign in with %s", d.SSOName))
+		return
+	}
 	var req loginReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)

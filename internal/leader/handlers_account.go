@@ -23,10 +23,11 @@ func (d *AccountDeps) TOTPStatus(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, nil)
 		return
 	}
-	enabled, enrolledAt := d.TOTP.Status(r.Context(), sess.UserID)
+	enabled, enrolledAt, left := d.TOTP.Status(r.Context(), sess.UserID)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":     enabled,
-		"enrolled_at": enrolledAt,
+		"enabled":                  enabled,
+		"enrolled_at":              enrolledAt,
+		"recovery_codes_remaining": left,
 	})
 }
 
@@ -128,6 +129,37 @@ func (d *AccountDeps) TOTPDisable(w http.ResponseWriter, r *http.Request) {
 	}
 	d.Audit.Log(r.Context(), r, "totp.disable", "user", emailString("", sess.UserID), nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// TOTPRegenerateRecovery replaces the recovery codes with a fresh set. Like
+// enrol/disable it re-authenticates: a stolen session must not be able to mint
+// itself a working second factor.
+func (d *AccountDeps) TOTPRegenerateRecovery(w http.ResponseWriter, r *http.Request) {
+	sess, _ := r.Context().Value(authCtxKey{}).(*auth.Session)
+	if sess == nil {
+		writeErr(w, http.StatusUnauthorized, nil)
+		return
+	}
+	var body passwordBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := d.reauth(r, sess.UserID, body.Password); err != nil {
+		writeErr(w, http.StatusUnauthorized, err)
+		return
+	}
+	codes, err := d.TOTP.RegenerateRecoveryCodes(r.Context(), sess.UserID)
+	if errors.Is(err, auth.ErrTOTPNotEnabled) {
+		writeErr(w, http.StatusConflict, err)
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	d.Audit.Log(r.Context(), r, "totp.recovery_regenerate", "user", emailString("", sess.UserID), nil)
+	writeJSON(w, http.StatusOK, map[string]any{"recovery_codes": codes})
 }
 
 // ChangePassword updates the user's own password after verifying the current one.

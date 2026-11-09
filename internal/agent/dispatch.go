@@ -21,38 +21,6 @@ func (h *Handler) HandleCommand(ctx context.Context, cmd *pb.Command) *pb.Comman
 		r, err := h.ListPath(ctx, op.ListPath)
 		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_ListPath{ListPath: r}})
 
-	case *pb.Command_Stat:
-		r, err := h.Stat(ctx, op.Stat)
-		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_Stat{Stat: r}})
-
-	case *pb.Command_ReadFile:
-		r, err := h.ReadFile(ctx, op.ReadFile)
-		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_ReadFile{ReadFile: r}})
-
-	case *pb.Command_WriteFile:
-		r, err := h.WriteFile(ctx, op.WriteFile)
-		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_WriteFile{WriteFile: r}})
-
-	case *pb.Command_Mkdir:
-		r, err := h.Mkdir(ctx, op.Mkdir)
-		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_Mkdir{Mkdir: r}})
-
-	case *pb.Command_Rename:
-		r, err := h.Rename(ctx, op.Rename)
-		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_Rename{Rename: r}})
-
-	case *pb.Command_Delete:
-		r, err := h.Delete(ctx, op.Delete)
-		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_Delete{Delete: r}})
-
-	case *pb.Command_Chown:
-		r, err := h.Chown(ctx, op.Chown)
-		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_Chown{Chown: r}})
-
-	case *pb.Command_LookupUser:
-		r, err := h.LookupUser(ctx, op.LookupUser)
-		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_LookupUser{LookupUser: r}})
-
 	// ── cron ──────────────────────────────────────────────────────────────
 	case *pb.Command_ListCron:
 		r, err := h.ListCron(ctx)
@@ -79,23 +47,6 @@ func (h *Handler) HandleCommand(ctx context.Context, cmd *pb.Command) *pb.Comman
 	case *pb.Command_SwarmNodes:
 		r, err := h.SwarmNodes(ctx, op.SwarmNodes)
 		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_SwarmNodes{SwarmNodes: r}})
-
-	// ── interactive terminal ──────────────────────────────────────────────
-	case *pb.Command_PtyOpen:
-		r, err := h.pty.Open(ctx, op.PtyOpen, h.monitor.eventEmitter())
-		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_PtyOpen{PtyOpen: r}})
-
-	case *pb.Command_PtyData:
-		err := h.pty.Write(op.PtyData.GetSessionId(), op.PtyData.GetData())
-		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_PtyData{PtyData: &pb.PtyDataResp{}}})
-
-	case *pb.Command_PtyResize:
-		err := h.pty.Resize(ctx, op.PtyResize.GetSessionId(), op.PtyResize.GetCols(), op.PtyResize.GetRows())
-		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_PtyResize{PtyResize: &pb.PtyResizeResp{}}})
-
-	case *pb.Command_PtyClose:
-		err := h.pty.Close(op.PtyClose.GetSessionId())
-		return wrap(err, &pb.CommandResult{Payload: &pb.CommandResult_PtyClose{PtyClose: &pb.PtyCloseResp{}}})
 
 	// ── monitoring control ────────────────────────────────────────────────
 	case *pb.Command_EnableLogs:

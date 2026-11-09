@@ -117,35 +117,67 @@ func (m *TOTPManager) FinishEnrollment(ctx context.Context, userID int64, code s
 	if err != nil {
 		return err
 	}
-	if !totp.Validate(code, secret) {
+	step, ok := matchStep(code, secret, time.Now())
+	if !ok {
 		return ErrInvalidCode
 	}
 	// Promote the pending enrollment. Guarded on pending_secret_enc so two
-	// concurrent confirmations cannot promote the same secret twice.
+	// concurrent confirmations cannot promote the same secret twice. The step is
+	// recorded so the confirming code cannot be reused for a login.
 	_, err = m.db.ExecContext(ctx, `
 		UPDATE totp_secrets
 		   SET secret_enc             = pending_secret_enc,
 		       recovery_codes         = pending_recovery_codes,
 		       enabled                = 1,
 		       enrolled_at            = ?,
+		       last_used_step         = ?,
 		       pending_secret_enc     = NULL,
 		       pending_recovery_codes = NULL
 		 WHERE user_id = ? AND pending_secret_enc IS NOT NULL
-	`, time.Now().Unix(), userID)
+	`, time.Now().Unix(), step, userID)
 	return err
 }
 
-// Verify checks a 6-digit code against the user's stored (decrypted) secret.
-// Accepts the current window (no skew — keep it simple, clocks should be NTP-synced).
+// Verify checks a 6-digit code against the user's stored (decrypted) secret,
+// allowing one step of clock skew either side. Each step is accepted once: a
+// code for a step at or before the last accepted one is rejected.
 func (m *TOTPManager) Verify(ctx context.Context, userID int64, code string) error {
 	secret, err := m.loadSecret(ctx, userID)
 	if err != nil {
 		return err
 	}
-	if totp.Validate(code, secret) {
-		return nil
+	step, ok := matchStep(code, secret, time.Now())
+	if !ok {
+		return ErrInvalidCode
 	}
-	return ErrInvalidCode
+	// Conditional update so two concurrent requests with the same code cannot
+	// both pass the check.
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE totp_secrets SET last_used_step = ? WHERE user_id = ? AND last_used_step < ?`,
+		step, userID, step)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrInvalidCode
+	}
+	return nil
+}
+
+// matchStep reports which 30s step (counter) in [now-1, now+1] code belongs to.
+func matchStep(code, secret string, now time.Time) (int64, bool) {
+	opts := totp.ValidateOpts{Period: 30, Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1}
+	cur := now.Unix() / 30
+	for _, step := range []int64{cur, cur - 1, cur + 1} {
+		want, err := totp.GenerateCodeCustom(secret, time.Unix(step*30, 0), opts)
+		if err != nil {
+			return 0, false
+		}
+		if subtle.ConstantTimeCompare([]byte(want), []byte(code)) == 1 {
+			return step, true
+		}
+	}
+	return 0, false
 }
 
 // VerifyRecoveryCode consumes one recovery code (marks used=true).
@@ -198,17 +230,46 @@ func (m *TOTPManager) Disable(ctx context.Context, userID int64) error {
 	return err
 }
 
-// Status reports whether the user has 2FA enabled.
-func (m *TOTPManager) Status(ctx context.Context, userID int64) (enabled bool, enrolledAt int64) {
+// Status reports whether the user has 2FA enabled and how many recovery codes
+// are still unused.
+func (m *TOTPManager) Status(ctx context.Context, userID int64) (enabled bool, enrolledAt int64, recoveryLeft int) {
 	var en int
 	var ea sql.NullInt64
+	var codesJSON string
 	_ = m.db.QueryRowContext(ctx,
-		`SELECT enabled, enrolled_at FROM totp_secrets WHERE user_id = ?`, userID,
-	).Scan(&en, &ea)
+		`SELECT enabled, enrolled_at, recovery_codes FROM totp_secrets WHERE user_id = ?`, userID,
+	).Scan(&en, &ea, &codesJSON)
 	if ea.Valid {
 		enrolledAt = ea.Int64
 	}
-	return en == 1, enrolledAt
+	var entries []recoveryEntry
+	_ = json.Unmarshal([]byte(codesJSON), &entries)
+	for _, e := range entries {
+		if !e.Used {
+			recoveryLeft++
+		}
+	}
+	return en == 1, enrolledAt, recoveryLeft
+}
+
+// RegenerateRecoveryCodes replaces the active recovery codes with 8 fresh ones;
+// every previous code, used or not, stops working.
+func (m *TOTPManager) RegenerateRecoveryCodes(ctx context.Context, userID int64) ([]string, error) {
+	codes := generateRecoveryCodes(8)
+	codesJSON, err := json.Marshal(toRecoveryEntries(codes))
+	if err != nil {
+		return nil, err
+	}
+	res, err := m.db.ExecContext(ctx,
+		`UPDATE totp_secrets SET recovery_codes = ? WHERE user_id = ? AND enabled = 1`,
+		string(codesJSON), userID)
+	if err != nil {
+		return nil, fmt.Errorf("persist: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrTOTPNotEnabled
+	}
+	return codes, nil
 }
 
 // loadSecret decrypts the stored secret.
@@ -305,5 +366,5 @@ func generateRecoveryCodes(n int) []string {
 // ErrInvalidCode signals an authentication failure on TOTP / recovery code.
 var ErrInvalidCode = errors.New("invalid 2fa code")
 
-// _ = otp.AlgorithmSHA1 ensures the otp import stays alive even if unused.
-var _ = otp.AlgorithmSHA1
+// ErrTOTPNotEnabled is returned for operations that need active 2FA.
+var ErrTOTPNotEnabled = errors.New("2fa is not enabled")

@@ -365,30 +365,6 @@ func (d *S3Deps) Objects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"objects": objs, "next": next})
 }
 
-func (d *S3Deps) DeleteObjects(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	bucket := chi.URLParam(r, "bucket")
-	var body struct {
-		Keys []string `json:"keys"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	c, err := d.clientFor(r, id)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	n, err := c.DeleteObjects(r.Context(), bucket, body.Keys)
-	if err != nil {
-		writeErr(w, http.StatusBadGateway, err)
-		return
-	}
-	d.Audit.Log(r.Context(), r, "s3.object.delete", "s3_bucket", bucket, map[string]any{"count": n})
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": n})
-}
-
 // ─── encryption + decode helpers ────────────────────────────────────────────
 
 // clientFor decrypts the row and returns a connected s3.Client.

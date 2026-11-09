@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, setCSRFToken } from '@/lib/api';
 import type { UserInfo } from '@/lib/types';
@@ -14,6 +14,22 @@ export default function LoginPage() {
   const [isRecovery, setIsRecovery] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sso, setSso] = useState<{ enabled: boolean; name: string; password_login: boolean } | null>(null);
+
+  useEffect(() => {
+    api<{ enabled: boolean; name: string; password_login: boolean }>('/api/auth/oidc/config')
+      .then(setSso)
+      .catch(() => setSso({ enabled: false, name: '', password_login: true }));
+    // A failed OIDC callback lands here with the reason in the query string.
+    const q = new URLSearchParams(window.location.search);
+    const err = q.get('oidc_error');
+    if (err) {
+      setError(err);
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, []);
+
+  const showPassword = !sso || sso.password_login || !sso.enabled;
 
   const onCreds = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,8 +75,25 @@ export default function LoginPage() {
       <h1 className="text-2xl font-semibold tracking-tight">Sign in</h1>
       <p className="mt-1 text-sm text-zinc-500">Access the LabExtend dashboard.</p>
 
-      {step === 'creds' ? (
-        <form onSubmit={onCreds} className="mt-6 space-y-3">
+      {step === 'creds' && sso?.enabled && (
+        <div className="mt-6 space-y-3">
+          {/* A plain link: the endpoint answers with a redirect to the provider. */}
+          <a href="/api/auth/oidc/login" className="btn-primary w-full">
+            Sign in with {sso.name}
+          </a>
+          {showPassword && (
+            <div className="flex items-center gap-3 text-xs text-zinc-400">
+              <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+              or use your password
+              <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+            </div>
+          )}
+          {!showPassword && error && <div role="alert" className="text-sm text-red-600">{error}</div>}
+        </div>
+      )}
+
+      {step === 'creds' ? (showPassword && (
+        <form onSubmit={onCreds} className={sso?.enabled ? 'mt-3 space-y-3' : 'mt-6 space-y-3'}>
           <label className="block">
             <span className="text-xs text-zinc-500">Email or username</span>
             <input
@@ -82,7 +115,7 @@ export default function LoginPage() {
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
-      ) : (
+      )) : (
         <form onSubmit={on2FA} className="mt-6 space-y-3">
           <label className="block">
             <span className="text-xs text-zinc-500">{isRecovery ? 'Recovery code' : '6-digit TOTP code'}</span>

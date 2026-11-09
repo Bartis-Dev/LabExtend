@@ -34,7 +34,7 @@ function Audit() {
     <div className="mx-auto max-w-7xl px-6 py-8">
       <header className="mb-4 flex items-end justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Audit log</h1>
-        <input className="input w-56" placeholder="filter action (e.g. file.chown)" value={action} onChange={(e) => setAction(e.target.value)} />
+        <input className="input w-56" placeholder="filter action (e.g. node_path.create)" value={action} onChange={(e) => setAction(e.target.value)} />
       </header>
       <div className="card overflow-hidden p-0">
         <table className="w-full text-sm">

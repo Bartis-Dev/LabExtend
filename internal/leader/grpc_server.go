@@ -145,7 +145,6 @@ type ManagerAgentServer struct {
 	containers *containerStore
 	logs       *logStore
 	analytics  *webAnalytics
-	ptys       *ptyHub
 }
 
 // Channel handles a single agent's persistent bidi stream.
@@ -289,10 +288,6 @@ func (s *ManagerAgentServer) handleEvent(c *AgentConn, ev *pb.Event) {
 		if s.analytics != nil {
 			s.analytics.Ingest(c.ID, k.LogBatch)
 		}
-	case *pb.Event_PtyOutput:
-		if s.ptys != nil {
-			s.ptys.deliver(k.PtyOutput)
-		}
 	case *pb.Event_BackupProgress, *pb.Event_BackupLog, *pb.Event_CronChanged:
 		// Routed in later phases.
 		slog.Debug("event from agent", "agent_id", c.ID, "kind", fmt.Sprintf("%T", k))
@@ -344,7 +339,7 @@ func (s *ManagerAgentServer) upsertNode(ctx context.Context, c *AgentConn) error
 }
 
 // startGRPCServer binds and serves the gRPC listener until ctx is canceled.
-func startGRPCServer(ctx context.Context, cfg *config.Config, reg *AgentRegistry, hub *Hub, database *sql.DB, metrics *metricsStore, cnts *containerStore, logs *logStore, analytics *webAnalytics, ptys *ptyHub) error {
+func startGRPCServer(ctx context.Context, cfg *config.Config, reg *AgentRegistry, hub *Hub, database *sql.DB, metrics *metricsStore, cnts *containerStore, logs *logStore, analytics *webAnalytics) error {
 	reg.SetHub(hub)
 	reg.SetMetrics(metrics)
 	reg.SetContainers(cnts)
@@ -394,7 +389,6 @@ func startGRPCServer(ctx context.Context, cfg *config.Config, reg *AgentRegistry
 		containers: cnts,
 		logs:       logs,
 		analytics:  analytics,
-		ptys:       ptys,
 	})
 
 	go func() {

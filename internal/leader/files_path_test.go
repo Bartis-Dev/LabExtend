@@ -32,7 +32,4 @@ func TestRemotePathsAreCleanedPOSIXStyle(t *testing.T) {
 	if gopath.Clean("/") != "/" {
 		t.Fatal(`Clean("/") must stay "/" for the virtual full-filesystem root`)
 	}
-	if gopath.Dir("/srv/data/file.txt") != "/srv/data" {
-		t.Error("Dir must return the POSIX parent for the suggest-owner lookup")
-	}
 }

@@ -10,7 +10,7 @@ import { fmtBytes, fmtBps, fmtPct, fmtRelative, fmtUptime } from '@/lib/format';
 import { AuthShell } from '@/components/auth-shell';
 import { Modal } from '@/components/modal';
 import { LabelChips } from '@/components/label-chips';
-import { SquareTerminal, Trash2 } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 
 export default function NodesPage() {
   return (
@@ -100,14 +100,13 @@ function Nodes() {
                 <th className="th w-[17%]">Disk</th>
                 <th className="th w-[13%]">Network</th>
                 <th className="th text-right">Uptime</th>
-                <th className="th w-10 text-right"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
               {sorted.map((n) => <NodeRow key={n.id} node={n} />)}
               {nodes.length === 0 && !err && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-12 text-center text-sm text-zinc-500">
+                  <td colSpan={7} className="px-3 py-12 text-center text-sm text-zinc-500">
                     No nodes yet. Start an agent with <code className="font-mono text-xs">LEADER_ADDR</code> pointing here.
                   </td>
                 </tr>
@@ -183,22 +182,6 @@ function NodeRow({ node }: { node: NodeView }) {
 
       <td className="td text-right text-[11px] text-zinc-500">
         {offline ? <>last seen<br />{fmtRelative(node.last_seen)}</> : (m?.uptime_seconds ? fmtUptime(m.uptime_seconds) : '—')}
-      </td>
-
-      <td className="td text-right">
-        {!offline && (
-          <Link
-            href={`/terminal?node=${encodeURIComponent(node.id)}`}
-            onClick={(e) => e.stopPropagation()}
-            title="Open a root shell on this host"
-            aria-label={`Open a terminal on ${node.hostname}`}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition
-                       hover:bg-zinc-100 hover:text-accent focus:outline-none focus-visible:ring-2
-                       focus-visible:ring-accent dark:hover:bg-zinc-800"
-          >
-            <SquareTerminal className="h-4 w-4" />
-          </Link>
-        )}
       </td>
     </tr>
   );

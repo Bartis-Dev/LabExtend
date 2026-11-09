@@ -86,7 +86,7 @@ type AuditRow struct {
 
 // List returns the audit log with optional filters.
 //
-//	?limit=100  ?action=file.chown  ?target_kind=file
+//	?limit=100  ?action=node_path.create  ?target_kind=file
 func (d *AuditDeps) List(w http.ResponseWriter, r *http.Request) {
 	limit := 200
 	if v := r.URL.Query().Get("limit"); v != "" {

@@ -55,23 +55,24 @@ type Config struct {
 	TOTPKey    string // 32-byte hex for AES-GCM of TOTP secrets
 	TOTPIssuer string
 
+	// Optional OIDC login (e.g. Pocket ID). Enabled only when issuer, client
+	// ID and client secret are all set; see OIDCEnabled.
+	OIDCIssuer       string
+	OIDCClientID     string
+	OIDCClientSecret string // BPM_OIDC_CLIENT_SECRET or BPM_OIDC_CLIENT_SECRET_FILE
+	OIDCName         string
+
+	// PasswordLogin=false turns off the password form, but only takes effect
+	// while OIDC is enabled, so a misconfigured instance cannot lock everyone out.
+	PasswordLogin bool
+
 	// Feature flags
 	AllowExec bool
-
-	// ShellImage is the image the agent starts for a browser terminal session.
-	// Empty means "the agent's own image", which is guaranteed to be present
-	// on the node and to ship nsenter — set this only to point at a different
-	// one.
-	ShellImage string
 
 	// Swarm service control. Default service force-updated by the "Restart
 	// Portainer Agent" button (leader-side, runs against the leader's manager
 	// socket). Override if the agent service has a different stack name.
 	PortainerService string
-
-	// Limits
-	FSMaxInlineBytes int64
-	UploadMaxBytes   int64
 
 	// Agent
 	AgentHostID       string
@@ -112,6 +113,11 @@ func Load() (*Config, error) {
 		}
 	}
 
+	oidcSecret, err := fileEnv("BPM_OIDC_CLIENT_SECRET")
+	if err != nil {
+		return nil, err
+	}
+
 	c := &Config{
 		LeaderMode:          leaderMode,
 		LeaderAddr:          os.Getenv("LEADER_ADDR"),
@@ -129,11 +135,13 @@ func Load() (*Config, error) {
 		SecretsKey:          os.Getenv("BPM_SECRETS_KEY"),
 		TOTPKey:             os.Getenv("BPM_TOTP_KEY"),
 		TOTPIssuer:          stringEnv("BPM_TOTP_ISSUER", "labextend"),
+		OIDCIssuer:          strings.TrimSpace(os.Getenv("BPM_OIDC_ISSUER")),
+		OIDCClientID:        strings.TrimSpace(os.Getenv("BPM_OIDC_CLIENT_ID")),
+		OIDCClientSecret:    oidcSecret,
+		OIDCName:            stringEnv("BPM_OIDC_NAME", "Pocket ID"),
+		PasswordLogin:       boolEnv("BPM_PASSWORD_LOGIN", true),
 		AllowExec:           boolEnv("BPM_ALLOW_EXEC", false),
-		ShellImage:          os.Getenv("BPM_SHELL_IMAGE"),
 		PortainerService:    stringEnv("BPM_PORTAINER_SERVICE", "portainer_agent"),
-		FSMaxInlineBytes:    int64Env("BPM_FS_MAX_INLINE_BYTES", 5*1024*1024),
-		UploadMaxBytes:      int64Env("BPM_UPLOAD_MAX_BYTES", 2*1024*1024*1024),
 		AgentHostID:         os.Getenv("BPM_AGENT_HOST_ID"),
 		AgentLabels:         parseLabels(os.Getenv("BPM_AGENT_LABELS")),
 		HeartbeatInterval:   durationEnv("BPM_HEARTBEAT_INTERVAL", 5*time.Second),
@@ -157,6 +165,11 @@ func Load() (*Config, error) {
 	return c, nil
 }
 
+// OIDCEnabled reports whether OIDC login is fully configured.
+func (c *Config) OIDCEnabled() bool {
+	return c.OIDCIssuer != "" && c.OIDCClientID != "" && c.OIDCClientSecret != ""
+}
+
 // Role returns the resolved role based on env hints.
 func (c *Config) Role() Role {
 	if c.LeaderMode {
@@ -169,19 +182,12 @@ func (c *Config) Role() Role {
 }
 
 // GRPCMaxMsgBytes is the message limit on both ends of the agent channel.
-// grpc-go defaults to 4 MiB on receive — below the default inline file limit
-// and below one log batch after a leader outage (2000 lines of up to 4 KiB) —
+// grpc-go defaults to 4 MiB on receive — below one log batch after a leader outage (2000 lines of up to 4 KiB) —
 // and a message over it does not fail the one call, it kills the whole
 // stream: the node drops offline, loses its live state and reconnects.
 const GRPCMaxMsgBytes = 64 << 20
 
-// maxInlineBytesCap keeps a whole-file read comfortably inside one message.
-const maxInlineBytesCap = 32 << 20
-
 func (c *Config) validate() error {
-	if c.FSMaxInlineBytes <= 0 || c.FSMaxInlineBytes > maxInlineBytesCap {
-		return fmt.Errorf("BPM_FS_MAX_INLINE_BYTES must be between 1 and %d, got %d", maxInlineBytesCap, c.FSMaxInlineBytes)
-	}
 	switch c.Role() {
 	case RoleLeader:
 		// EnsureLeaderSecrets() in Load() auto-generates these on first boot.
@@ -214,6 +220,23 @@ func stringEnv(k, def string) string {
 	return def
 }
 
+// fileEnv returns $k, or else the trimmed contents of the file named by
+// $k_FILE (the Docker Swarm secret convention).
+func fileEnv(k string) (string, error) {
+	if v := os.Getenv(k); v != "" {
+		return v, nil
+	}
+	path := os.Getenv(k + "_FILE")
+	if path == "" {
+		return "", nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s_FILE: %w", k, err)
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
 func boolEnv(k string, def bool) bool {
 	v := strings.ToLower(os.Getenv(k))
 	if v == "" {
@@ -225,15 +248,6 @@ func boolEnv(k string, def bool) bool {
 func intEnv(k string, def int) int {
 	if v := os.Getenv(k); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return def
-}
-
-func int64Env(k string, def int64) int64 {
-	if v := os.Getenv(k); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			return n
 		}
 	}

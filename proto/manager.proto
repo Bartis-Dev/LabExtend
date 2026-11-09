@@ -6,13 +6,9 @@ option go_package = "github.com/Bartis-Dev/LabExtend/internal/grpc/pb;pb";
 
 // ManagerAgent is the single gRPC service exposed by the leader. Agents open
 // the bidirectional Channel stream on startup and keep it open for the
-// lifetime of the process. Large byte payloads (file download/upload) use
-// dedicated streaming RPCs so they don't block the control channel.
+// lifetime of the process.
 service ManagerAgent {
   rpc Channel(stream AgentMessage) returns (stream LeaderMessage);
-
-  rpc DownloadFile(DownloadRequest) returns (stream FileChunk);
-  rpc UploadFile(stream UploadChunk) returns (UploadResult);
 }
 
 // ─── envelopes ──────────────────────────────────────────────────────────────
@@ -75,16 +71,11 @@ message Ping { int64 ts_ms = 1; }
 // ─── commands (leader → agent) ──────────────────────────────────────────────
 
 message Command {
+  // Former file-write ops (2-9) and terminal ops (34-37). Never reuse: during
+  // a rolling update an old peer would decode them as the removed commands.
+  reserved 2 to 9, 34 to 37;
   oneof op {
     ListPathReq     list_path     = 1;
-    StatReq         stat          = 2;
-    ReadFileReq     read_file     = 3;
-    WriteFileReq    write_file    = 4;
-    MkdirReq        mkdir         = 5;
-    RenameReq       rename        = 6;
-    DeleteReq       delete        = 7;
-    ChownReq        chown         = 8;
-    LookupUserReq   lookup_user   = 9;
 
     ListCronReq     list_cron     = 20;
     ApplyCronReq    apply_cron    = 21;
@@ -98,12 +89,6 @@ message Command {
     // Swarm topology (manager socket only): node roles + Spec.Labels.
     SwarmNodesReq    swarm_nodes    = 33;
 
-    // Interactive host shell (see PtyOpenReq).
-    PtyOpenReq       pty_open       = 34;
-    PtyDataReq       pty_data       = 35;
-    PtyResizeReq     pty_resize     = 36;
-    PtyCloseReq      pty_close      = 37;
-
     // Monitoring control (rarely used; agents stream proactively).
     EnableLogsReq   enable_logs   = 50;
     DisableLogsReq  disable_logs  = 51;
@@ -115,16 +100,9 @@ message Command {
 message CommandResult {
   bool   ok    = 1;
   string error = 2;
+  reserved 11 to 18, 44 to 47;
   oneof payload {
     ListPathResp     list_path     = 10;
-    StatResp         stat          = 11;
-    ReadFileResp     read_file     = 12;
-    WriteFileResp    write_file    = 13;
-    MkdirResp        mkdir         = 14;
-    RenameResp       rename        = 15;
-    DeleteResp       delete        = 16;
-    ChownResp        chown         = 17;
-    LookupUserResp   lookup_user   = 18;
 
     ListCronResp     list_cron     = 30;
     ApplyCronResp    apply_cron    = 31;
@@ -134,11 +112,6 @@ message CommandResult {
 
     ServiceUpdateResp service_update = 42;
     SwarmNodesResp    swarm_nodes    = 43;
-
-    PtyOpenResp       pty_open       = 44;
-    PtyDataResp       pty_data       = 45;
-    PtyResizeResp     pty_resize     = 46;
-    PtyCloseResp      pty_close      = 47;
 
     EnableLogsResp   enable_logs   = 60;
     DisableLogsResp  disable_logs  = 61;
@@ -150,13 +123,13 @@ message CommandResult {
 // ─── async events (agent → leader, unsolicited) ─────────────────────────────
 
 message Event {
+  reserved 6; // former terminal output
   oneof kind {
     BackupProgress  backup_progress  = 1;
     BackupLogLine   backup_log       = 2;
     CronChanged     cron_changed     = 3;
     ContainerReport container_report = 4;  // every ~5s
     LogBatch        log_batch        = 5;  // every ~1-2s when logs available
-    PtyOutput       pty_output       = 6;  // terminal bytes, as they arrive
   }
 }
 
@@ -248,50 +221,6 @@ message FileEntry {
 
 message ListPathResp { repeated FileEntry entries = 1; }
 
-message StatReq  { string path = 1; }
-message StatResp { FileEntry entry = 1; }
-
-message ReadFileReq  { string path = 1; uint32 max_bytes = 2; }
-message ReadFileResp { bytes data = 1; bool truncated = 2; }
-
-message WriteFileReq {
-  string path                = 1;
-  bytes  data                = 2;
-  uint32 mode                = 3;
-  bool   apply_default_owner = 4;
-}
-message WriteFileResp { uint64 bytes_written = 1; }
-
-message MkdirReq {
-  string path                = 1;
-  uint32 mode                = 2;
-  bool   apply_default_owner = 3;
-  bool   parents             = 4;
-}
-message MkdirResp {}
-
-message RenameReq  { string from = 1; string to = 2; }
-message RenameResp {}
-
-message DeleteReq  { string path = 1; bool recursive = 2; }
-message DeleteResp {}
-
-message ChownReq {
-  string path      = 1;
-  uint32 uid       = 2;
-  uint32 gid       = 3;
-  bool   recursive = 4;
-}
-message ChownResp { uint64 changed_count = 1; }
-
-message LookupUserReq  { string name = 1; }
-message LookupUserResp {
-  string name = 1;
-  uint32 uid  = 2;
-  uint32 gid  = 3;
-  string home = 4;
-}
-
 // ─── swarm topology ─────────────────────────────────────────────
 
 // SwarmNodesReq asks an agent that sits on a manager node for the cluster's
@@ -308,51 +237,6 @@ message SwarmNode {
   string state        = 5;  // ready | down | disconnected
   bool   leader       = 6;  // raft leader among the managers
   map<string,string> labels = 7;  // Spec.Labels — what placement constraints match
-}
-
-// ─── interactive terminal ───────────────────────────────────────────────────
-
-// PtyOpenReq asks the agent for a root shell ON THE HOST. The agent has no
-// host privileges itself, so it uses the Docker socket it already holds to
-// start a short-lived privileged helper container that nsenters into PID 1's
-// namespaces. That container IS the session: closing it ends the shell.
-//
-// Terminal traffic does not fit the request/response shape in both directions:
-// input arrives as PtyDataReq commands, output comes back as unsolicited
-// PtyOutput events keyed by the same session_id.
-message PtyOpenReq {
-  uint32 cols = 1;
-  uint32 rows = 2;
-  // max_seconds caps the session's lifetime; the agent kills the helper
-  // container when it expires even if the browser never disconnects.
-  uint32 max_seconds = 3;
-  // session_id is assigned by the LEADER, not the agent: the leader has to
-  // subscribe to the output stream before the shell produces its first prompt,
-  // and it cannot do that for an id it does not know yet.
-  string session_id = 4;
-}
-message PtyOpenResp {
-  string session_id   = 1;
-  string container_id = 2;
-  string image        = 3;
-}
-
-message PtyDataReq  { string session_id = 1; bytes data = 2; }
-message PtyDataResp {}
-
-message PtyResizeReq  { string session_id = 1; uint32 cols = 2; uint32 rows = 3; }
-message PtyResizeResp {}
-
-message PtyCloseReq  { string session_id = 1; }
-message PtyCloseResp {}
-
-// PtyOutput carries raw terminal bytes (Tty=true, so no docker demux header).
-// The final message for a session has closed=true and an optional reason.
-message PtyOutput {
-  string session_id = 1;
-  bytes  data       = 2;
-  bool   closed     = 3;
-  string reason     = 4;
 }
 
 // ─── cron ───────────────────────────────────────────────────────────────────
@@ -413,27 +297,6 @@ message RunBackupResp {
 
 message CancelBackupReq  { string run_id = 1; }
 message CancelBackupResp {}
-
-// ─── chunked file IO ────────────────────────────────────────────────────────
-
-message DownloadRequest { string path = 1; uint32 chunk_size = 2; }
-message FileChunk       { bytes data = 1; bool last = 2; }
-
-message UploadChunk {
-  oneof kind {
-    UploadStart start = 1;
-    bytes       data  = 2;
-  }
-}
-
-message UploadStart {
-  string path                = 1;
-  uint32 mode                = 2;
-  bool   apply_default_owner = 3;
-  bool   overwrite           = 4;
-}
-
-message UploadResult { uint64 bytes_written = 1; }
 
 // ─── swarm service control ──────────────────────────────────────────────────
 

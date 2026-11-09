@@ -569,24 +569,12 @@ type Command struct {
 	// Types that are valid to be assigned to Op:
 	//
 	//	*Command_ListPath
-	//	*Command_Stat
-	//	*Command_ReadFile
-	//	*Command_WriteFile
-	//	*Command_Mkdir
-	//	*Command_Rename
-	//	*Command_Delete
-	//	*Command_Chown
-	//	*Command_LookupUser
 	//	*Command_ListCron
 	//	*Command_ApplyCron
 	//	*Command_RunBackup
 	//	*Command_CancelBackup
 	//	*Command_ServiceUpdate
 	//	*Command_SwarmNodes
-	//	*Command_PtyOpen
-	//	*Command_PtyData
-	//	*Command_PtyResize
-	//	*Command_PtyClose
 	//	*Command_EnableLogs
 	//	*Command_DisableLogs
 	//	*Command_Exec
@@ -636,78 +624,6 @@ func (x *Command) GetListPath() *ListPathReq {
 	if x != nil {
 		if x, ok := x.Op.(*Command_ListPath); ok {
 			return x.ListPath
-		}
-	}
-	return nil
-}
-
-func (x *Command) GetStat() *StatReq {
-	if x != nil {
-		if x, ok := x.Op.(*Command_Stat); ok {
-			return x.Stat
-		}
-	}
-	return nil
-}
-
-func (x *Command) GetReadFile() *ReadFileReq {
-	if x != nil {
-		if x, ok := x.Op.(*Command_ReadFile); ok {
-			return x.ReadFile
-		}
-	}
-	return nil
-}
-
-func (x *Command) GetWriteFile() *WriteFileReq {
-	if x != nil {
-		if x, ok := x.Op.(*Command_WriteFile); ok {
-			return x.WriteFile
-		}
-	}
-	return nil
-}
-
-func (x *Command) GetMkdir() *MkdirReq {
-	if x != nil {
-		if x, ok := x.Op.(*Command_Mkdir); ok {
-			return x.Mkdir
-		}
-	}
-	return nil
-}
-
-func (x *Command) GetRename() *RenameReq {
-	if x != nil {
-		if x, ok := x.Op.(*Command_Rename); ok {
-			return x.Rename
-		}
-	}
-	return nil
-}
-
-func (x *Command) GetDelete() *DeleteReq {
-	if x != nil {
-		if x, ok := x.Op.(*Command_Delete); ok {
-			return x.Delete
-		}
-	}
-	return nil
-}
-
-func (x *Command) GetChown() *ChownReq {
-	if x != nil {
-		if x, ok := x.Op.(*Command_Chown); ok {
-			return x.Chown
-		}
-	}
-	return nil
-}
-
-func (x *Command) GetLookupUser() *LookupUserReq {
-	if x != nil {
-		if x, ok := x.Op.(*Command_LookupUser); ok {
-			return x.LookupUser
 		}
 	}
 	return nil
@@ -767,42 +683,6 @@ func (x *Command) GetSwarmNodes() *SwarmNodesReq {
 	return nil
 }
 
-func (x *Command) GetPtyOpen() *PtyOpenReq {
-	if x != nil {
-		if x, ok := x.Op.(*Command_PtyOpen); ok {
-			return x.PtyOpen
-		}
-	}
-	return nil
-}
-
-func (x *Command) GetPtyData() *PtyDataReq {
-	if x != nil {
-		if x, ok := x.Op.(*Command_PtyData); ok {
-			return x.PtyData
-		}
-	}
-	return nil
-}
-
-func (x *Command) GetPtyResize() *PtyResizeReq {
-	if x != nil {
-		if x, ok := x.Op.(*Command_PtyResize); ok {
-			return x.PtyResize
-		}
-	}
-	return nil
-}
-
-func (x *Command) GetPtyClose() *PtyCloseReq {
-	if x != nil {
-		if x, ok := x.Op.(*Command_PtyClose); ok {
-			return x.PtyClose
-		}
-	}
-	return nil
-}
-
 func (x *Command) GetEnableLogs() *EnableLogsReq {
 	if x != nil {
 		if x, ok := x.Op.(*Command_EnableLogs); ok {
@@ -838,38 +718,6 @@ type Command_ListPath struct {
 	ListPath *ListPathReq `protobuf:"bytes,1,opt,name=list_path,json=listPath,proto3,oneof"`
 }
 
-type Command_Stat struct {
-	Stat *StatReq `protobuf:"bytes,2,opt,name=stat,proto3,oneof"`
-}
-
-type Command_ReadFile struct {
-	ReadFile *ReadFileReq `protobuf:"bytes,3,opt,name=read_file,json=readFile,proto3,oneof"`
-}
-
-type Command_WriteFile struct {
-	WriteFile *WriteFileReq `protobuf:"bytes,4,opt,name=write_file,json=writeFile,proto3,oneof"`
-}
-
-type Command_Mkdir struct {
-	Mkdir *MkdirReq `protobuf:"bytes,5,opt,name=mkdir,proto3,oneof"`
-}
-
-type Command_Rename struct {
-	Rename *RenameReq `protobuf:"bytes,6,opt,name=rename,proto3,oneof"`
-}
-
-type Command_Delete struct {
-	Delete *DeleteReq `protobuf:"bytes,7,opt,name=delete,proto3,oneof"`
-}
-
-type Command_Chown struct {
-	Chown *ChownReq `protobuf:"bytes,8,opt,name=chown,proto3,oneof"`
-}
-
-type Command_LookupUser struct {
-	LookupUser *LookupUserReq `protobuf:"bytes,9,opt,name=lookup_user,json=lookupUser,proto3,oneof"`
-}
-
 type Command_ListCron struct {
 	ListCron *ListCronReq `protobuf:"bytes,20,opt,name=list_cron,json=listCron,proto3,oneof"`
 }
@@ -896,23 +744,6 @@ type Command_SwarmNodes struct {
 	SwarmNodes *SwarmNodesReq `protobuf:"bytes,33,opt,name=swarm_nodes,json=swarmNodes,proto3,oneof"`
 }
 
-type Command_PtyOpen struct {
-	// Interactive host shell (see PtyOpenReq).
-	PtyOpen *PtyOpenReq `protobuf:"bytes,34,opt,name=pty_open,json=ptyOpen,proto3,oneof"`
-}
-
-type Command_PtyData struct {
-	PtyData *PtyDataReq `protobuf:"bytes,35,opt,name=pty_data,json=ptyData,proto3,oneof"`
-}
-
-type Command_PtyResize struct {
-	PtyResize *PtyResizeReq `protobuf:"bytes,36,opt,name=pty_resize,json=ptyResize,proto3,oneof"`
-}
-
-type Command_PtyClose struct {
-	PtyClose *PtyCloseReq `protobuf:"bytes,37,opt,name=pty_close,json=ptyClose,proto3,oneof"`
-}
-
 type Command_EnableLogs struct {
 	// Monitoring control (rarely used; agents stream proactively).
 	EnableLogs *EnableLogsReq `protobuf:"bytes,50,opt,name=enable_logs,json=enableLogs,proto3,oneof"`
@@ -928,22 +759,6 @@ type Command_Exec struct {
 
 func (*Command_ListPath) isCommand_Op() {}
 
-func (*Command_Stat) isCommand_Op() {}
-
-func (*Command_ReadFile) isCommand_Op() {}
-
-func (*Command_WriteFile) isCommand_Op() {}
-
-func (*Command_Mkdir) isCommand_Op() {}
-
-func (*Command_Rename) isCommand_Op() {}
-
-func (*Command_Delete) isCommand_Op() {}
-
-func (*Command_Chown) isCommand_Op() {}
-
-func (*Command_LookupUser) isCommand_Op() {}
-
 func (*Command_ListCron) isCommand_Op() {}
 
 func (*Command_ApplyCron) isCommand_Op() {}
@@ -955,14 +770,6 @@ func (*Command_CancelBackup) isCommand_Op() {}
 func (*Command_ServiceUpdate) isCommand_Op() {}
 
 func (*Command_SwarmNodes) isCommand_Op() {}
-
-func (*Command_PtyOpen) isCommand_Op() {}
-
-func (*Command_PtyData) isCommand_Op() {}
-
-func (*Command_PtyResize) isCommand_Op() {}
-
-func (*Command_PtyClose) isCommand_Op() {}
 
 func (*Command_EnableLogs) isCommand_Op() {}
 
@@ -977,24 +784,12 @@ type CommandResult struct {
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*CommandResult_ListPath
-	//	*CommandResult_Stat
-	//	*CommandResult_ReadFile
-	//	*CommandResult_WriteFile
-	//	*CommandResult_Mkdir
-	//	*CommandResult_Rename
-	//	*CommandResult_Delete
-	//	*CommandResult_Chown
-	//	*CommandResult_LookupUser
 	//	*CommandResult_ListCron
 	//	*CommandResult_ApplyCron
 	//	*CommandResult_RunBackup
 	//	*CommandResult_CancelBackup
 	//	*CommandResult_ServiceUpdate
 	//	*CommandResult_SwarmNodes
-	//	*CommandResult_PtyOpen
-	//	*CommandResult_PtyData
-	//	*CommandResult_PtyResize
-	//	*CommandResult_PtyClose
 	//	*CommandResult_EnableLogs
 	//	*CommandResult_DisableLogs
 	//	*CommandResult_Exec
@@ -1063,78 +858,6 @@ func (x *CommandResult) GetListPath() *ListPathResp {
 	return nil
 }
 
-func (x *CommandResult) GetStat() *StatResp {
-	if x != nil {
-		if x, ok := x.Payload.(*CommandResult_Stat); ok {
-			return x.Stat
-		}
-	}
-	return nil
-}
-
-func (x *CommandResult) GetReadFile() *ReadFileResp {
-	if x != nil {
-		if x, ok := x.Payload.(*CommandResult_ReadFile); ok {
-			return x.ReadFile
-		}
-	}
-	return nil
-}
-
-func (x *CommandResult) GetWriteFile() *WriteFileResp {
-	if x != nil {
-		if x, ok := x.Payload.(*CommandResult_WriteFile); ok {
-			return x.WriteFile
-		}
-	}
-	return nil
-}
-
-func (x *CommandResult) GetMkdir() *MkdirResp {
-	if x != nil {
-		if x, ok := x.Payload.(*CommandResult_Mkdir); ok {
-			return x.Mkdir
-		}
-	}
-	return nil
-}
-
-func (x *CommandResult) GetRename() *RenameResp {
-	if x != nil {
-		if x, ok := x.Payload.(*CommandResult_Rename); ok {
-			return x.Rename
-		}
-	}
-	return nil
-}
-
-func (x *CommandResult) GetDelete() *DeleteResp {
-	if x != nil {
-		if x, ok := x.Payload.(*CommandResult_Delete); ok {
-			return x.Delete
-		}
-	}
-	return nil
-}
-
-func (x *CommandResult) GetChown() *ChownResp {
-	if x != nil {
-		if x, ok := x.Payload.(*CommandResult_Chown); ok {
-			return x.Chown
-		}
-	}
-	return nil
-}
-
-func (x *CommandResult) GetLookupUser() *LookupUserResp {
-	if x != nil {
-		if x, ok := x.Payload.(*CommandResult_LookupUser); ok {
-			return x.LookupUser
-		}
-	}
-	return nil
-}
-
 func (x *CommandResult) GetListCron() *ListCronResp {
 	if x != nil {
 		if x, ok := x.Payload.(*CommandResult_ListCron); ok {
@@ -1189,42 +912,6 @@ func (x *CommandResult) GetSwarmNodes() *SwarmNodesResp {
 	return nil
 }
 
-func (x *CommandResult) GetPtyOpen() *PtyOpenResp {
-	if x != nil {
-		if x, ok := x.Payload.(*CommandResult_PtyOpen); ok {
-			return x.PtyOpen
-		}
-	}
-	return nil
-}
-
-func (x *CommandResult) GetPtyData() *PtyDataResp {
-	if x != nil {
-		if x, ok := x.Payload.(*CommandResult_PtyData); ok {
-			return x.PtyData
-		}
-	}
-	return nil
-}
-
-func (x *CommandResult) GetPtyResize() *PtyResizeResp {
-	if x != nil {
-		if x, ok := x.Payload.(*CommandResult_PtyResize); ok {
-			return x.PtyResize
-		}
-	}
-	return nil
-}
-
-func (x *CommandResult) GetPtyClose() *PtyCloseResp {
-	if x != nil {
-		if x, ok := x.Payload.(*CommandResult_PtyClose); ok {
-			return x.PtyClose
-		}
-	}
-	return nil
-}
-
 func (x *CommandResult) GetEnableLogs() *EnableLogsResp {
 	if x != nil {
 		if x, ok := x.Payload.(*CommandResult_EnableLogs); ok {
@@ -1260,38 +947,6 @@ type CommandResult_ListPath struct {
 	ListPath *ListPathResp `protobuf:"bytes,10,opt,name=list_path,json=listPath,proto3,oneof"`
 }
 
-type CommandResult_Stat struct {
-	Stat *StatResp `protobuf:"bytes,11,opt,name=stat,proto3,oneof"`
-}
-
-type CommandResult_ReadFile struct {
-	ReadFile *ReadFileResp `protobuf:"bytes,12,opt,name=read_file,json=readFile,proto3,oneof"`
-}
-
-type CommandResult_WriteFile struct {
-	WriteFile *WriteFileResp `protobuf:"bytes,13,opt,name=write_file,json=writeFile,proto3,oneof"`
-}
-
-type CommandResult_Mkdir struct {
-	Mkdir *MkdirResp `protobuf:"bytes,14,opt,name=mkdir,proto3,oneof"`
-}
-
-type CommandResult_Rename struct {
-	Rename *RenameResp `protobuf:"bytes,15,opt,name=rename,proto3,oneof"`
-}
-
-type CommandResult_Delete struct {
-	Delete *DeleteResp `protobuf:"bytes,16,opt,name=delete,proto3,oneof"`
-}
-
-type CommandResult_Chown struct {
-	Chown *ChownResp `protobuf:"bytes,17,opt,name=chown,proto3,oneof"`
-}
-
-type CommandResult_LookupUser struct {
-	LookupUser *LookupUserResp `protobuf:"bytes,18,opt,name=lookup_user,json=lookupUser,proto3,oneof"`
-}
-
 type CommandResult_ListCron struct {
 	ListCron *ListCronResp `protobuf:"bytes,30,opt,name=list_cron,json=listCron,proto3,oneof"`
 }
@@ -1316,22 +971,6 @@ type CommandResult_SwarmNodes struct {
 	SwarmNodes *SwarmNodesResp `protobuf:"bytes,43,opt,name=swarm_nodes,json=swarmNodes,proto3,oneof"`
 }
 
-type CommandResult_PtyOpen struct {
-	PtyOpen *PtyOpenResp `protobuf:"bytes,44,opt,name=pty_open,json=ptyOpen,proto3,oneof"`
-}
-
-type CommandResult_PtyData struct {
-	PtyData *PtyDataResp `protobuf:"bytes,45,opt,name=pty_data,json=ptyData,proto3,oneof"`
-}
-
-type CommandResult_PtyResize struct {
-	PtyResize *PtyResizeResp `protobuf:"bytes,46,opt,name=pty_resize,json=ptyResize,proto3,oneof"`
-}
-
-type CommandResult_PtyClose struct {
-	PtyClose *PtyCloseResp `protobuf:"bytes,47,opt,name=pty_close,json=ptyClose,proto3,oneof"`
-}
-
 type CommandResult_EnableLogs struct {
 	EnableLogs *EnableLogsResp `protobuf:"bytes,60,opt,name=enable_logs,json=enableLogs,proto3,oneof"`
 }
@@ -1346,22 +985,6 @@ type CommandResult_Exec struct {
 
 func (*CommandResult_ListPath) isCommandResult_Payload() {}
 
-func (*CommandResult_Stat) isCommandResult_Payload() {}
-
-func (*CommandResult_ReadFile) isCommandResult_Payload() {}
-
-func (*CommandResult_WriteFile) isCommandResult_Payload() {}
-
-func (*CommandResult_Mkdir) isCommandResult_Payload() {}
-
-func (*CommandResult_Rename) isCommandResult_Payload() {}
-
-func (*CommandResult_Delete) isCommandResult_Payload() {}
-
-func (*CommandResult_Chown) isCommandResult_Payload() {}
-
-func (*CommandResult_LookupUser) isCommandResult_Payload() {}
-
 func (*CommandResult_ListCron) isCommandResult_Payload() {}
 
 func (*CommandResult_ApplyCron) isCommandResult_Payload() {}
@@ -1373,14 +996,6 @@ func (*CommandResult_CancelBackup) isCommandResult_Payload() {}
 func (*CommandResult_ServiceUpdate) isCommandResult_Payload() {}
 
 func (*CommandResult_SwarmNodes) isCommandResult_Payload() {}
-
-func (*CommandResult_PtyOpen) isCommandResult_Payload() {}
-
-func (*CommandResult_PtyData) isCommandResult_Payload() {}
-
-func (*CommandResult_PtyResize) isCommandResult_Payload() {}
-
-func (*CommandResult_PtyClose) isCommandResult_Payload() {}
 
 func (*CommandResult_EnableLogs) isCommandResult_Payload() {}
 
@@ -1397,7 +1012,6 @@ type Event struct {
 	//	*Event_CronChanged
 	//	*Event_ContainerReport
 	//	*Event_LogBatch
-	//	*Event_PtyOutput
 	Kind          isEvent_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1485,15 +1099,6 @@ func (x *Event) GetLogBatch() *LogBatch {
 	return nil
 }
 
-func (x *Event) GetPtyOutput() *PtyOutput {
-	if x != nil {
-		if x, ok := x.Kind.(*Event_PtyOutput); ok {
-			return x.PtyOutput
-		}
-	}
-	return nil
-}
-
 type isEvent_Kind interface {
 	isEvent_Kind()
 }
@@ -1518,10 +1123,6 @@ type Event_LogBatch struct {
 	LogBatch *LogBatch `protobuf:"bytes,5,opt,name=log_batch,json=logBatch,proto3,oneof"` // every ~1-2s when logs available
 }
 
-type Event_PtyOutput struct {
-	PtyOutput *PtyOutput `protobuf:"bytes,6,opt,name=pty_output,json=ptyOutput,proto3,oneof"` // terminal bytes, as they arrive
-}
-
 func (*Event_BackupProgress) isEvent_Kind() {}
 
 func (*Event_BackupLog) isEvent_Kind() {}
@@ -1531,8 +1132,6 @@ func (*Event_CronChanged) isEvent_Kind() {}
 func (*Event_ContainerReport) isEvent_Kind() {}
 
 func (*Event_LogBatch) isEvent_Kind() {}
-
-func (*Event_PtyOutput) isEvent_Kind() {}
 
 type BackupProgress struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
@@ -2441,814 +2040,6 @@ func (x *ListPathResp) GetEntries() []*FileEntry {
 	return nil
 }
 
-type StatReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *StatReq) Reset() {
-	*x = StatReq{}
-	mi := &file_manager_proto_msgTypes[23]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *StatReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*StatReq) ProtoMessage() {}
-
-func (x *StatReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[23]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use StatReq.ProtoReflect.Descriptor instead.
-func (*StatReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{23}
-}
-
-func (x *StatReq) GetPath() string {
-	if x != nil {
-		return x.Path
-	}
-	return ""
-}
-
-type StatResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Entry         *FileEntry             `protobuf:"bytes,1,opt,name=entry,proto3" json:"entry,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *StatResp) Reset() {
-	*x = StatResp{}
-	mi := &file_manager_proto_msgTypes[24]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *StatResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*StatResp) ProtoMessage() {}
-
-func (x *StatResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[24]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use StatResp.ProtoReflect.Descriptor instead.
-func (*StatResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{24}
-}
-
-func (x *StatResp) GetEntry() *FileEntry {
-	if x != nil {
-		return x.Entry
-	}
-	return nil
-}
-
-type ReadFileReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	MaxBytes      uint32                 `protobuf:"varint,2,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ReadFileReq) Reset() {
-	*x = ReadFileReq{}
-	mi := &file_manager_proto_msgTypes[25]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ReadFileReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ReadFileReq) ProtoMessage() {}
-
-func (x *ReadFileReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[25]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ReadFileReq.ProtoReflect.Descriptor instead.
-func (*ReadFileReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{25}
-}
-
-func (x *ReadFileReq) GetPath() string {
-	if x != nil {
-		return x.Path
-	}
-	return ""
-}
-
-func (x *ReadFileReq) GetMaxBytes() uint32 {
-	if x != nil {
-		return x.MaxBytes
-	}
-	return 0
-}
-
-type ReadFileResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
-	Truncated     bool                   `protobuf:"varint,2,opt,name=truncated,proto3" json:"truncated,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ReadFileResp) Reset() {
-	*x = ReadFileResp{}
-	mi := &file_manager_proto_msgTypes[26]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ReadFileResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ReadFileResp) ProtoMessage() {}
-
-func (x *ReadFileResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[26]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ReadFileResp.ProtoReflect.Descriptor instead.
-func (*ReadFileResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{26}
-}
-
-func (x *ReadFileResp) GetData() []byte {
-	if x != nil {
-		return x.Data
-	}
-	return nil
-}
-
-func (x *ReadFileResp) GetTruncated() bool {
-	if x != nil {
-		return x.Truncated
-	}
-	return false
-}
-
-type WriteFileReq struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Path              string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	Data              []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
-	Mode              uint32                 `protobuf:"varint,3,opt,name=mode,proto3" json:"mode,omitempty"`
-	ApplyDefaultOwner bool                   `protobuf:"varint,4,opt,name=apply_default_owner,json=applyDefaultOwner,proto3" json:"apply_default_owner,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
-}
-
-func (x *WriteFileReq) Reset() {
-	*x = WriteFileReq{}
-	mi := &file_manager_proto_msgTypes[27]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *WriteFileReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*WriteFileReq) ProtoMessage() {}
-
-func (x *WriteFileReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[27]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use WriteFileReq.ProtoReflect.Descriptor instead.
-func (*WriteFileReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{27}
-}
-
-func (x *WriteFileReq) GetPath() string {
-	if x != nil {
-		return x.Path
-	}
-	return ""
-}
-
-func (x *WriteFileReq) GetData() []byte {
-	if x != nil {
-		return x.Data
-	}
-	return nil
-}
-
-func (x *WriteFileReq) GetMode() uint32 {
-	if x != nil {
-		return x.Mode
-	}
-	return 0
-}
-
-func (x *WriteFileReq) GetApplyDefaultOwner() bool {
-	if x != nil {
-		return x.ApplyDefaultOwner
-	}
-	return false
-}
-
-type WriteFileResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	BytesWritten  uint64                 `protobuf:"varint,1,opt,name=bytes_written,json=bytesWritten,proto3" json:"bytes_written,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *WriteFileResp) Reset() {
-	*x = WriteFileResp{}
-	mi := &file_manager_proto_msgTypes[28]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *WriteFileResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*WriteFileResp) ProtoMessage() {}
-
-func (x *WriteFileResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[28]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use WriteFileResp.ProtoReflect.Descriptor instead.
-func (*WriteFileResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{28}
-}
-
-func (x *WriteFileResp) GetBytesWritten() uint64 {
-	if x != nil {
-		return x.BytesWritten
-	}
-	return 0
-}
-
-type MkdirReq struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Path              string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	Mode              uint32                 `protobuf:"varint,2,opt,name=mode,proto3" json:"mode,omitempty"`
-	ApplyDefaultOwner bool                   `protobuf:"varint,3,opt,name=apply_default_owner,json=applyDefaultOwner,proto3" json:"apply_default_owner,omitempty"`
-	Parents           bool                   `protobuf:"varint,4,opt,name=parents,proto3" json:"parents,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
-}
-
-func (x *MkdirReq) Reset() {
-	*x = MkdirReq{}
-	mi := &file_manager_proto_msgTypes[29]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MkdirReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MkdirReq) ProtoMessage() {}
-
-func (x *MkdirReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[29]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MkdirReq.ProtoReflect.Descriptor instead.
-func (*MkdirReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{29}
-}
-
-func (x *MkdirReq) GetPath() string {
-	if x != nil {
-		return x.Path
-	}
-	return ""
-}
-
-func (x *MkdirReq) GetMode() uint32 {
-	if x != nil {
-		return x.Mode
-	}
-	return 0
-}
-
-func (x *MkdirReq) GetApplyDefaultOwner() bool {
-	if x != nil {
-		return x.ApplyDefaultOwner
-	}
-	return false
-}
-
-func (x *MkdirReq) GetParents() bool {
-	if x != nil {
-		return x.Parents
-	}
-	return false
-}
-
-type MkdirResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *MkdirResp) Reset() {
-	*x = MkdirResp{}
-	mi := &file_manager_proto_msgTypes[30]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *MkdirResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*MkdirResp) ProtoMessage() {}
-
-func (x *MkdirResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[30]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use MkdirResp.ProtoReflect.Descriptor instead.
-func (*MkdirResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{30}
-}
-
-type RenameReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	From          string                 `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
-	To            string                 `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RenameReq) Reset() {
-	*x = RenameReq{}
-	mi := &file_manager_proto_msgTypes[31]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RenameReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RenameReq) ProtoMessage() {}
-
-func (x *RenameReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[31]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RenameReq.ProtoReflect.Descriptor instead.
-func (*RenameReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{31}
-}
-
-func (x *RenameReq) GetFrom() string {
-	if x != nil {
-		return x.From
-	}
-	return ""
-}
-
-func (x *RenameReq) GetTo() string {
-	if x != nil {
-		return x.To
-	}
-	return ""
-}
-
-type RenameResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RenameResp) Reset() {
-	*x = RenameResp{}
-	mi := &file_manager_proto_msgTypes[32]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RenameResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RenameResp) ProtoMessage() {}
-
-func (x *RenameResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[32]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RenameResp.ProtoReflect.Descriptor instead.
-func (*RenameResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{32}
-}
-
-type DeleteReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	Recursive     bool                   `protobuf:"varint,2,opt,name=recursive,proto3" json:"recursive,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DeleteReq) Reset() {
-	*x = DeleteReq{}
-	mi := &file_manager_proto_msgTypes[33]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DeleteReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DeleteReq) ProtoMessage() {}
-
-func (x *DeleteReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[33]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DeleteReq.ProtoReflect.Descriptor instead.
-func (*DeleteReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{33}
-}
-
-func (x *DeleteReq) GetPath() string {
-	if x != nil {
-		return x.Path
-	}
-	return ""
-}
-
-func (x *DeleteReq) GetRecursive() bool {
-	if x != nil {
-		return x.Recursive
-	}
-	return false
-}
-
-type DeleteResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DeleteResp) Reset() {
-	*x = DeleteResp{}
-	mi := &file_manager_proto_msgTypes[34]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DeleteResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DeleteResp) ProtoMessage() {}
-
-func (x *DeleteResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[34]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DeleteResp.ProtoReflect.Descriptor instead.
-func (*DeleteResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{34}
-}
-
-type ChownReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	Uid           uint32                 `protobuf:"varint,2,opt,name=uid,proto3" json:"uid,omitempty"`
-	Gid           uint32                 `protobuf:"varint,3,opt,name=gid,proto3" json:"gid,omitempty"`
-	Recursive     bool                   `protobuf:"varint,4,opt,name=recursive,proto3" json:"recursive,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ChownReq) Reset() {
-	*x = ChownReq{}
-	mi := &file_manager_proto_msgTypes[35]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ChownReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ChownReq) ProtoMessage() {}
-
-func (x *ChownReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[35]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ChownReq.ProtoReflect.Descriptor instead.
-func (*ChownReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{35}
-}
-
-func (x *ChownReq) GetPath() string {
-	if x != nil {
-		return x.Path
-	}
-	return ""
-}
-
-func (x *ChownReq) GetUid() uint32 {
-	if x != nil {
-		return x.Uid
-	}
-	return 0
-}
-
-func (x *ChownReq) GetGid() uint32 {
-	if x != nil {
-		return x.Gid
-	}
-	return 0
-}
-
-func (x *ChownReq) GetRecursive() bool {
-	if x != nil {
-		return x.Recursive
-	}
-	return false
-}
-
-type ChownResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ChangedCount  uint64                 `protobuf:"varint,1,opt,name=changed_count,json=changedCount,proto3" json:"changed_count,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ChownResp) Reset() {
-	*x = ChownResp{}
-	mi := &file_manager_proto_msgTypes[36]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ChownResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ChownResp) ProtoMessage() {}
-
-func (x *ChownResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[36]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ChownResp.ProtoReflect.Descriptor instead.
-func (*ChownResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{36}
-}
-
-func (x *ChownResp) GetChangedCount() uint64 {
-	if x != nil {
-		return x.ChangedCount
-	}
-	return 0
-}
-
-type LookupUserReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *LookupUserReq) Reset() {
-	*x = LookupUserReq{}
-	mi := &file_manager_proto_msgTypes[37]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *LookupUserReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*LookupUserReq) ProtoMessage() {}
-
-func (x *LookupUserReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[37]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use LookupUserReq.ProtoReflect.Descriptor instead.
-func (*LookupUserReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{37}
-}
-
-func (x *LookupUserReq) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-type LookupUserResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Uid           uint32                 `protobuf:"varint,2,opt,name=uid,proto3" json:"uid,omitempty"`
-	Gid           uint32                 `protobuf:"varint,3,opt,name=gid,proto3" json:"gid,omitempty"`
-	Home          string                 `protobuf:"bytes,4,opt,name=home,proto3" json:"home,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *LookupUserResp) Reset() {
-	*x = LookupUserResp{}
-	mi := &file_manager_proto_msgTypes[38]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *LookupUserResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*LookupUserResp) ProtoMessage() {}
-
-func (x *LookupUserResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[38]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use LookupUserResp.ProtoReflect.Descriptor instead.
-func (*LookupUserResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{38}
-}
-
-func (x *LookupUserResp) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *LookupUserResp) GetUid() uint32 {
-	if x != nil {
-		return x.Uid
-	}
-	return 0
-}
-
-func (x *LookupUserResp) GetGid() uint32 {
-	if x != nil {
-		return x.Gid
-	}
-	return 0
-}
-
-func (x *LookupUserResp) GetHome() string {
-	if x != nil {
-		return x.Home
-	}
-	return ""
-}
-
 // SwarmNodesReq asks an agent that sits on a manager node for the cluster's
 // node list. GET /nodes is manager-only, so this is answered by the leader's
 // own in-process agent and fails elsewhere.
@@ -3260,7 +2051,7 @@ type SwarmNodesReq struct {
 
 func (x *SwarmNodesReq) Reset() {
 	*x = SwarmNodesReq{}
-	mi := &file_manager_proto_msgTypes[39]
+	mi := &file_manager_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3272,7 +2063,7 @@ func (x *SwarmNodesReq) String() string {
 func (*SwarmNodesReq) ProtoMessage() {}
 
 func (x *SwarmNodesReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[39]
+	mi := &file_manager_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3285,7 +2076,7 @@ func (x *SwarmNodesReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SwarmNodesReq.ProtoReflect.Descriptor instead.
 func (*SwarmNodesReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{39}
+	return file_manager_proto_rawDescGZIP(), []int{23}
 }
 
 type SwarmNodesResp struct {
@@ -3297,7 +2088,7 @@ type SwarmNodesResp struct {
 
 func (x *SwarmNodesResp) Reset() {
 	*x = SwarmNodesResp{}
-	mi := &file_manager_proto_msgTypes[40]
+	mi := &file_manager_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3309,7 +2100,7 @@ func (x *SwarmNodesResp) String() string {
 func (*SwarmNodesResp) ProtoMessage() {}
 
 func (x *SwarmNodesResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[40]
+	mi := &file_manager_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3322,7 +2113,7 @@ func (x *SwarmNodesResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SwarmNodesResp.ProtoReflect.Descriptor instead.
 func (*SwarmNodesResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{40}
+	return file_manager_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *SwarmNodesResp) GetNodes() []*SwarmNode {
@@ -3347,7 +2138,7 @@ type SwarmNode struct {
 
 func (x *SwarmNode) Reset() {
 	*x = SwarmNode{}
-	mi := &file_manager_proto_msgTypes[41]
+	mi := &file_manager_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3359,7 +2150,7 @@ func (x *SwarmNode) String() string {
 func (*SwarmNode) ProtoMessage() {}
 
 func (x *SwarmNode) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[41]
+	mi := &file_manager_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3372,7 +2163,7 @@ func (x *SwarmNode) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SwarmNode.ProtoReflect.Descriptor instead.
 func (*SwarmNode) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{41}
+	return file_manager_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *SwarmNode) GetId() string {
@@ -3424,481 +2215,6 @@ func (x *SwarmNode) GetLabels() map[string]string {
 	return nil
 }
 
-// PtyOpenReq asks the agent for a root shell ON THE HOST. The agent has no
-// host privileges itself, so it uses the Docker socket it already holds to
-// start a short-lived privileged helper container that nsenters into PID 1's
-// namespaces. That container IS the session: closing it ends the shell.
-//
-// Terminal traffic does not fit the request/response shape in both directions:
-// input arrives as PtyDataReq commands, output comes back as unsolicited
-// PtyOutput events keyed by the same session_id.
-type PtyOpenReq struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	Cols  uint32                 `protobuf:"varint,1,opt,name=cols,proto3" json:"cols,omitempty"`
-	Rows  uint32                 `protobuf:"varint,2,opt,name=rows,proto3" json:"rows,omitempty"`
-	// max_seconds caps the session's lifetime; the agent kills the helper
-	// container when it expires even if the browser never disconnects.
-	MaxSeconds uint32 `protobuf:"varint,3,opt,name=max_seconds,json=maxSeconds,proto3" json:"max_seconds,omitempty"`
-	// session_id is assigned by the LEADER, not the agent: the leader has to
-	// subscribe to the output stream before the shell produces its first prompt,
-	// and it cannot do that for an id it does not know yet.
-	SessionId     string `protobuf:"bytes,4,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PtyOpenReq) Reset() {
-	*x = PtyOpenReq{}
-	mi := &file_manager_proto_msgTypes[42]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PtyOpenReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PtyOpenReq) ProtoMessage() {}
-
-func (x *PtyOpenReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[42]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PtyOpenReq.ProtoReflect.Descriptor instead.
-func (*PtyOpenReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{42}
-}
-
-func (x *PtyOpenReq) GetCols() uint32 {
-	if x != nil {
-		return x.Cols
-	}
-	return 0
-}
-
-func (x *PtyOpenReq) GetRows() uint32 {
-	if x != nil {
-		return x.Rows
-	}
-	return 0
-}
-
-func (x *PtyOpenReq) GetMaxSeconds() uint32 {
-	if x != nil {
-		return x.MaxSeconds
-	}
-	return 0
-}
-
-func (x *PtyOpenReq) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
-type PtyOpenResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	ContainerId   string                 `protobuf:"bytes,2,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
-	Image         string                 `protobuf:"bytes,3,opt,name=image,proto3" json:"image,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PtyOpenResp) Reset() {
-	*x = PtyOpenResp{}
-	mi := &file_manager_proto_msgTypes[43]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PtyOpenResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PtyOpenResp) ProtoMessage() {}
-
-func (x *PtyOpenResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[43]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PtyOpenResp.ProtoReflect.Descriptor instead.
-func (*PtyOpenResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{43}
-}
-
-func (x *PtyOpenResp) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
-func (x *PtyOpenResp) GetContainerId() string {
-	if x != nil {
-		return x.ContainerId
-	}
-	return ""
-}
-
-func (x *PtyOpenResp) GetImage() string {
-	if x != nil {
-		return x.Image
-	}
-	return ""
-}
-
-type PtyDataReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PtyDataReq) Reset() {
-	*x = PtyDataReq{}
-	mi := &file_manager_proto_msgTypes[44]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PtyDataReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PtyDataReq) ProtoMessage() {}
-
-func (x *PtyDataReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[44]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PtyDataReq.ProtoReflect.Descriptor instead.
-func (*PtyDataReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{44}
-}
-
-func (x *PtyDataReq) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
-func (x *PtyDataReq) GetData() []byte {
-	if x != nil {
-		return x.Data
-	}
-	return nil
-}
-
-type PtyDataResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PtyDataResp) Reset() {
-	*x = PtyDataResp{}
-	mi := &file_manager_proto_msgTypes[45]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PtyDataResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PtyDataResp) ProtoMessage() {}
-
-func (x *PtyDataResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[45]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PtyDataResp.ProtoReflect.Descriptor instead.
-func (*PtyDataResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{45}
-}
-
-type PtyResizeReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Cols          uint32                 `protobuf:"varint,2,opt,name=cols,proto3" json:"cols,omitempty"`
-	Rows          uint32                 `protobuf:"varint,3,opt,name=rows,proto3" json:"rows,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PtyResizeReq) Reset() {
-	*x = PtyResizeReq{}
-	mi := &file_manager_proto_msgTypes[46]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PtyResizeReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PtyResizeReq) ProtoMessage() {}
-
-func (x *PtyResizeReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[46]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PtyResizeReq.ProtoReflect.Descriptor instead.
-func (*PtyResizeReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{46}
-}
-
-func (x *PtyResizeReq) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
-func (x *PtyResizeReq) GetCols() uint32 {
-	if x != nil {
-		return x.Cols
-	}
-	return 0
-}
-
-func (x *PtyResizeReq) GetRows() uint32 {
-	if x != nil {
-		return x.Rows
-	}
-	return 0
-}
-
-type PtyResizeResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PtyResizeResp) Reset() {
-	*x = PtyResizeResp{}
-	mi := &file_manager_proto_msgTypes[47]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PtyResizeResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PtyResizeResp) ProtoMessage() {}
-
-func (x *PtyResizeResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[47]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PtyResizeResp.ProtoReflect.Descriptor instead.
-func (*PtyResizeResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{47}
-}
-
-type PtyCloseReq struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PtyCloseReq) Reset() {
-	*x = PtyCloseReq{}
-	mi := &file_manager_proto_msgTypes[48]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PtyCloseReq) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PtyCloseReq) ProtoMessage() {}
-
-func (x *PtyCloseReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[48]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PtyCloseReq.ProtoReflect.Descriptor instead.
-func (*PtyCloseReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{48}
-}
-
-func (x *PtyCloseReq) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
-type PtyCloseResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PtyCloseResp) Reset() {
-	*x = PtyCloseResp{}
-	mi := &file_manager_proto_msgTypes[49]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PtyCloseResp) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PtyCloseResp) ProtoMessage() {}
-
-func (x *PtyCloseResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[49]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PtyCloseResp.ProtoReflect.Descriptor instead.
-func (*PtyCloseResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{49}
-}
-
-// PtyOutput carries raw terminal bytes (Tty=true, so no docker demux header).
-// The final message for a session has closed=true and an optional reason.
-type PtyOutput struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Data          []byte                 `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
-	Closed        bool                   `protobuf:"varint,3,opt,name=closed,proto3" json:"closed,omitempty"`
-	Reason        string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PtyOutput) Reset() {
-	*x = PtyOutput{}
-	mi := &file_manager_proto_msgTypes[50]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PtyOutput) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PtyOutput) ProtoMessage() {}
-
-func (x *PtyOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[50]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PtyOutput.ProtoReflect.Descriptor instead.
-func (*PtyOutput) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{50}
-}
-
-func (x *PtyOutput) GetSessionId() string {
-	if x != nil {
-		return x.SessionId
-	}
-	return ""
-}
-
-func (x *PtyOutput) GetData() []byte {
-	if x != nil {
-		return x.Data
-	}
-	return nil
-}
-
-func (x *PtyOutput) GetClosed() bool {
-	if x != nil {
-		return x.Closed
-	}
-	return false
-}
-
-func (x *PtyOutput) GetReason() string {
-	if x != nil {
-		return x.Reason
-	}
-	return ""
-}
-
 type CronEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -3913,7 +2229,7 @@ type CronEntry struct {
 
 func (x *CronEntry) Reset() {
 	*x = CronEntry{}
-	mi := &file_manager_proto_msgTypes[51]
+	mi := &file_manager_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3925,7 +2241,7 @@ func (x *CronEntry) String() string {
 func (*CronEntry) ProtoMessage() {}
 
 func (x *CronEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[51]
+	mi := &file_manager_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3938,7 +2254,7 @@ func (x *CronEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CronEntry.ProtoReflect.Descriptor instead.
 func (*CronEntry) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{51}
+	return file_manager_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *CronEntry) GetId() string {
@@ -3991,7 +2307,7 @@ type ListCronReq struct {
 
 func (x *ListCronReq) Reset() {
 	*x = ListCronReq{}
-	mi := &file_manager_proto_msgTypes[52]
+	mi := &file_manager_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4003,7 +2319,7 @@ func (x *ListCronReq) String() string {
 func (*ListCronReq) ProtoMessage() {}
 
 func (x *ListCronReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[52]
+	mi := &file_manager_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4016,7 +2332,7 @@ func (x *ListCronReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCronReq.ProtoReflect.Descriptor instead.
 func (*ListCronReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{52}
+	return file_manager_proto_rawDescGZIP(), []int{27}
 }
 
 type ListCronResp struct {
@@ -4028,7 +2344,7 @@ type ListCronResp struct {
 
 func (x *ListCronResp) Reset() {
 	*x = ListCronResp{}
-	mi := &file_manager_proto_msgTypes[53]
+	mi := &file_manager_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4040,7 +2356,7 @@ func (x *ListCronResp) String() string {
 func (*ListCronResp) ProtoMessage() {}
 
 func (x *ListCronResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[53]
+	mi := &file_manager_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4053,7 +2369,7 @@ func (x *ListCronResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCronResp.ProtoReflect.Descriptor instead.
 func (*ListCronResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{53}
+	return file_manager_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ListCronResp) GetEntries() []*CronEntry {
@@ -4072,7 +2388,7 @@ type ApplyCronReq struct {
 
 func (x *ApplyCronReq) Reset() {
 	*x = ApplyCronReq{}
-	mi := &file_manager_proto_msgTypes[54]
+	mi := &file_manager_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4084,7 +2400,7 @@ func (x *ApplyCronReq) String() string {
 func (*ApplyCronReq) ProtoMessage() {}
 
 func (x *ApplyCronReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[54]
+	mi := &file_manager_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4097,7 +2413,7 @@ func (x *ApplyCronReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyCronReq.ProtoReflect.Descriptor instead.
 func (*ApplyCronReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{54}
+	return file_manager_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ApplyCronReq) GetEntries() []*CronEntry {
@@ -4116,7 +2432,7 @@ type ApplyCronResp struct {
 
 func (x *ApplyCronResp) Reset() {
 	*x = ApplyCronResp{}
-	mi := &file_manager_proto_msgTypes[55]
+	mi := &file_manager_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4128,7 +2444,7 @@ func (x *ApplyCronResp) String() string {
 func (*ApplyCronResp) ProtoMessage() {}
 
 func (x *ApplyCronResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[55]
+	mi := &file_manager_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4141,7 +2457,7 @@ func (x *ApplyCronResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApplyCronResp.ProtoReflect.Descriptor instead.
 func (*ApplyCronResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{55}
+	return file_manager_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ApplyCronResp) GetInstalled() uint32 {
@@ -4185,7 +2501,7 @@ type RunBackupReq struct {
 
 func (x *RunBackupReq) Reset() {
 	*x = RunBackupReq{}
-	mi := &file_manager_proto_msgTypes[56]
+	mi := &file_manager_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4197,7 +2513,7 @@ func (x *RunBackupReq) String() string {
 func (*RunBackupReq) ProtoMessage() {}
 
 func (x *RunBackupReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[56]
+	mi := &file_manager_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4210,7 +2526,7 @@ func (x *RunBackupReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunBackupReq.ProtoReflect.Descriptor instead.
 func (*RunBackupReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{56}
+	return file_manager_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *RunBackupReq) GetPlanId() string {
@@ -4324,7 +2640,7 @@ type RunBackupResp struct {
 
 func (x *RunBackupResp) Reset() {
 	*x = RunBackupResp{}
-	mi := &file_manager_proto_msgTypes[57]
+	mi := &file_manager_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4336,7 +2652,7 @@ func (x *RunBackupResp) String() string {
 func (*RunBackupResp) ProtoMessage() {}
 
 func (x *RunBackupResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[57]
+	mi := &file_manager_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4349,7 +2665,7 @@ func (x *RunBackupResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunBackupResp.ProtoReflect.Descriptor instead.
 func (*RunBackupResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{57}
+	return file_manager_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *RunBackupResp) GetS3Key() string {
@@ -4396,7 +2712,7 @@ type CancelBackupReq struct {
 
 func (x *CancelBackupReq) Reset() {
 	*x = CancelBackupReq{}
-	mi := &file_manager_proto_msgTypes[58]
+	mi := &file_manager_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4408,7 +2724,7 @@ func (x *CancelBackupReq) String() string {
 func (*CancelBackupReq) ProtoMessage() {}
 
 func (x *CancelBackupReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[58]
+	mi := &file_manager_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4421,7 +2737,7 @@ func (x *CancelBackupReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelBackupReq.ProtoReflect.Descriptor instead.
 func (*CancelBackupReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{58}
+	return file_manager_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *CancelBackupReq) GetRunId() string {
@@ -4439,7 +2755,7 @@ type CancelBackupResp struct {
 
 func (x *CancelBackupResp) Reset() {
 	*x = CancelBackupResp{}
-	mi := &file_manager_proto_msgTypes[59]
+	mi := &file_manager_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4451,7 +2767,7 @@ func (x *CancelBackupResp) String() string {
 func (*CancelBackupResp) ProtoMessage() {}
 
 func (x *CancelBackupResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[59]
+	mi := &file_manager_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4464,305 +2780,7 @@ func (x *CancelBackupResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelBackupResp.ProtoReflect.Descriptor instead.
 func (*CancelBackupResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{59}
-}
-
-type DownloadRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	ChunkSize     uint32                 `protobuf:"varint,2,opt,name=chunk_size,json=chunkSize,proto3" json:"chunk_size,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DownloadRequest) Reset() {
-	*x = DownloadRequest{}
-	mi := &file_manager_proto_msgTypes[60]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DownloadRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DownloadRequest) ProtoMessage() {}
-
-func (x *DownloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[60]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DownloadRequest.ProtoReflect.Descriptor instead.
-func (*DownloadRequest) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{60}
-}
-
-func (x *DownloadRequest) GetPath() string {
-	if x != nil {
-		return x.Path
-	}
-	return ""
-}
-
-func (x *DownloadRequest) GetChunkSize() uint32 {
-	if x != nil {
-		return x.ChunkSize
-	}
-	return 0
-}
-
-type FileChunk struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
-	Last          bool                   `protobuf:"varint,2,opt,name=last,proto3" json:"last,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FileChunk) Reset() {
-	*x = FileChunk{}
-	mi := &file_manager_proto_msgTypes[61]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FileChunk) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FileChunk) ProtoMessage() {}
-
-func (x *FileChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[61]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FileChunk.ProtoReflect.Descriptor instead.
-func (*FileChunk) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{61}
-}
-
-func (x *FileChunk) GetData() []byte {
-	if x != nil {
-		return x.Data
-	}
-	return nil
-}
-
-func (x *FileChunk) GetLast() bool {
-	if x != nil {
-		return x.Last
-	}
-	return false
-}
-
-type UploadChunk struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Kind:
-	//
-	//	*UploadChunk_Start
-	//	*UploadChunk_Data
-	Kind          isUploadChunk_Kind `protobuf_oneof:"kind"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *UploadChunk) Reset() {
-	*x = UploadChunk{}
-	mi := &file_manager_proto_msgTypes[62]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *UploadChunk) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*UploadChunk) ProtoMessage() {}
-
-func (x *UploadChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[62]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use UploadChunk.ProtoReflect.Descriptor instead.
-func (*UploadChunk) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{62}
-}
-
-func (x *UploadChunk) GetKind() isUploadChunk_Kind {
-	if x != nil {
-		return x.Kind
-	}
-	return nil
-}
-
-func (x *UploadChunk) GetStart() *UploadStart {
-	if x != nil {
-		if x, ok := x.Kind.(*UploadChunk_Start); ok {
-			return x.Start
-		}
-	}
-	return nil
-}
-
-func (x *UploadChunk) GetData() []byte {
-	if x != nil {
-		if x, ok := x.Kind.(*UploadChunk_Data); ok {
-			return x.Data
-		}
-	}
-	return nil
-}
-
-type isUploadChunk_Kind interface {
-	isUploadChunk_Kind()
-}
-
-type UploadChunk_Start struct {
-	Start *UploadStart `protobuf:"bytes,1,opt,name=start,proto3,oneof"`
-}
-
-type UploadChunk_Data struct {
-	Data []byte `protobuf:"bytes,2,opt,name=data,proto3,oneof"`
-}
-
-func (*UploadChunk_Start) isUploadChunk_Kind() {}
-
-func (*UploadChunk_Data) isUploadChunk_Kind() {}
-
-type UploadStart struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Path              string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
-	Mode              uint32                 `protobuf:"varint,2,opt,name=mode,proto3" json:"mode,omitempty"`
-	ApplyDefaultOwner bool                   `protobuf:"varint,3,opt,name=apply_default_owner,json=applyDefaultOwner,proto3" json:"apply_default_owner,omitempty"`
-	Overwrite         bool                   `protobuf:"varint,4,opt,name=overwrite,proto3" json:"overwrite,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
-}
-
-func (x *UploadStart) Reset() {
-	*x = UploadStart{}
-	mi := &file_manager_proto_msgTypes[63]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *UploadStart) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*UploadStart) ProtoMessage() {}
-
-func (x *UploadStart) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[63]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use UploadStart.ProtoReflect.Descriptor instead.
-func (*UploadStart) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{63}
-}
-
-func (x *UploadStart) GetPath() string {
-	if x != nil {
-		return x.Path
-	}
-	return ""
-}
-
-func (x *UploadStart) GetMode() uint32 {
-	if x != nil {
-		return x.Mode
-	}
-	return 0
-}
-
-func (x *UploadStart) GetApplyDefaultOwner() bool {
-	if x != nil {
-		return x.ApplyDefaultOwner
-	}
-	return false
-}
-
-func (x *UploadStart) GetOverwrite() bool {
-	if x != nil {
-		return x.Overwrite
-	}
-	return false
-}
-
-type UploadResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	BytesWritten  uint64                 `protobuf:"varint,1,opt,name=bytes_written,json=bytesWritten,proto3" json:"bytes_written,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *UploadResult) Reset() {
-	*x = UploadResult{}
-	mi := &file_manager_proto_msgTypes[64]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *UploadResult) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*UploadResult) ProtoMessage() {}
-
-func (x *UploadResult) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[64]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use UploadResult.ProtoReflect.Descriptor instead.
-func (*UploadResult) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{64}
-}
-
-func (x *UploadResult) GetBytesWritten() uint64 {
-	if x != nil {
-		return x.BytesWritten
-	}
-	return 0
+	return file_manager_proto_rawDescGZIP(), []int{34}
 }
 
 // ServiceUpdateReq force-redeploys a swarm service, the Engine-API equivalent
@@ -4777,7 +2795,7 @@ type ServiceUpdateReq struct {
 
 func (x *ServiceUpdateReq) Reset() {
 	*x = ServiceUpdateReq{}
-	mi := &file_manager_proto_msgTypes[65]
+	mi := &file_manager_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4789,7 +2807,7 @@ func (x *ServiceUpdateReq) String() string {
 func (*ServiceUpdateReq) ProtoMessage() {}
 
 func (x *ServiceUpdateReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[65]
+	mi := &file_manager_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4802,7 +2820,7 @@ func (x *ServiceUpdateReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceUpdateReq.ProtoReflect.Descriptor instead.
 func (*ServiceUpdateReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{65}
+	return file_manager_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ServiceUpdateReq) GetService() string {
@@ -4822,7 +2840,7 @@ type ServiceUpdateResp struct {
 
 func (x *ServiceUpdateResp) Reset() {
 	*x = ServiceUpdateResp{}
-	mi := &file_manager_proto_msgTypes[66]
+	mi := &file_manager_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4834,7 +2852,7 @@ func (x *ServiceUpdateResp) String() string {
 func (*ServiceUpdateResp) ProtoMessage() {}
 
 func (x *ServiceUpdateResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[66]
+	mi := &file_manager_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4847,7 +2865,7 @@ func (x *ServiceUpdateResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceUpdateResp.ProtoReflect.Descriptor instead.
 func (*ServiceUpdateResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{66}
+	return file_manager_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ServiceUpdateResp) GetServiceId() string {
@@ -4875,7 +2893,7 @@ type ExecReq struct {
 
 func (x *ExecReq) Reset() {
 	*x = ExecReq{}
-	mi := &file_manager_proto_msgTypes[67]
+	mi := &file_manager_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4887,7 +2905,7 @@ func (x *ExecReq) String() string {
 func (*ExecReq) ProtoMessage() {}
 
 func (x *ExecReq) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[67]
+	mi := &file_manager_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4900,7 +2918,7 @@ func (x *ExecReq) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecReq.ProtoReflect.Descriptor instead.
 func (*ExecReq) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{67}
+	return file_manager_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ExecReq) GetCmd() string {
@@ -4935,7 +2953,7 @@ type ExecResp struct {
 
 func (x *ExecResp) Reset() {
 	*x = ExecResp{}
-	mi := &file_manager_proto_msgTypes[68]
+	mi := &file_manager_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4947,7 +2965,7 @@ func (x *ExecResp) String() string {
 func (*ExecResp) ProtoMessage() {}
 
 func (x *ExecResp) ProtoReflect() protoreflect.Message {
-	mi := &file_manager_proto_msgTypes[68]
+	mi := &file_manager_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4960,7 +2978,7 @@ func (x *ExecResp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecResp.ProtoReflect.Descriptor instead.
 func (*ExecResp) Descriptor() ([]byte, []int) {
-	return file_manager_proto_rawDescGZIP(), []int{68}
+	return file_manager_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ExecResp) GetExitCode() int32 {
@@ -5038,19 +3056,9 @@ const file_manager_proto_rawDesc = "" +
 	"\x0fdisk_read_bytes\x18\v \x01(\x04R\rdiskReadBytes\x12(\n" +
 	"\x10disk_write_bytes\x18\f \x01(\x04R\x0ediskWriteBytes\"\x1b\n" +
 	"\x04Ping\x12\x13\n" +
-	"\x05ts_ms\x18\x01 \x01(\x03R\x04tsMs\"\x87\t\n" +
+	"\x05ts_ms\x18\x01 \x01(\x03R\x04tsMs\"\xcc\x04\n" +
 	"\aCommand\x122\n" +
-	"\tlist_path\x18\x01 \x01(\v2\x13.bpm.v1.ListPathReqH\x00R\blistPath\x12%\n" +
-	"\x04stat\x18\x02 \x01(\v2\x0f.bpm.v1.StatReqH\x00R\x04stat\x122\n" +
-	"\tread_file\x18\x03 \x01(\v2\x13.bpm.v1.ReadFileReqH\x00R\breadFile\x125\n" +
-	"\n" +
-	"write_file\x18\x04 \x01(\v2\x14.bpm.v1.WriteFileReqH\x00R\twriteFile\x12(\n" +
-	"\x05mkdir\x18\x05 \x01(\v2\x10.bpm.v1.MkdirReqH\x00R\x05mkdir\x12+\n" +
-	"\x06rename\x18\x06 \x01(\v2\x11.bpm.v1.RenameReqH\x00R\x06rename\x12+\n" +
-	"\x06delete\x18\a \x01(\v2\x11.bpm.v1.DeleteReqH\x00R\x06delete\x12(\n" +
-	"\x05chown\x18\b \x01(\v2\x10.bpm.v1.ChownReqH\x00R\x05chown\x128\n" +
-	"\vlookup_user\x18\t \x01(\v2\x15.bpm.v1.LookupUserReqH\x00R\n" +
-	"lookupUser\x122\n" +
+	"\tlist_path\x18\x01 \x01(\v2\x13.bpm.v1.ListPathReqH\x00R\blistPath\x122\n" +
 	"\tlist_cron\x18\x14 \x01(\v2\x13.bpm.v1.ListCronReqH\x00R\blistCron\x125\n" +
 	"\n" +
 	"apply_cron\x18\x15 \x01(\v2\x14.bpm.v1.ApplyCronReqH\x00R\tapplyCron\x125\n" +
@@ -5059,32 +3067,18 @@ const file_manager_proto_rawDesc = "" +
 	"\rcancel_backup\x18\x1f \x01(\v2\x17.bpm.v1.CancelBackupReqH\x00R\fcancelBackup\x12A\n" +
 	"\x0eservice_update\x18  \x01(\v2\x18.bpm.v1.ServiceUpdateReqH\x00R\rserviceUpdate\x128\n" +
 	"\vswarm_nodes\x18! \x01(\v2\x15.bpm.v1.SwarmNodesReqH\x00R\n" +
-	"swarmNodes\x12/\n" +
-	"\bpty_open\x18\" \x01(\v2\x12.bpm.v1.PtyOpenReqH\x00R\aptyOpen\x12/\n" +
-	"\bpty_data\x18# \x01(\v2\x12.bpm.v1.PtyDataReqH\x00R\aptyData\x125\n" +
-	"\n" +
-	"pty_resize\x18$ \x01(\v2\x14.bpm.v1.PtyResizeReqH\x00R\tptyResize\x122\n" +
-	"\tpty_close\x18% \x01(\v2\x13.bpm.v1.PtyCloseReqH\x00R\bptyClose\x128\n" +
+	"swarmNodes\x128\n" +
 	"\venable_logs\x182 \x01(\v2\x15.bpm.v1.EnableLogsReqH\x00R\n" +
 	"enableLogs\x12;\n" +
 	"\fdisable_logs\x183 \x01(\v2\x16.bpm.v1.DisableLogsReqH\x00R\vdisableLogs\x12%\n" +
 	"\x04exec\x18Z \x01(\v2\x0f.bpm.v1.ExecReqH\x00R\x04execB\x04\n" +
-	"\x02op\"\xce\t\n" +
+	"\x02opJ\x04\b\x02\x10\n" +
+	"J\x04\b\"\x10&\"\x87\x05\n" +
 	"\rCommandResult\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x123\n" +
 	"\tlist_path\x18\n" +
-	" \x01(\v2\x14.bpm.v1.ListPathRespH\x00R\blistPath\x12&\n" +
-	"\x04stat\x18\v \x01(\v2\x10.bpm.v1.StatRespH\x00R\x04stat\x123\n" +
-	"\tread_file\x18\f \x01(\v2\x14.bpm.v1.ReadFileRespH\x00R\breadFile\x126\n" +
-	"\n" +
-	"write_file\x18\r \x01(\v2\x15.bpm.v1.WriteFileRespH\x00R\twriteFile\x12)\n" +
-	"\x05mkdir\x18\x0e \x01(\v2\x11.bpm.v1.MkdirRespH\x00R\x05mkdir\x12,\n" +
-	"\x06rename\x18\x0f \x01(\v2\x12.bpm.v1.RenameRespH\x00R\x06rename\x12,\n" +
-	"\x06delete\x18\x10 \x01(\v2\x12.bpm.v1.DeleteRespH\x00R\x06delete\x12)\n" +
-	"\x05chown\x18\x11 \x01(\v2\x11.bpm.v1.ChownRespH\x00R\x05chown\x129\n" +
-	"\vlookup_user\x18\x12 \x01(\v2\x16.bpm.v1.LookupUserRespH\x00R\n" +
-	"lookupUser\x123\n" +
+	" \x01(\v2\x14.bpm.v1.ListPathRespH\x00R\blistPath\x123\n" +
 	"\tlist_cron\x18\x1e \x01(\v2\x14.bpm.v1.ListCronRespH\x00R\blistCron\x126\n" +
 	"\n" +
 	"apply_cron\x18\x1f \x01(\v2\x15.bpm.v1.ApplyCronRespH\x00R\tapplyCron\x126\n" +
@@ -5093,27 +3087,20 @@ const file_manager_proto_rawDesc = "" +
 	"\rcancel_backup\x18) \x01(\v2\x18.bpm.v1.CancelBackupRespH\x00R\fcancelBackup\x12B\n" +
 	"\x0eservice_update\x18* \x01(\v2\x19.bpm.v1.ServiceUpdateRespH\x00R\rserviceUpdate\x129\n" +
 	"\vswarm_nodes\x18+ \x01(\v2\x16.bpm.v1.SwarmNodesRespH\x00R\n" +
-	"swarmNodes\x120\n" +
-	"\bpty_open\x18, \x01(\v2\x13.bpm.v1.PtyOpenRespH\x00R\aptyOpen\x120\n" +
-	"\bpty_data\x18- \x01(\v2\x13.bpm.v1.PtyDataRespH\x00R\aptyData\x126\n" +
-	"\n" +
-	"pty_resize\x18. \x01(\v2\x15.bpm.v1.PtyResizeRespH\x00R\tptyResize\x123\n" +
-	"\tpty_close\x18/ \x01(\v2\x14.bpm.v1.PtyCloseRespH\x00R\bptyClose\x129\n" +
+	"swarmNodes\x129\n" +
 	"\venable_logs\x18< \x01(\v2\x16.bpm.v1.EnableLogsRespH\x00R\n" +
 	"enableLogs\x12<\n" +
 	"\fdisable_logs\x18= \x01(\v2\x17.bpm.v1.DisableLogsRespH\x00R\vdisableLogs\x12&\n" +
 	"\x04exec\x18Z \x01(\v2\x10.bpm.v1.ExecRespH\x00R\x04execB\t\n" +
-	"\apayload\"\xef\x02\n" +
+	"\apayloadJ\x04\b\v\x10\x13J\x04\b,\x100\"\xc1\x02\n" +
 	"\x05Event\x12A\n" +
 	"\x0fbackup_progress\x18\x01 \x01(\v2\x16.bpm.v1.BackupProgressH\x00R\x0ebackupProgress\x126\n" +
 	"\n" +
 	"backup_log\x18\x02 \x01(\v2\x15.bpm.v1.BackupLogLineH\x00R\tbackupLog\x128\n" +
 	"\fcron_changed\x18\x03 \x01(\v2\x13.bpm.v1.CronChangedH\x00R\vcronChanged\x12D\n" +
 	"\x10container_report\x18\x04 \x01(\v2\x17.bpm.v1.ContainerReportH\x00R\x0fcontainerReport\x12/\n" +
-	"\tlog_batch\x18\x05 \x01(\v2\x10.bpm.v1.LogBatchH\x00R\blogBatch\x122\n" +
-	"\n" +
-	"pty_output\x18\x06 \x01(\v2\x11.bpm.v1.PtyOutputH\x00R\tptyOutputB\x06\n" +
-	"\x04kind\"\x92\x01\n" +
+	"\tlog_batch\x18\x05 \x01(\v2\x10.bpm.v1.LogBatchH\x00R\blogBatchB\x06\n" +
+	"\x04kindJ\x04\b\x06\x10\a\"\x92\x01\n" +
 	"\x0eBackupProgress\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12'\n" +
 	"\x0fbytes_processed\x18\x02 \x01(\x04R\x0ebytesProcessed\x12\x1d\n" +
@@ -5191,54 +3178,7 @@ const file_manager_proto_rawDesc = "" +
 	"\x0esymlink_target\x18\n" +
 	" \x01(\tR\rsymlinkTarget\";\n" +
 	"\fListPathResp\x12+\n" +
-	"\aentries\x18\x01 \x03(\v2\x11.bpm.v1.FileEntryR\aentries\"\x1d\n" +
-	"\aStatReq\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\"3\n" +
-	"\bStatResp\x12'\n" +
-	"\x05entry\x18\x01 \x01(\v2\x11.bpm.v1.FileEntryR\x05entry\">\n" +
-	"\vReadFileReq\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1b\n" +
-	"\tmax_bytes\x18\x02 \x01(\rR\bmaxBytes\"@\n" +
-	"\fReadFileResp\x12\x12\n" +
-	"\x04data\x18\x01 \x01(\fR\x04data\x12\x1c\n" +
-	"\ttruncated\x18\x02 \x01(\bR\ttruncated\"z\n" +
-	"\fWriteFileReq\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
-	"\x04data\x18\x02 \x01(\fR\x04data\x12\x12\n" +
-	"\x04mode\x18\x03 \x01(\rR\x04mode\x12.\n" +
-	"\x13apply_default_owner\x18\x04 \x01(\bR\x11applyDefaultOwner\"4\n" +
-	"\rWriteFileResp\x12#\n" +
-	"\rbytes_written\x18\x01 \x01(\x04R\fbytesWritten\"|\n" +
-	"\bMkdirReq\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
-	"\x04mode\x18\x02 \x01(\rR\x04mode\x12.\n" +
-	"\x13apply_default_owner\x18\x03 \x01(\bR\x11applyDefaultOwner\x12\x18\n" +
-	"\aparents\x18\x04 \x01(\bR\aparents\"\v\n" +
-	"\tMkdirResp\"/\n" +
-	"\tRenameReq\x12\x12\n" +
-	"\x04from\x18\x01 \x01(\tR\x04from\x12\x0e\n" +
-	"\x02to\x18\x02 \x01(\tR\x02to\"\f\n" +
-	"\n" +
-	"RenameResp\"=\n" +
-	"\tDeleteReq\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1c\n" +
-	"\trecursive\x18\x02 \x01(\bR\trecursive\"\f\n" +
-	"\n" +
-	"DeleteResp\"`\n" +
-	"\bChownReq\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\x12\x10\n" +
-	"\x03uid\x18\x02 \x01(\rR\x03uid\x12\x10\n" +
-	"\x03gid\x18\x03 \x01(\rR\x03gid\x12\x1c\n" +
-	"\trecursive\x18\x04 \x01(\bR\trecursive\"0\n" +
-	"\tChownResp\x12#\n" +
-	"\rchanged_count\x18\x01 \x01(\x04R\fchangedCount\"#\n" +
-	"\rLookupUserReq\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\\\n" +
-	"\x0eLookupUserResp\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
-	"\x03uid\x18\x02 \x01(\rR\x03uid\x12\x10\n" +
-	"\x03gid\x18\x03 \x01(\rR\x03gid\x12\x12\n" +
-	"\x04home\x18\x04 \x01(\tR\x04home\"\x0f\n" +
+	"\aentries\x18\x01 \x03(\v2\x11.bpm.v1.FileEntryR\aentries\"\x0f\n" +
 	"\rSwarmNodesReq\"9\n" +
 	"\x0eSwarmNodesResp\x12'\n" +
 	"\x05nodes\x18\x01 \x03(\v2\x11.bpm.v1.SwarmNodeR\x05nodes\"\x8f\x02\n" +
@@ -5252,42 +3192,7 @@ const file_manager_proto_rawDesc = "" +
 	"\x06labels\x18\a \x03(\v2\x1d.bpm.v1.SwarmNode.LabelsEntryR\x06labels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"t\n" +
-	"\n" +
-	"PtyOpenReq\x12\x12\n" +
-	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x12\n" +
-	"\x04rows\x18\x02 \x01(\rR\x04rows\x12\x1f\n" +
-	"\vmax_seconds\x18\x03 \x01(\rR\n" +
-	"maxSeconds\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x04 \x01(\tR\tsessionId\"e\n" +
-	"\vPtyOpenResp\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\x12!\n" +
-	"\fcontainer_id\x18\x02 \x01(\tR\vcontainerId\x12\x14\n" +
-	"\x05image\x18\x03 \x01(\tR\x05image\"?\n" +
-	"\n" +
-	"PtyDataReq\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
-	"\x04data\x18\x02 \x01(\fR\x04data\"\r\n" +
-	"\vPtyDataResp\"U\n" +
-	"\fPtyResizeReq\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
-	"\x04cols\x18\x02 \x01(\rR\x04cols\x12\x12\n" +
-	"\x04rows\x18\x03 \x01(\rR\x04rows\"\x0f\n" +
-	"\rPtyResizeResp\",\n" +
-	"\vPtyCloseReq\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\"\x0e\n" +
-	"\fPtyCloseResp\"n\n" +
-	"\tPtyOutput\x12\x1d\n" +
-	"\n" +
-	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
-	"\x04data\x18\x02 \x01(\fR\x04data\x12\x16\n" +
-	"\x06closed\x18\x03 \x01(\bR\x06closed\x12\x16\n" +
-	"\x06reason\x18\x04 \x01(\tR\x06reason\"\x99\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x99\x01\n" +
 	"\tCronEntry\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\bschedule\x18\x02 \x01(\tR\bschedule\x12\x18\n" +
@@ -5329,25 +3234,7 @@ const file_manager_proto_rawDesc = "" +
 	"durationMs\"(\n" +
 	"\x0fCancelBackupReq\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\"\x12\n" +
-	"\x10CancelBackupResp\"D\n" +
-	"\x0fDownloadRequest\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\x12\x1d\n" +
-	"\n" +
-	"chunk_size\x18\x02 \x01(\rR\tchunkSize\"3\n" +
-	"\tFileChunk\x12\x12\n" +
-	"\x04data\x18\x01 \x01(\fR\x04data\x12\x12\n" +
-	"\x04last\x18\x02 \x01(\bR\x04last\"X\n" +
-	"\vUploadChunk\x12+\n" +
-	"\x05start\x18\x01 \x01(\v2\x13.bpm.v1.UploadStartH\x00R\x05start\x12\x14\n" +
-	"\x04data\x18\x02 \x01(\fH\x00R\x04dataB\x06\n" +
-	"\x04kind\"\x83\x01\n" +
-	"\vUploadStart\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\x12\x12\n" +
-	"\x04mode\x18\x02 \x01(\rR\x04mode\x12.\n" +
-	"\x13apply_default_owner\x18\x03 \x01(\bR\x11applyDefaultOwner\x12\x1c\n" +
-	"\toverwrite\x18\x04 \x01(\bR\toverwrite\"3\n" +
-	"\fUploadResult\x12#\n" +
-	"\rbytes_written\x18\x01 \x01(\x04R\fbytesWritten\",\n" +
+	"\x10CancelBackupResp\",\n" +
 	"\x10ServiceUpdateReq\x12\x18\n" +
 	"\aservice\x18\x01 \x01(\tR\aservice\"W\n" +
 	"\x11ServiceUpdateResp\x12\x1d\n" +
@@ -5361,12 +3248,9 @@ const file_manager_proto_rawDesc = "" +
 	"\bExecResp\x12\x1b\n" +
 	"\texit_code\x18\x01 \x01(\x05R\bexitCode\x12\x16\n" +
 	"\x06stdout\x18\x02 \x01(\fR\x06stdout\x12\x16\n" +
-	"\x06stderr\x18\x03 \x01(\fR\x06stderr2\xc3\x01\n" +
+	"\x06stderr\x18\x03 \x01(\fR\x06stderr2J\n" +
 	"\fManagerAgent\x12:\n" +
-	"\aChannel\x12\x14.bpm.v1.AgentMessage\x1a\x15.bpm.v1.LeaderMessage(\x010\x01\x12<\n" +
-	"\fDownloadFile\x12\x17.bpm.v1.DownloadRequest\x1a\x11.bpm.v1.FileChunk0\x01\x129\n" +
-	"\n" +
-	"UploadFile\x12\x13.bpm.v1.UploadChunk\x1a\x14.bpm.v1.UploadResult(\x01B5Z3github.com/Bartis-Dev/LabExtend/internal/grpc/pb;pbb\x06proto3"
+	"\aChannel\x12\x14.bpm.v1.AgentMessage\x1a\x15.bpm.v1.LeaderMessage(\x010\x01B5Z3github.com/Bartis-Dev/LabExtend/internal/grpc/pb;pbb\x06proto3"
 
 var (
 	file_manager_proto_rawDescOnce sync.Once
@@ -5380,7 +3264,7 @@ func file_manager_proto_rawDescGZIP() []byte {
 	return file_manager_proto_rawDescData
 }
 
-var file_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 72)
+var file_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
 var file_manager_proto_goTypes = []any{
 	(*AgentMessage)(nil),      // 0: bpm.v1.AgentMessage
 	(*LeaderMessage)(nil),     // 1: bpm.v1.LeaderMessage
@@ -5405,55 +3289,25 @@ var file_manager_proto_goTypes = []any{
 	(*ListPathReq)(nil),       // 20: bpm.v1.ListPathReq
 	(*FileEntry)(nil),         // 21: bpm.v1.FileEntry
 	(*ListPathResp)(nil),      // 22: bpm.v1.ListPathResp
-	(*StatReq)(nil),           // 23: bpm.v1.StatReq
-	(*StatResp)(nil),          // 24: bpm.v1.StatResp
-	(*ReadFileReq)(nil),       // 25: bpm.v1.ReadFileReq
-	(*ReadFileResp)(nil),      // 26: bpm.v1.ReadFileResp
-	(*WriteFileReq)(nil),      // 27: bpm.v1.WriteFileReq
-	(*WriteFileResp)(nil),     // 28: bpm.v1.WriteFileResp
-	(*MkdirReq)(nil),          // 29: bpm.v1.MkdirReq
-	(*MkdirResp)(nil),         // 30: bpm.v1.MkdirResp
-	(*RenameReq)(nil),         // 31: bpm.v1.RenameReq
-	(*RenameResp)(nil),        // 32: bpm.v1.RenameResp
-	(*DeleteReq)(nil),         // 33: bpm.v1.DeleteReq
-	(*DeleteResp)(nil),        // 34: bpm.v1.DeleteResp
-	(*ChownReq)(nil),          // 35: bpm.v1.ChownReq
-	(*ChownResp)(nil),         // 36: bpm.v1.ChownResp
-	(*LookupUserReq)(nil),     // 37: bpm.v1.LookupUserReq
-	(*LookupUserResp)(nil),    // 38: bpm.v1.LookupUserResp
-	(*SwarmNodesReq)(nil),     // 39: bpm.v1.SwarmNodesReq
-	(*SwarmNodesResp)(nil),    // 40: bpm.v1.SwarmNodesResp
-	(*SwarmNode)(nil),         // 41: bpm.v1.SwarmNode
-	(*PtyOpenReq)(nil),        // 42: bpm.v1.PtyOpenReq
-	(*PtyOpenResp)(nil),       // 43: bpm.v1.PtyOpenResp
-	(*PtyDataReq)(nil),        // 44: bpm.v1.PtyDataReq
-	(*PtyDataResp)(nil),       // 45: bpm.v1.PtyDataResp
-	(*PtyResizeReq)(nil),      // 46: bpm.v1.PtyResizeReq
-	(*PtyResizeResp)(nil),     // 47: bpm.v1.PtyResizeResp
-	(*PtyCloseReq)(nil),       // 48: bpm.v1.PtyCloseReq
-	(*PtyCloseResp)(nil),      // 49: bpm.v1.PtyCloseResp
-	(*PtyOutput)(nil),         // 50: bpm.v1.PtyOutput
-	(*CronEntry)(nil),         // 51: bpm.v1.CronEntry
-	(*ListCronReq)(nil),       // 52: bpm.v1.ListCronReq
-	(*ListCronResp)(nil),      // 53: bpm.v1.ListCronResp
-	(*ApplyCronReq)(nil),      // 54: bpm.v1.ApplyCronReq
-	(*ApplyCronResp)(nil),     // 55: bpm.v1.ApplyCronResp
-	(*RunBackupReq)(nil),      // 56: bpm.v1.RunBackupReq
-	(*RunBackupResp)(nil),     // 57: bpm.v1.RunBackupResp
-	(*CancelBackupReq)(nil),   // 58: bpm.v1.CancelBackupReq
-	(*CancelBackupResp)(nil),  // 59: bpm.v1.CancelBackupResp
-	(*DownloadRequest)(nil),   // 60: bpm.v1.DownloadRequest
-	(*FileChunk)(nil),         // 61: bpm.v1.FileChunk
-	(*UploadChunk)(nil),       // 62: bpm.v1.UploadChunk
-	(*UploadStart)(nil),       // 63: bpm.v1.UploadStart
-	(*UploadResult)(nil),      // 64: bpm.v1.UploadResult
-	(*ServiceUpdateReq)(nil),  // 65: bpm.v1.ServiceUpdateReq
-	(*ServiceUpdateResp)(nil), // 66: bpm.v1.ServiceUpdateResp
-	(*ExecReq)(nil),           // 67: bpm.v1.ExecReq
-	(*ExecResp)(nil),          // 68: bpm.v1.ExecResp
-	nil,                       // 69: bpm.v1.Hello.LabelsEntry
-	nil,                       // 70: bpm.v1.ContainerSnapshot.LabelsEntry
-	nil,                       // 71: bpm.v1.SwarmNode.LabelsEntry
+	(*SwarmNodesReq)(nil),     // 23: bpm.v1.SwarmNodesReq
+	(*SwarmNodesResp)(nil),    // 24: bpm.v1.SwarmNodesResp
+	(*SwarmNode)(nil),         // 25: bpm.v1.SwarmNode
+	(*CronEntry)(nil),         // 26: bpm.v1.CronEntry
+	(*ListCronReq)(nil),       // 27: bpm.v1.ListCronReq
+	(*ListCronResp)(nil),      // 28: bpm.v1.ListCronResp
+	(*ApplyCronReq)(nil),      // 29: bpm.v1.ApplyCronReq
+	(*ApplyCronResp)(nil),     // 30: bpm.v1.ApplyCronResp
+	(*RunBackupReq)(nil),      // 31: bpm.v1.RunBackupReq
+	(*RunBackupResp)(nil),     // 32: bpm.v1.RunBackupResp
+	(*CancelBackupReq)(nil),   // 33: bpm.v1.CancelBackupReq
+	(*CancelBackupResp)(nil),  // 34: bpm.v1.CancelBackupResp
+	(*ServiceUpdateReq)(nil),  // 35: bpm.v1.ServiceUpdateReq
+	(*ServiceUpdateResp)(nil), // 36: bpm.v1.ServiceUpdateResp
+	(*ExecReq)(nil),           // 37: bpm.v1.ExecReq
+	(*ExecResp)(nil),          // 38: bpm.v1.ExecResp
+	nil,                       // 39: bpm.v1.Hello.LabelsEntry
+	nil,                       // 40: bpm.v1.ContainerSnapshot.LabelsEntry
+	nil,                       // 41: bpm.v1.SwarmNode.LabelsEntry
 }
 var file_manager_proto_depIdxs = []int32{
 	2,  // 0: bpm.v1.AgentMessage.hello:type_name -> bpm.v1.Hello
@@ -5463,78 +3317,47 @@ var file_manager_proto_depIdxs = []int32{
 	3,  // 4: bpm.v1.LeaderMessage.welcome:type_name -> bpm.v1.Welcome
 	5,  // 5: bpm.v1.LeaderMessage.ping:type_name -> bpm.v1.Ping
 	6,  // 6: bpm.v1.LeaderMessage.command:type_name -> bpm.v1.Command
-	69, // 7: bpm.v1.Hello.labels:type_name -> bpm.v1.Hello.LabelsEntry
+	39, // 7: bpm.v1.Hello.labels:type_name -> bpm.v1.Hello.LabelsEntry
 	20, // 8: bpm.v1.Command.list_path:type_name -> bpm.v1.ListPathReq
-	23, // 9: bpm.v1.Command.stat:type_name -> bpm.v1.StatReq
-	25, // 10: bpm.v1.Command.read_file:type_name -> bpm.v1.ReadFileReq
-	27, // 11: bpm.v1.Command.write_file:type_name -> bpm.v1.WriteFileReq
-	29, // 12: bpm.v1.Command.mkdir:type_name -> bpm.v1.MkdirReq
-	31, // 13: bpm.v1.Command.rename:type_name -> bpm.v1.RenameReq
-	33, // 14: bpm.v1.Command.delete:type_name -> bpm.v1.DeleteReq
-	35, // 15: bpm.v1.Command.chown:type_name -> bpm.v1.ChownReq
-	37, // 16: bpm.v1.Command.lookup_user:type_name -> bpm.v1.LookupUserReq
-	52, // 17: bpm.v1.Command.list_cron:type_name -> bpm.v1.ListCronReq
-	54, // 18: bpm.v1.Command.apply_cron:type_name -> bpm.v1.ApplyCronReq
-	56, // 19: bpm.v1.Command.run_backup:type_name -> bpm.v1.RunBackupReq
-	58, // 20: bpm.v1.Command.cancel_backup:type_name -> bpm.v1.CancelBackupReq
-	65, // 21: bpm.v1.Command.service_update:type_name -> bpm.v1.ServiceUpdateReq
-	39, // 22: bpm.v1.Command.swarm_nodes:type_name -> bpm.v1.SwarmNodesReq
-	42, // 23: bpm.v1.Command.pty_open:type_name -> bpm.v1.PtyOpenReq
-	44, // 24: bpm.v1.Command.pty_data:type_name -> bpm.v1.PtyDataReq
-	46, // 25: bpm.v1.Command.pty_resize:type_name -> bpm.v1.PtyResizeReq
-	48, // 26: bpm.v1.Command.pty_close:type_name -> bpm.v1.PtyCloseReq
-	16, // 27: bpm.v1.Command.enable_logs:type_name -> bpm.v1.EnableLogsReq
-	18, // 28: bpm.v1.Command.disable_logs:type_name -> bpm.v1.DisableLogsReq
-	67, // 29: bpm.v1.Command.exec:type_name -> bpm.v1.ExecReq
-	22, // 30: bpm.v1.CommandResult.list_path:type_name -> bpm.v1.ListPathResp
-	24, // 31: bpm.v1.CommandResult.stat:type_name -> bpm.v1.StatResp
-	26, // 32: bpm.v1.CommandResult.read_file:type_name -> bpm.v1.ReadFileResp
-	28, // 33: bpm.v1.CommandResult.write_file:type_name -> bpm.v1.WriteFileResp
-	30, // 34: bpm.v1.CommandResult.mkdir:type_name -> bpm.v1.MkdirResp
-	32, // 35: bpm.v1.CommandResult.rename:type_name -> bpm.v1.RenameResp
-	34, // 36: bpm.v1.CommandResult.delete:type_name -> bpm.v1.DeleteResp
-	36, // 37: bpm.v1.CommandResult.chown:type_name -> bpm.v1.ChownResp
-	38, // 38: bpm.v1.CommandResult.lookup_user:type_name -> bpm.v1.LookupUserResp
-	53, // 39: bpm.v1.CommandResult.list_cron:type_name -> bpm.v1.ListCronResp
-	55, // 40: bpm.v1.CommandResult.apply_cron:type_name -> bpm.v1.ApplyCronResp
-	57, // 41: bpm.v1.CommandResult.run_backup:type_name -> bpm.v1.RunBackupResp
-	59, // 42: bpm.v1.CommandResult.cancel_backup:type_name -> bpm.v1.CancelBackupResp
-	66, // 43: bpm.v1.CommandResult.service_update:type_name -> bpm.v1.ServiceUpdateResp
-	40, // 44: bpm.v1.CommandResult.swarm_nodes:type_name -> bpm.v1.SwarmNodesResp
-	43, // 45: bpm.v1.CommandResult.pty_open:type_name -> bpm.v1.PtyOpenResp
-	45, // 46: bpm.v1.CommandResult.pty_data:type_name -> bpm.v1.PtyDataResp
-	47, // 47: bpm.v1.CommandResult.pty_resize:type_name -> bpm.v1.PtyResizeResp
-	49, // 48: bpm.v1.CommandResult.pty_close:type_name -> bpm.v1.PtyCloseResp
-	17, // 49: bpm.v1.CommandResult.enable_logs:type_name -> bpm.v1.EnableLogsResp
-	19, // 50: bpm.v1.CommandResult.disable_logs:type_name -> bpm.v1.DisableLogsResp
-	68, // 51: bpm.v1.CommandResult.exec:type_name -> bpm.v1.ExecResp
-	9,  // 52: bpm.v1.Event.backup_progress:type_name -> bpm.v1.BackupProgress
-	10, // 53: bpm.v1.Event.backup_log:type_name -> bpm.v1.BackupLogLine
-	11, // 54: bpm.v1.Event.cron_changed:type_name -> bpm.v1.CronChanged
-	13, // 55: bpm.v1.Event.container_report:type_name -> bpm.v1.ContainerReport
-	15, // 56: bpm.v1.Event.log_batch:type_name -> bpm.v1.LogBatch
-	50, // 57: bpm.v1.Event.pty_output:type_name -> bpm.v1.PtyOutput
-	70, // 58: bpm.v1.ContainerSnapshot.labels:type_name -> bpm.v1.ContainerSnapshot.LabelsEntry
-	12, // 59: bpm.v1.ContainerReport.containers:type_name -> bpm.v1.ContainerSnapshot
-	14, // 60: bpm.v1.LogBatch.lines:type_name -> bpm.v1.LogLine
-	21, // 61: bpm.v1.ListPathResp.entries:type_name -> bpm.v1.FileEntry
-	21, // 62: bpm.v1.StatResp.entry:type_name -> bpm.v1.FileEntry
-	41, // 63: bpm.v1.SwarmNodesResp.nodes:type_name -> bpm.v1.SwarmNode
-	71, // 64: bpm.v1.SwarmNode.labels:type_name -> bpm.v1.SwarmNode.LabelsEntry
-	51, // 65: bpm.v1.ListCronResp.entries:type_name -> bpm.v1.CronEntry
-	51, // 66: bpm.v1.ApplyCronReq.entries:type_name -> bpm.v1.CronEntry
-	63, // 67: bpm.v1.UploadChunk.start:type_name -> bpm.v1.UploadStart
-	0,  // 68: bpm.v1.ManagerAgent.Channel:input_type -> bpm.v1.AgentMessage
-	60, // 69: bpm.v1.ManagerAgent.DownloadFile:input_type -> bpm.v1.DownloadRequest
-	62, // 70: bpm.v1.ManagerAgent.UploadFile:input_type -> bpm.v1.UploadChunk
-	1,  // 71: bpm.v1.ManagerAgent.Channel:output_type -> bpm.v1.LeaderMessage
-	61, // 72: bpm.v1.ManagerAgent.DownloadFile:output_type -> bpm.v1.FileChunk
-	64, // 73: bpm.v1.ManagerAgent.UploadFile:output_type -> bpm.v1.UploadResult
-	71, // [71:74] is the sub-list for method output_type
-	68, // [68:71] is the sub-list for method input_type
-	68, // [68:68] is the sub-list for extension type_name
-	68, // [68:68] is the sub-list for extension extendee
-	0,  // [0:68] is the sub-list for field type_name
+	27, // 9: bpm.v1.Command.list_cron:type_name -> bpm.v1.ListCronReq
+	29, // 10: bpm.v1.Command.apply_cron:type_name -> bpm.v1.ApplyCronReq
+	31, // 11: bpm.v1.Command.run_backup:type_name -> bpm.v1.RunBackupReq
+	33, // 12: bpm.v1.Command.cancel_backup:type_name -> bpm.v1.CancelBackupReq
+	35, // 13: bpm.v1.Command.service_update:type_name -> bpm.v1.ServiceUpdateReq
+	23, // 14: bpm.v1.Command.swarm_nodes:type_name -> bpm.v1.SwarmNodesReq
+	16, // 15: bpm.v1.Command.enable_logs:type_name -> bpm.v1.EnableLogsReq
+	18, // 16: bpm.v1.Command.disable_logs:type_name -> bpm.v1.DisableLogsReq
+	37, // 17: bpm.v1.Command.exec:type_name -> bpm.v1.ExecReq
+	22, // 18: bpm.v1.CommandResult.list_path:type_name -> bpm.v1.ListPathResp
+	28, // 19: bpm.v1.CommandResult.list_cron:type_name -> bpm.v1.ListCronResp
+	30, // 20: bpm.v1.CommandResult.apply_cron:type_name -> bpm.v1.ApplyCronResp
+	32, // 21: bpm.v1.CommandResult.run_backup:type_name -> bpm.v1.RunBackupResp
+	34, // 22: bpm.v1.CommandResult.cancel_backup:type_name -> bpm.v1.CancelBackupResp
+	36, // 23: bpm.v1.CommandResult.service_update:type_name -> bpm.v1.ServiceUpdateResp
+	24, // 24: bpm.v1.CommandResult.swarm_nodes:type_name -> bpm.v1.SwarmNodesResp
+	17, // 25: bpm.v1.CommandResult.enable_logs:type_name -> bpm.v1.EnableLogsResp
+	19, // 26: bpm.v1.CommandResult.disable_logs:type_name -> bpm.v1.DisableLogsResp
+	38, // 27: bpm.v1.CommandResult.exec:type_name -> bpm.v1.ExecResp
+	9,  // 28: bpm.v1.Event.backup_progress:type_name -> bpm.v1.BackupProgress
+	10, // 29: bpm.v1.Event.backup_log:type_name -> bpm.v1.BackupLogLine
+	11, // 30: bpm.v1.Event.cron_changed:type_name -> bpm.v1.CronChanged
+	13, // 31: bpm.v1.Event.container_report:type_name -> bpm.v1.ContainerReport
+	15, // 32: bpm.v1.Event.log_batch:type_name -> bpm.v1.LogBatch
+	40, // 33: bpm.v1.ContainerSnapshot.labels:type_name -> bpm.v1.ContainerSnapshot.LabelsEntry
+	12, // 34: bpm.v1.ContainerReport.containers:type_name -> bpm.v1.ContainerSnapshot
+	14, // 35: bpm.v1.LogBatch.lines:type_name -> bpm.v1.LogLine
+	21, // 36: bpm.v1.ListPathResp.entries:type_name -> bpm.v1.FileEntry
+	25, // 37: bpm.v1.SwarmNodesResp.nodes:type_name -> bpm.v1.SwarmNode
+	41, // 38: bpm.v1.SwarmNode.labels:type_name -> bpm.v1.SwarmNode.LabelsEntry
+	26, // 39: bpm.v1.ListCronResp.entries:type_name -> bpm.v1.CronEntry
+	26, // 40: bpm.v1.ApplyCronReq.entries:type_name -> bpm.v1.CronEntry
+	0,  // 41: bpm.v1.ManagerAgent.Channel:input_type -> bpm.v1.AgentMessage
+	1,  // 42: bpm.v1.ManagerAgent.Channel:output_type -> bpm.v1.LeaderMessage
+	42, // [42:43] is the sub-list for method output_type
+	41, // [41:42] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_manager_proto_init() }
@@ -5555,48 +3378,24 @@ func file_manager_proto_init() {
 	}
 	file_manager_proto_msgTypes[6].OneofWrappers = []any{
 		(*Command_ListPath)(nil),
-		(*Command_Stat)(nil),
-		(*Command_ReadFile)(nil),
-		(*Command_WriteFile)(nil),
-		(*Command_Mkdir)(nil),
-		(*Command_Rename)(nil),
-		(*Command_Delete)(nil),
-		(*Command_Chown)(nil),
-		(*Command_LookupUser)(nil),
 		(*Command_ListCron)(nil),
 		(*Command_ApplyCron)(nil),
 		(*Command_RunBackup)(nil),
 		(*Command_CancelBackup)(nil),
 		(*Command_ServiceUpdate)(nil),
 		(*Command_SwarmNodes)(nil),
-		(*Command_PtyOpen)(nil),
-		(*Command_PtyData)(nil),
-		(*Command_PtyResize)(nil),
-		(*Command_PtyClose)(nil),
 		(*Command_EnableLogs)(nil),
 		(*Command_DisableLogs)(nil),
 		(*Command_Exec)(nil),
 	}
 	file_manager_proto_msgTypes[7].OneofWrappers = []any{
 		(*CommandResult_ListPath)(nil),
-		(*CommandResult_Stat)(nil),
-		(*CommandResult_ReadFile)(nil),
-		(*CommandResult_WriteFile)(nil),
-		(*CommandResult_Mkdir)(nil),
-		(*CommandResult_Rename)(nil),
-		(*CommandResult_Delete)(nil),
-		(*CommandResult_Chown)(nil),
-		(*CommandResult_LookupUser)(nil),
 		(*CommandResult_ListCron)(nil),
 		(*CommandResult_ApplyCron)(nil),
 		(*CommandResult_RunBackup)(nil),
 		(*CommandResult_CancelBackup)(nil),
 		(*CommandResult_ServiceUpdate)(nil),
 		(*CommandResult_SwarmNodes)(nil),
-		(*CommandResult_PtyOpen)(nil),
-		(*CommandResult_PtyData)(nil),
-		(*CommandResult_PtyResize)(nil),
-		(*CommandResult_PtyClose)(nil),
 		(*CommandResult_EnableLogs)(nil),
 		(*CommandResult_DisableLogs)(nil),
 		(*CommandResult_Exec)(nil),
@@ -5607,11 +3406,6 @@ func file_manager_proto_init() {
 		(*Event_CronChanged)(nil),
 		(*Event_ContainerReport)(nil),
 		(*Event_LogBatch)(nil),
-		(*Event_PtyOutput)(nil),
-	}
-	file_manager_proto_msgTypes[62].OneofWrappers = []any{
-		(*UploadChunk_Start)(nil),
-		(*UploadChunk_Data)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -5619,7 +3413,7 @@ func file_manager_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_manager_proto_rawDesc), len(file_manager_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   72,
+			NumMessages:   42,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

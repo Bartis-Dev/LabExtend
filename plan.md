@@ -110,7 +110,7 @@ Effort: 2d.
 
 ## Phase 9 — Filebrowser (per-node FS via agent gRPC) — DONE
 
-Agent implements every fs op (ListPath, Stat, ReadFile, WriteFile, Mkdir, Rename, Delete, Chown, LookupUser). Leader proxies via `/api/nodes/:id/files/*` and enforces managed-root bounds via `node_paths`. Frontend page at `/files` with sidebar-driven node + root picker, right-click chown, recursive delete.
+Read-only. Agent implements ListPath; leader proxies via `/api/nodes/:id/files` and enforces managed-root bounds via `node_paths` (browse roots). Frontend page at `/files` with sidebar-driven node + root picker. Write access (write, mkdir, rename, delete, chown) was removed again.
 
 ## Phase 10 — Cron management — DONE
 
@@ -148,7 +148,7 @@ Optional mTLS via `BPM_GRPC_TLS_*` env vars: leader presents server cert, option
 2. Agent identity = hostname (`BPM_AGENT_HOST_ID` override).
 3. Cron via `/etc/cron.d/bpm` only.
 4. Bind-mount `/:/host:rslave` for v1.
-5. Inline CodeMirror editor for files <1 MiB.
+5. No in-browser file editing; the file browser is read-only.
 6. S3 upload through the leader for normal use; presigned for >100 MiB later.
 7. TOTP only; WebAuthn deferred.
 8. Binary admin/user role (no granular RBAC) for v1.

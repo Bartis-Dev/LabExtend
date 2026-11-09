@@ -4,6 +4,11 @@
 
 ### Security
 
+- **A TOTP code can no longer be replayed.** `totp.Validate` accepts one 30s
+  step of skew either side, so a used code stayed valid for up to 90 seconds.
+  The leader now remembers the last accepted step per user and only accepts
+  later ones (migration 0009).
+
 - **grpc-go 1.66 → 1.82.1** for GO-2026-6061 and GO-2026-4762, both reachable
   through the leader's gRPC server (`govulncheck` traced them from
   `startGRPCServer` and the `Channel` stream). grpc 1.82 needs Go 1.25, so the
@@ -102,6 +107,19 @@
   used to answer `200` while leaving the password unchanged.
 
 ### Added
+
+- **Sign in with Pocket ID (OIDC).** Optional login through any OIDC provider:
+  authorization code flow with PKCE, state and nonce. Accounts are connected
+  explicitly under Account (password required), never matched by email; an
+  unknown identity is refused. An OIDC login skips the TOTP step. Configure
+  with `BPM_OIDC_ISSUER`, `BPM_OIDC_CLIENT_ID`, `BPM_OIDC_CLIENT_SECRET` (or
+  `_FILE`) and `EXTERNAL_URL`. `BPM_PASSWORD_LOGIN=false` turns the password
+  form off, but only while OIDC is enabled.
+- **Recovery codes: count, regenerate, copy, download.** The account page shows
+  how many recovery codes are left (warning at two or fewer), can replace them
+  with a fresh set (password required, old codes stop working), and offers Copy
+  and Download .txt next to the codes. Its browser alert and confirm dialogs
+  became inline messages and the shared modal.
 
 - **Web Analytics: page views for every site behind Traefik, without a script
   on the sites.** The leader reads the JSON access log of every container whose

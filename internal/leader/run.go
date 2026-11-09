@@ -55,7 +55,6 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	bucketRetention := intEnv("BPM_METRIC_RETENTION_HOURS", 24)
 	sampleRetention := intEnv("BPM_SAMPLE_RETENTION_HOURS", 2)
 	logs := newLogStore(database, maxLogLines)
-	ptys := newPtyHub()
 	analytics := newWebAnalytics(database, containers.imageOf, cfg.AnalyticsImagePrefix, cfg.AnalyticsRetentionDays)
 	if err := analytics.Load(ctx); err != nil {
 		return fmt.Errorf("web analytics: %w", err)
@@ -87,6 +86,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	// Background loops.
 	go metrics.RunPruneLoop(ctx, bucketRetention, sampleRetention)
 	go logs.RunRetentionLoop(ctx, logRetention)
+	go logs.RunOrphanLoop(ctx, 15*time.Minute)
 	go alerts.Run(ctx)
 	go analytics.Run(ctx, 30*time.Second)
 	go func() {
@@ -98,7 +98,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	errs := make(chan error, 2)
 
 	go func() {
-		if err := startGRPCServer(ctx, cfg, registry, hub, database, metrics, containers, logs, analytics, ptys); err != nil {
+		if err := startGRPCServer(ctx, cfg, registry, hub, database, metrics, containers, logs, analytics); err != nil {
 			errs <- fmt.Errorf("grpc: %w", err)
 		}
 	}()
@@ -112,7 +112,6 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			Containers: containers,
 			Logs:       logs,
 			Analytics:  analytics,
-			Ptys:       ptys,
 			Alerts:     alerts,
 			Audit:      audit,
 			TOTP:       totpMgr,

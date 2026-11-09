@@ -28,7 +28,6 @@ type leaderDeps struct {
 	Containers *containerStore
 	Logs       *logStore
 	Analytics  *webAnalytics
-	Ptys       *ptyHub
 	Alerts     *AlertEngine
 	Audit      *AuditLogger
 	TOTP       *auth.TOTPManager
@@ -71,7 +70,7 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 		// own in-process agent can reach.
 		Swarm: newSwarmTopology(deps.Registry, cfg.AgentHostID),
 	}
-	filesDeps := &FilesDeps{DB: deps.DB, Registry: deps.Registry, Audit: deps.Audit, MaxInlineBytes: cfg.FSMaxInlineBytes}
+	filesDeps := &FilesDeps{DB: deps.DB, Registry: deps.Registry, Audit: deps.Audit}
 	cronDeps := &CronDeps{DB: deps.DB, Registry: deps.Registry, Audit: deps.Audit}
 	s3Deps := &S3Deps{DB: deps.DB, SecretsKey: deps.SecretsKey, Audit: deps.Audit}
 	backupDeps := &BackupDeps{DB: deps.DB, Scheduler: deps.Scheduler, Audit: deps.Audit}
@@ -83,7 +82,7 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 		ServiceName:  cfg.PortainerService,
 	}
 	accountDeps := &AccountDeps{AuthDeps: authDeps, TOTP: deps.TOTP, Audit: deps.Audit}
-	terminalDeps := &TerminalDeps{Registry: deps.Registry, Pty: deps.Ptys, Audit: deps.Audit}
+	oidcDeps := newOIDCDeps(ctx, cfg, authDeps, accountDeps, deps.Audit)
 	auditDeps := &AuditDeps{DB: deps.DB}
 
 	r := chi.NewRouter()
@@ -109,6 +108,9 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 		api.Get("/setup/status", authDeps.SetupStatus)
 		api.Post("/setup/initialize", authDeps.SetupInitialize)
 		api.Post("/auth/login", authDeps.Login)
+		api.Get("/auth/oidc/config", oidcDeps.Config)
+		api.Get("/auth/oidc/login", oidcDeps.Login)
+		api.Get("/auth/oidc/callback", oidcDeps.Callback)
 		api.Get("/ping", func(w http.ResponseWriter, _ *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]any{"pong": true, "ts": time.Now().Unix()})
 		})
@@ -164,7 +166,11 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 			authed.Post("/account/totp/begin", accountDeps.TOTPBegin)
 			authed.Post("/account/totp/confirm", accountDeps.TOTPConfirm)
 			authed.Post("/account/totp/disable", accountDeps.TOTPDisable)
+			authed.Post("/account/totp/recovery-codes", accountDeps.TOTPRegenerateRecovery)
 			authed.Post("/account/password", accountDeps.ChangePassword)
+			authed.Get("/account/oidc", oidcDeps.Status)
+			authed.Post("/account/oidc/link", oidcDeps.Link)
+			authed.Post("/account/oidc/unlink", oidcDeps.Unlink)
 
 			// ── admin only ────────────────────────────────────
 			// Files, cron, swarm services, S3 and backups all reach the host
@@ -184,15 +190,6 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 				admin.Post("/nodes/{id}/paths", filesDeps.CreatePath)
 				admin.Delete("/nodes/{id}/paths/{pid}", filesDeps.DeletePath)
 				admin.Get("/nodes/{id}/files", filesDeps.ListFiles)
-				admin.Get("/nodes/{id}/files/stat", filesDeps.StatFile)
-				admin.Get("/nodes/{id}/files/read", filesDeps.ReadFile)
-				admin.Post("/nodes/{id}/files/write", filesDeps.WriteFile)
-				admin.Post("/nodes/{id}/files/mkdir", filesDeps.Mkdir)
-				admin.Post("/nodes/{id}/files/rename", filesDeps.Rename)
-				admin.Delete("/nodes/{id}/files", filesDeps.Delete)
-				admin.Post("/nodes/{id}/files/chown", filesDeps.Chown)
-				admin.Post("/nodes/{id}/files/suggest-owner", filesDeps.SuggestOwner)
-				admin.Get("/nodes/{id}/files/lookup-user", filesDeps.LookupUser)
 
 				// ── cron ──────────────────────────────────────────────────
 				admin.Get("/cronjobs", cronDeps.List)
@@ -201,11 +198,6 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 				admin.Put("/cronjobs/{id}", cronDeps.Update)
 				admin.Delete("/cronjobs/{id}", cronDeps.Delete)
 				admin.Post("/nodes/{id}/cronjobs/apply", cronDeps.Apply)
-
-				// ── interactive terminal ──────────────────────────────────
-				// Hands out a root shell on the node's host. Admin-only for
-				// the same reason files and cron are.
-				admin.Get("/nodes/{id}/terminal", terminalDeps.Serve)
 
 				// ── swarm service control ─────────────────────────────────
 				admin.Post("/services/portainer-agent/restart", serviceDeps.RestartPortainerAgent)
@@ -218,7 +210,6 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 				admin.Post("/s3/endpoints/{id}/test", s3Deps.Test)
 				admin.Get("/s3/endpoints/{id}/buckets", s3Deps.Buckets)
 				admin.Get("/s3/endpoints/{id}/buckets/{bucket}/objects", s3Deps.Objects)
-				admin.Post("/s3/endpoints/{id}/buckets/{bucket}/delete", s3Deps.DeleteObjects)
 
 				// ── backup ────────────────────────────────────────────────
 				admin.Get("/backups/plans", backupDeps.ListPlans)
@@ -265,8 +256,8 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 
 // timeoutExceptStreams puts a deadline on ordinary API calls but leaves the
 // long-lived streaming endpoints alone. chi's middleware.Timeout cancels the
-// request context, so under it an SSE tail or a terminal session is torn down
-// after two minutes no matter how healthy it is.
+// request context, so under it an SSE tail is torn down after two minutes no
+// matter how healthy it is.
 func timeoutExceptStreams(d time.Duration) func(http.Handler) http.Handler {
 	timeout := middleware.Timeout(d)
 	return func(next http.Handler) http.Handler {
@@ -283,8 +274,7 @@ func timeoutExceptStreams(d time.Duration) func(http.Handler) http.Handler {
 
 func isStreamingPath(p string) bool {
 	return p == "/api/events" ||
-		strings.HasSuffix(p, "/logs/stream") ||
-		strings.HasSuffix(p, "/terminal")
+		strings.HasSuffix(p, "/logs/stream")
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

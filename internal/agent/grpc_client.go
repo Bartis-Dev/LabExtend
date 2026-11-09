@@ -135,7 +135,7 @@ func (c *Client) connectAndServe(parentCtx context.Context) error {
 			Os:           runtime.GOOS,
 			Arch:         runtime.GOARCH,
 			Labels:       c.cfg.AgentLabels,
-			Capabilities: []string{"fs", "cron", "backup", "terminal"},
+			Capabilities: []string{"fs", "cron", "backup"},
 		}},
 	}
 	if err := stream.Send(hello); err != nil {
@@ -165,9 +165,6 @@ func (c *Client) connectAndServe(parentCtx context.Context) error {
 	// 3. Spawn goroutines: receive loop + heartbeat loop + monitor.
 	c.handler.monitor.Start(ctx, safeSend)
 	defer c.handler.monitor.Stop()
-	// Shells are only reachable through this stream. Once it is gone they are
-	// unsupervised root containers on the host, so they go with it.
-	defer c.handler.pty.CloseAll()
 
 	errCh := make(chan error, 2)
 

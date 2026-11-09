@@ -10,11 +10,6 @@ A Docker Swarm-native infrastructure + monitoring tool. Single Go binary deploye
 - **Alerts + webhooks** — threshold rules with hysteresis (CPU > 80% for 60s on any node → Discord). Recovery posts too.
 - **Auth** — SQLite users, Argon2id, opaque sessions, CSRF. Setup wizard on first boot.
 - **SSE** — UI updates without polling.
-- **Browser terminal** — a root shell on any node's host, admin-only and
-  audit-logged, capped at one hour. The agent starts a privileged helper
-  container that `nsenter`s into the host namespaces (no sshd, no keys); the
-  browser reaches it over a WebSocket on the leader. Anyone who can reach this
-  is root on that host — treat admin accounts accordingly and put 2FA on them.
 
 ## Web Analytics
 
@@ -76,7 +71,7 @@ and visitors are then undercounted.
 
 ## What's planned (phases 9–14)
 
-Filebrowser per-node, cron management, S3 browser, **backup engine** (the original headline), TOTP 2FA, admin user management, mTLS hardening.
+Read-only file browser per-node, cron management, S3 browser, **backup engine** (the original headline), TOTP 2FA, admin user management, mTLS hardening.
 
 ## Architecture
 
@@ -132,7 +127,30 @@ UI receives delta-computed rates (bps) — the leader does the math, the browser
 | `BPM_PORTAINER_SERVICE` | `portainer_agent` | Swarm service the sidebar "Restart Portainer" button force-updates (runs on the leader's manager socket). |
 | `BPM_ANALYTICS_IMAGE_PREFIX` | `traefik` | Web Analytics reads the access log of containers whose image name starts with this. |
 | `BPM_ANALYTICS_RETENTION_DAYS` | `400` | Days of daily Web Analytics totals and breakdowns to keep. |
-| `BPM_SHELL_IMAGE` | the agent's own image | Image the browser terminal's privileged `nsenter` helper container runs. The default is already on the node and ships `nsenter`; a replacement must do both. |
+| `EXTERNAL_URL` | unset | Public base URL of the UI. Needed for OIDC: the redirect URL is `EXTERNAL_URL` + `/api/auth/oidc/callback`. |
+| `BPM_OIDC_ISSUER` | unset | OIDC issuer, e.g. `https://id.bartis.dev`. OIDC is on only when issuer, client ID and client secret are all set. |
+| `BPM_OIDC_CLIENT_ID` | unset | OIDC client ID. |
+| `BPM_OIDC_CLIENT_SECRET` | unset | OIDC client secret. `BPM_OIDC_CLIENT_SECRET_FILE` reads it from a file instead (Docker Swarm secret). |
+| `BPM_OIDC_NAME` | `Pocket ID` | Provider name shown on the login and account pages. |
+| `BPM_PASSWORD_LOGIN` | `true` | `false` hides the password form and makes `/api/auth/login` answer 403. Ignored (with a warning) while OIDC is not enabled, so nobody gets locked out. |
+
+## Pocket ID login (OIDC)
+
+Optional "Sign in with Pocket ID" (any OIDC provider works). Authorization code flow with PKCE (S256), state and nonce, as a confidential client.
+
+1. In Pocket ID, create an OIDC client:
+   - Callback URL: `https://labextend.bartis.dev/api/auth/oidc/callback` (generally `EXTERNAL_URL` + `/api/auth/oidc/callback`)
+   - Scopes used: `openid profile email`
+   - Keep it a confidential client (with a client secret); PKCE stays on.
+2. Set `EXTERNAL_URL`, `BPM_OIDC_ISSUER`, `BPM_OIDC_CLIENT_ID` and `BPM_OIDC_CLIENT_SECRET` (or `BPM_OIDC_CLIENT_SECRET_FILE`) on the leader and redeploy.
+3. Each user signs in with their password once and clicks **Connect Pocket ID** under Account (asks for the current password).
+
+Notes:
+
+- Accounts are linked explicitly by issuer + subject, never by email. An unknown identity is refused; there is no auto-provisioning.
+- An OIDC login skips the local TOTP step: the passkey already is the second factor.
+- If the issuer is unreachable at boot, the leader still starts; discovery is retried on the next sign-in.
+- `BPM_PASSWORD_LOGIN=false` is only honored while OIDC is enabled. A user who has not connected Pocket ID cannot sign in at all in that mode, so connect accounts first. Disconnecting is refused in that mode for the same reason.
 
 ## Dev loop
 

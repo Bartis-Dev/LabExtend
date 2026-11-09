@@ -66,6 +66,17 @@ func newContainerStore(db *sql.DB) *containerStore {
 	}
 }
 
+// stoppedRetention is how long a stopped container stays visible (with its
+// logs) before it is treated as removed.
+const stoppedRetention = 48 * time.Hour
+
+func stoppedTooLong(state string, finishedAtMs, cutoffMs int64) bool {
+	if state != "exited" && state != "dead" {
+		return false
+	}
+	return finishedAtMs > 0 && finishedAtMs < cutoffMs
+}
+
 func key(node, container string) string { return node + "::" + container }
 
 // Apply ingests one ContainerReport from one node. Returns the updated
@@ -79,8 +90,15 @@ func (s *containerStore) Apply(ctx context.Context, nodeID string, rep *pb.Conta
 	updated := make([]*ContainerView, 0, len(rep.Containers))
 	seen := make(map[string]bool, len(rep.Containers))
 
+	stoppedCutoff := time.Now().Add(-stoppedRetention).UnixMilli()
+
 	s.mu.Lock()
 	for _, snap := range rep.Containers {
+		if stoppedTooLong(snap.State, snap.FinishedAtMs, stoppedCutoff) {
+			// Treated as gone: dropped from state below, and its logs are
+			// then removed by logStore.RunOrphanLoop.
+			continue
+		}
 		k := key(nodeID, snap.ContainerId)
 		seen[k] = true
 
@@ -140,13 +158,13 @@ func (s *containerStore) Apply(ctx context.Context, nodeID string, rep *pb.Conta
 	s.mu.Unlock()
 
 	if s.db != nil {
-		s.persistBatch(ctx, nodeID, updated, seen)
+		s.persistBatch(ctx, nodeID, updated, seen, len(rep.Containers) > 0)
 	}
 	return updated
 }
 
 // persistBatch writes (or deletes) container_state rows in one transaction.
-func (s *containerStore) persistBatch(ctx context.Context, nodeID string, views []*ContainerView, seen map[string]bool) {
+func (s *containerStore) persistBatch(ctx context.Context, nodeID string, views []*ContainerView, seen map[string]bool, reported bool) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return
@@ -199,7 +217,7 @@ func (s *containerStore) persistBatch(ctx context.Context, nodeID string, views 
 	}
 
 	// Drop rows for this node not in the latest report.
-	if len(seen) > 0 {
+	if reported {
 		rows, err := tx.QueryContext(ctx, `SELECT container_id FROM container_state WHERE node_id = ?`, nodeID)
 		if err == nil {
 			var toDelete []string

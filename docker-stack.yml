@@ -73,6 +73,18 @@ services:
       BPM_LOG_RETENTION_HOURS: "0"       # 0 = no time-based prune (cap-only)
       BPM_METRIC_RETENTION_HOURS: "168"  # 7 days of minute buckets
       BPM_DOCKER_SOCKET: "/host/var/run/docker.sock"
+      # Optional Pocket ID login. Empty values keep OIDC off. For the secret,
+      # either export BPM_OIDC_CLIENT_SECRET or use the Swarm secret below.
+      BPM_OIDC_ISSUER: "${BPM_OIDC_ISSUER:-}"
+      BPM_OIDC_CLIENT_ID: "${BPM_OIDC_CLIENT_ID:-}"
+      BPM_OIDC_CLIENT_SECRET: "${BPM_OIDC_CLIENT_SECRET:-}"
+      # BPM_OIDC_CLIENT_SECRET_FILE: "/run/secrets/labextend_oidc_client_secret"
+      BPM_OIDC_NAME: "${BPM_OIDC_NAME:-Pocket ID}"
+      BPM_PASSWORD_LOGIN: "${BPM_PASSWORD_LOGIN:-true}"
+    # Uncomment together with the top-level secrets block once the secret exists:
+    #   printf %s "<secret>" | docker secret create labextend_oidc_client_secret -
+    # secrets:
+    #   - labextend_oidc_client_secret
     ports:
       - target: 8080
         published: 8080
@@ -95,6 +107,10 @@ networks:
   labextend-net:
     driver: overlay
     attachable: true
+
+# secrets:
+#   labextend_oidc_client_secret:
+#     external: true
 
 volumes:
   labextend-leader-data:

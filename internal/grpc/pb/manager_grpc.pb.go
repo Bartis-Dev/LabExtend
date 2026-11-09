@@ -19,9 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ManagerAgent_Channel_FullMethodName      = "/bpm.v1.ManagerAgent/Channel"
-	ManagerAgent_DownloadFile_FullMethodName = "/bpm.v1.ManagerAgent/DownloadFile"
-	ManagerAgent_UploadFile_FullMethodName   = "/bpm.v1.ManagerAgent/UploadFile"
+	ManagerAgent_Channel_FullMethodName = "/bpm.v1.ManagerAgent/Channel"
 )
 
 // ManagerAgentClient is the client API for ManagerAgent service.
@@ -30,12 +28,9 @@ const (
 //
 // ManagerAgent is the single gRPC service exposed by the leader. Agents open
 // the bidirectional Channel stream on startup and keep it open for the
-// lifetime of the process. Large byte payloads (file download/upload) use
-// dedicated streaming RPCs so they don't block the control channel.
+// lifetime of the process.
 type ManagerAgentClient interface {
 	Channel(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[AgentMessage, LeaderMessage], error)
-	DownloadFile(ctx context.Context, in *DownloadRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[FileChunk], error)
-	UploadFile(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadChunk, UploadResult], error)
 }
 
 type managerAgentClient struct {
@@ -59,50 +54,15 @@ func (c *managerAgentClient) Channel(ctx context.Context, opts ...grpc.CallOptio
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ManagerAgent_ChannelClient = grpc.BidiStreamingClient[AgentMessage, LeaderMessage]
 
-func (c *managerAgentClient) DownloadFile(ctx context.Context, in *DownloadRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[FileChunk], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &ManagerAgent_ServiceDesc.Streams[1], ManagerAgent_DownloadFile_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[DownloadRequest, FileChunk]{ClientStream: stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ManagerAgent_DownloadFileClient = grpc.ServerStreamingClient[FileChunk]
-
-func (c *managerAgentClient) UploadFile(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadChunk, UploadResult], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &ManagerAgent_ServiceDesc.Streams[2], ManagerAgent_UploadFile_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[UploadChunk, UploadResult]{ClientStream: stream}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ManagerAgent_UploadFileClient = grpc.ClientStreamingClient[UploadChunk, UploadResult]
-
 // ManagerAgentServer is the server API for ManagerAgent service.
 // All implementations must embed UnimplementedManagerAgentServer
 // for forward compatibility.
 //
 // ManagerAgent is the single gRPC service exposed by the leader. Agents open
 // the bidirectional Channel stream on startup and keep it open for the
-// lifetime of the process. Large byte payloads (file download/upload) use
-// dedicated streaming RPCs so they don't block the control channel.
+// lifetime of the process.
 type ManagerAgentServer interface {
 	Channel(grpc.BidiStreamingServer[AgentMessage, LeaderMessage]) error
-	DownloadFile(*DownloadRequest, grpc.ServerStreamingServer[FileChunk]) error
-	UploadFile(grpc.ClientStreamingServer[UploadChunk, UploadResult]) error
 	mustEmbedUnimplementedManagerAgentServer()
 }
 
@@ -115,12 +75,6 @@ type UnimplementedManagerAgentServer struct{}
 
 func (UnimplementedManagerAgentServer) Channel(grpc.BidiStreamingServer[AgentMessage, LeaderMessage]) error {
 	return status.Error(codes.Unimplemented, "method Channel not implemented")
-}
-func (UnimplementedManagerAgentServer) DownloadFile(*DownloadRequest, grpc.ServerStreamingServer[FileChunk]) error {
-	return status.Error(codes.Unimplemented, "method DownloadFile not implemented")
-}
-func (UnimplementedManagerAgentServer) UploadFile(grpc.ClientStreamingServer[UploadChunk, UploadResult]) error {
-	return status.Error(codes.Unimplemented, "method UploadFile not implemented")
 }
 func (UnimplementedManagerAgentServer) mustEmbedUnimplementedManagerAgentServer() {}
 func (UnimplementedManagerAgentServer) testEmbeddedByValue()                      {}
@@ -150,24 +104,6 @@ func _ManagerAgent_Channel_Handler(srv interface{}, stream grpc.ServerStream) er
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ManagerAgent_ChannelServer = grpc.BidiStreamingServer[AgentMessage, LeaderMessage]
 
-func _ManagerAgent_DownloadFile_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(DownloadRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(ManagerAgentServer).DownloadFile(m, &grpc.GenericServerStream[DownloadRequest, FileChunk]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ManagerAgent_DownloadFileServer = grpc.ServerStreamingServer[FileChunk]
-
-func _ManagerAgent_UploadFile_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(ManagerAgentServer).UploadFile(&grpc.GenericServerStream[UploadChunk, UploadResult]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ManagerAgent_UploadFileServer = grpc.ClientStreamingServer[UploadChunk, UploadResult]
-
 // ManagerAgent_ServiceDesc is the grpc.ServiceDesc for ManagerAgent service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -180,16 +116,6 @@ var ManagerAgent_ServiceDesc = grpc.ServiceDesc{
 			StreamName:    "Channel",
 			Handler:       _ManagerAgent_Channel_Handler,
 			ServerStreams: true,
-			ClientStreams: true,
-		},
-		{
-			StreamName:    "DownloadFile",
-			Handler:       _ManagerAgent_DownloadFile_Handler,
-			ServerStreams: true,
-		},
-		{
-			StreamName:    "UploadFile",
-			Handler:       _ManagerAgent_UploadFile_Handler,
 			ClientStreams: true,
 		},
 	},

@@ -39,7 +39,9 @@ func newLogStore(db *sql.DB, maxLinesPerContainer int) *logStore {
 	return &logStore{
 		db:              db,
 		maxLinesPerCnt:  maxLinesPerContainer,
-		pruneBatchEvery: maxLinesPerContainer / 10,
+		// Prune in batches of 1000 instead of per line: the table holds up to
+		// cap+1000 rows per container, and one DELETE runs per 1000 inserts.
+		pruneBatchEvery: 1000,
 		subscribers:     make(map[string]map[chan *LogEntry]struct{}),
 		pendingPrn:      make(map[string]int),
 	}
@@ -254,6 +256,50 @@ func (s *logStore) RunRetentionLoop(ctx context.Context, retentionHours int) {
 				slog.Warn("log retention prune failed", "err", err)
 			}
 		}
+	}
+}
+
+// orphanGrace keeps the newest lines of a container that is not (yet) in
+// container_state: the first log batch of a new container can arrive before
+// its first container report.
+const orphanGrace = time.Hour
+
+// RunOrphanLoop deletes the log lines of containers that no longer exist in
+// container_state. Containers leave container_state when they are removed
+// from the host or have been stopped longer than stoppedRetention, so this
+// is what keeps dead containers from piling up forever.
+func (s *logStore) RunOrphanLoop(ctx context.Context, every time.Duration) {
+	if s.db == nil {
+		return
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		s.pruneOrphans(ctx, time.Now())
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+func (s *logStore) pruneOrphans(ctx context.Context, now time.Time) {
+	res, err := s.db.ExecContext(ctx, `
+		DELETE FROM container_log_lines
+		WHERE ts_ms < ?
+		  AND NOT EXISTS (
+		    SELECT 1 FROM container_state c
+		    WHERE c.node_id = container_log_lines.node_id
+		      AND c.container_id = container_log_lines.container_id
+		  )
+	`, now.Add(-orphanGrace).UnixMilli())
+	if err != nil {
+		slog.Warn("log orphan prune failed", "err", err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		slog.Info("log orphan prune", "deleted_lines", n)
 	}
 }
 
