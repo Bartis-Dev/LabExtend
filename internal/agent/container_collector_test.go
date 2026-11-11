@@ -7,7 +7,7 @@ import (
 
 // Docker's RestartCount covers the container's whole life. Seeing it for the
 // first time — every agent start — must not look like that many restarts in
-// the last minute, or each rollout raises a false container_crashed alert.
+// the last minute, or each rollout raises a false container.crashloop notification.
 func TestRecordRestartsSeedsBaselineOnFirstSight(t *testing.T) {
 	c := newContainerCollector(nil, time.Second)
 	now := time.Now()

@@ -22,7 +22,6 @@ type Session struct {
 	IP           string
 	UserAgent    string
 	CSRFToken    string
-	Is2FAPending bool
 }
 
 // SessionStore persists sessions in SQLite. Single backing table = simple
@@ -46,7 +45,6 @@ func (s *SessionStore) Create(
 	w http.ResponseWriter,
 	r *http.Request,
 	userID int64,
-	pending2FA bool,
 ) (*Session, error) {
 	id, err := NewSessionID()
 	if err != nil {
@@ -67,19 +65,17 @@ func (s *SessionStore) Create(
 		IP:           clientIP(r),
 		UserAgent:    truncate(r.Header.Get("User-Agent"), 255),
 		CSRFToken:    csrf,
-		Is2FAPending: pending2FA,
 	}
 
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO sessions
 			(id, user_id, created_at, expires_at, last_seen,
-			 ip, user_agent, csrf_token, is_2fa_pending)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ip, user_agent, csrf_token)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		sess.ID, sess.UserID,
 		sess.CreatedAt.Unix(), sess.ExpiresAt.Unix(), sess.LastSeen.Unix(),
 		sess.IP, sess.UserAgent, sess.CSRFToken,
-		boolToInt(sess.Is2FAPending),
 	)
 	if err != nil {
 		return nil, err
@@ -111,18 +107,17 @@ func (s *SessionStore) Get(ctx context.Context, r *http.Request) (*Session, erro
 
 	row := s.db.QueryRowContext(ctx, `
 		SELECT id, user_id, created_at, expires_at, last_seen,
-		       COALESCE(ip,''), COALESCE(user_agent,''), csrf_token, is_2fa_pending
+		       COALESCE(ip,''), COALESCE(user_agent,''), csrf_token
 		FROM sessions WHERE id = ?
 	`, c.Value)
 
 	var (
 		sess                           Session
 		createdAt, expiresAt, lastSeen int64
-		pending2FA                     int
 	)
 	if err := row.Scan(
 		&sess.ID, &sess.UserID, &createdAt, &expiresAt, &lastSeen,
-		&sess.IP, &sess.UserAgent, &sess.CSRFToken, &pending2FA,
+		&sess.IP, &sess.UserAgent, &sess.CSRFToken,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -132,7 +127,6 @@ func (s *SessionStore) Get(ctx context.Context, r *http.Request) (*Session, erro
 	sess.CreatedAt = time.Unix(createdAt, 0)
 	sess.ExpiresAt = time.Unix(expiresAt, 0)
 	sess.LastSeen = time.Unix(lastSeen, 0)
-	sess.Is2FAPending = pending2FA == 1
 
 	if time.Now().After(sess.ExpiresAt) {
 		// Expired — clean up + report no-session.
@@ -165,17 +159,6 @@ func (s *SessionStore) Destroy(ctx context.Context, w http.ResponseWriter, r *ht
 		SameSite: http.SameSiteLaxMode,
 	})
 	return nil
-}
-
-// PromoteFrom2FA flips is_2fa_pending=0 after a successful TOTP/recovery
-// check. Cookie value stays the same.
-func (s *SessionStore) PromoteFrom2FA(ctx context.Context, sess *Session) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE sessions SET is_2fa_pending = 0 WHERE id = ?`, sess.ID)
-	if err == nil {
-		sess.Is2FAPending = false
-	}
-	return err
 }
 
 // PurgeExpired deletes rows past their expires_at. Call from a goroutine
@@ -229,11 +212,4 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }

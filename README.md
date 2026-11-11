@@ -7,8 +7,8 @@ A Docker Swarm-native infrastructure + monitoring tool. Single Go binary deploye
 - **Live node dashboard** — per-node CPU/RAM/Disk bars + network throughput, ~5s refresh, with average buttons for 1h / 12h / 24h windows.
 - **Container view** — every container across the swarm: name, image, state, health, CPU%, RAM, network rates, restart counter. Auto-detects restart-loops (≥3 restarts/60s → "crashed").
 - **Live logs** — per-container streaming with persisted ringbuffer (last 5000 lines per container, configurable). Open a container → instantly see backlog, then live tail.
-- **Alerts + webhooks** — threshold rules with hysteresis (CPU > 80% for 60s on any node → Discord). Recovery posts too.
-- **Auth** — SQLite users, Argon2id, opaque sessions, CSRF. Setup wizard on first boot.
+- **Notifications + webhooks**: failed backups, offline nodes and crash-looping containers show up in the bell in the sidebar and go to every Discord webhook subscribed to them.
+- **Auth** — sign-in with Pocket ID (OIDC) only, roles from Pocket ID groups, opaque sessions, CSRF.
 - **SSE** — UI updates without polling.
 
 ## Web Analytics
@@ -71,7 +71,7 @@ and visitors are then undercounted.
 
 ## What's planned (phases 9–14)
 
-Read-only file browser per-node, cron management, S3 browser, **backup engine** (the original headline), TOTP 2FA, admin user management, mTLS hardening.
+Read-only file browser per-node, cron management, S3 browser, **backup engine** (the original headline), mTLS hardening.
 
 ## Architecture
 
@@ -85,7 +85,7 @@ Read-only file browser per-node, cron management, S3 browser, **backup engine** 
    │  - metrics store (5s heartbeat + 1min downsampled to DB)  │
    │  - container store (cluster-wide map, ContainerReport)    │
    │  - log store (ringbuffer per container in SQLite)         │
-   │  - alert engine (rule evaluator w/ hysteresis, Discord)   │
+   │  - event watcher (offline nodes, crash loops) + notify   │
    │  - in-process agent loop (monitors leader's own host)     │
    └──────────────────────────────────────────────────────────┘
         ▲ gRPC bidi (shared-secret)         ▲
@@ -106,7 +106,7 @@ Read-only file browser per-node, cron management, S3 browser, **backup engine** 
 | Host metrics (`/proc/stat`, `/proc/net/dev`, `/proc/diskstats`) | gRPC `Heartbeat` | 5s | `node_metrics` (latest) + `node_metric_buckets` (1min avg, 7-day retention) |
 | Container snapshots (Docker API `/containers/json` + `/stats?stream=0`) | gRPC `Event_ContainerReport` | 5s | `container_state` |
 | Container logs (`/containers/{id}/logs?follow=1`) | gRPC `Event_LogBatch` | 1.5s flush | `container_log_lines` (5000/container cap) |
-| Alert rule fires | leader → Discord webhook | on change | `alert_history` |
+| Event (backup failed, node offline/online, crash loop) | leader → SSE + subscribed Discord webhooks | on change | `notifications` (90 days, newest 500) |
 
 UI receives delta-computed rates (bps) — the leader does the math, the browser does not.
 
@@ -128,29 +128,81 @@ UI receives delta-computed rates (bps) — the leader does the math, the browser
 | `BPM_ANALYTICS_IMAGE_PREFIX` | `traefik` | Web Analytics reads the access log of containers whose image name starts with this. |
 | `BPM_ANALYTICS_RETENTION_DAYS` | `400` | Days of daily Web Analytics totals and breakdowns to keep. |
 | `EXTERNAL_URL` | unset | Public base URL of the UI. Needed for OIDC: the redirect URL is `EXTERNAL_URL` + `/api/auth/oidc/callback`. |
-| `BPM_OIDC_ISSUER` | unset | OIDC issuer, e.g. `https://id.bartis.dev`. OIDC is on only when issuer, client ID and client secret are all set. |
+| `BPM_OIDC_ISSUER` | unset | OIDC issuer, e.g. `https://id.bartis.dev`. Required: sign-in works only when issuer, client ID and client secret are all set. Also the "manage passkeys" link on the Account page. |
 | `BPM_OIDC_CLIENT_ID` | unset | OIDC client ID. |
 | `BPM_OIDC_CLIENT_SECRET` | unset | OIDC client secret. `BPM_OIDC_CLIENT_SECRET_FILE` reads it from a file instead (Docker Swarm secret). |
 | `BPM_OIDC_NAME` | `Pocket ID` | Provider name shown on the login and account pages. |
-| `BPM_PASSWORD_LOGIN` | `true` | `false` hides the password form and makes `/api/auth/login` answer 403. Ignored (with a warning) while OIDC is not enabled, so nobody gets locked out. |
+| `BPM_OIDC_USER_GROUP` | `labextend` | Pocket ID group whose members may sign in. |
+| `BPM_OIDC_ADMIN_GROUP` | `labextend-admins` | Pocket ID group whose members sign in as admin. |
+| `BPM_FILEBROWSER` | `false` | `true` enables the file browser. |
 
 ## Pocket ID login (OIDC)
 
-Optional "Sign in with Pocket ID" (any OIDC provider works). Authorization code flow with PKCE (S256), state and nonce, as a confidential client.
+Pocket ID is the only way to sign in (any OIDC provider works). There are no local passwords, no TOTP, no setup wizard and no user management in LabExtend: users and roles live in Pocket ID groups. Authorization code flow with PKCE (S256), state and nonce, as a confidential client.
 
-1. In Pocket ID, create an OIDC client:
+1. In Pocket ID, create two groups (the group **name** is what counts, not the friendly name):
+   - `labextend`: may sign in as a regular user.
+   - `labextend-admins`: may sign in as admin. Admins do not also need `labextend`.
+2. Create an OIDC client:
    - Callback URL: `https://labextend.bartis.dev/api/auth/oidc/callback` (generally `EXTERNAL_URL` + `/api/auth/oidc/callback`)
-   - Scopes used: `openid profile email`
+   - Scopes used: `openid profile email groups`
    - Keep it a confidential client (with a client secret); PKCE stays on.
-2. Set `EXTERNAL_URL`, `BPM_OIDC_ISSUER`, `BPM_OIDC_CLIENT_ID` and `BPM_OIDC_CLIENT_SECRET` (or `BPM_OIDC_CLIENT_SECRET_FILE`) on the leader and redeploy.
-3. Each user signs in with their password once and clicks **Connect Pocket ID** under Account (asks for the current password).
+   - Allowed user groups: `labextend` and `labextend-admins`, so Pocket ID itself refuses everyone else.
+3. Set `EXTERNAL_URL`, `BPM_OIDC_ISSUER`, `BPM_OIDC_CLIENT_ID` and `BPM_OIDC_CLIENT_SECRET` (or `BPM_OIDC_CLIENT_SECRET_FILE`) on the leader and redeploy.
 
-Notes:
+On every login:
 
-- Accounts are linked explicitly by issuer + subject, never by email. An unknown identity is refused; there is no auto-provisioning.
-- An OIDC login skips the local TOTP step: the passkey already is the second factor.
-- If the issuer is unreachable at boot, the leader still starts; discovery is retried on the next sign-in.
-- `BPM_PASSWORD_LOGIN=false` is only honored while OIDC is enabled. A user who has not connected Pocket ID cannot sign in at all in that mode, so connect accounts first. Disconnecting is refused in that mode for the same reason.
+- Someone in neither group is refused (audit `auth.oidc.failed` with the reason), and any sessions they still hold are revoked.
+- An unknown subject in a group gets a user row: username from `preferred_username` (`-2`, `-3`, ... on a collision), email and display name from the token. If the email is missing or already used by another row, `<subject>@oidc.invalid` is stored instead.
+- An existing user is matched by issuer + subject only, never by email. Role (admin exactly when in the admin group), email and name are refreshed. Removing someone from the admin group takes their admin rights on their next login. The role is read from the database on every request, so existing sessions follow at once.
+
+If OIDC is not configured, the leader logs an error and keeps running (agents are unaffected), and the login page says which variables are missing. If the issuer is unreachable at boot, discovery is retried on the next sign-in.
+
+### Break-glass
+
+Lost your passkey or locked out? Create a one-time login link in Pocket ID on the server and add a new passkey with it:
+
+```bash
+docker exec <pocket-id-container> /app/pocket-id one-time-access-token <user>
+```
+
+Then sign in to LabExtend normally. If the account is not in `labextend` or `labextend-admins`, fix the group membership in the Pocket ID admin UI first.
+
+## Audit log and settings
+
+**Settings** (admin only) holds the audit log mode, stored in the database:
+
+- `auto` (default): full log with two or more users. With exactly one user only the newest 100 entries are kept, trimmed after every insert and once at startup.
+- `on`: keep everything.
+- `off`: record nothing. The Audit page is hidden from the sidebar.
+
+## Notifications
+
+There are no threshold rules. The leader emits a fixed set of events:
+
+| Type | Severity | When |
+|---|---|---|
+| `backup.failed` | critical (failed), warning (partial) | A run ends failed or partial, including runs that die before reaching a node and runs cut off by a leader restart. Names the failed nodes and the error. |
+| `backup.retention_failed` | warning | The backup succeeded but deleting old archives failed. |
+| `node.offline` | critical | No heartbeat for 60s. Time the leader itself was down does not count. |
+| `node.online` | info | An offline node stayed connected for 30s, so a flapping node is reported once. |
+| `container.crashloop` | critical | A container starts crash-looping (3 or more restarts within 60s). Once per transition. |
+
+Every event is stored in `notifications` (newest 500, at most 90 days), pushed
+to the panel over SSE and posted to every enabled webhook subscribed to its type
+(Webhooks page, one checkbox per type). A post that fails is logged and shown on
+the notification as a delivery error. The bell in the sidebar shows the unread
+count (red while a critical one is unread) and links each notification to its
+backup run, node or container. Read state is shared by all users.
+
+A backup plan's own webhook is only used for successful runs: with "Successful
+runs: posted to this webhook" (`webhook_mode=always`) each successful run posts
+a summary there. Failures always go through the events above, whatever the
+plan says.
+
+## File browser
+
+Off by default. `BPM_FILEBROWSER=true` on the leader turns it on; without it every file route answers 403 and the Files page explains how to enable it. It is enforced on the leader only: agents take commands from the leader alone, and a leader that wanted to read files could just as well run a backup or a cron job, so a second switch on every agent would add configuration without a boundary.
 
 ## Dev loop
 
@@ -170,7 +222,8 @@ DATA_DIR=./_dev-data \
 SESSION_SECURE_COOKIE=false \
 go run ./cmd/manager
 
-# Open http://localhost:8080 → setup wizard
+# Set BPM_OIDC_ISSUER, BPM_OIDC_CLIENT_ID, BPM_OIDC_CLIENT_SECRET and
+# EXTERNAL_URL=http://localhost:8080 first, then open http://localhost:8080
 ```
 
 The leader's local agent auto-attaches; no separate agent process needed unless you want to test multi-node from a single machine.
@@ -191,7 +244,6 @@ go run ./cmd/manager
 # Generate secrets once
 export BPM_AGENT_TOKEN=$(openssl rand -hex 32)
 export BPM_SECRETS_KEY=$(openssl rand -hex 32)
-export BPM_TOTP_KEY=$(openssl rand -hex 32)
 
 # Label the leader node
 docker node update --label-add labextend_leader=true <leader-node-id>
@@ -219,8 +271,9 @@ internal/
   config/            Env loading, defaults, validation, secret auto-gen
   db/                SQLite (modernc.org/sqlite), goose migrations
   agent/             Docker API client, container sampler, log tailer, host metrics
-  leader/            HTTP+SSE server, gRPC server, stores (metrics/container/log), alert engine
-  auth/              Sessions, Argon2id, TOTP
+  leader/            HTTP+SSE server, gRPC server, stores (metrics/container/log), event watcher
+  notify/            Notifications: storage, retention, webhook fan-out
+  auth/              Sessions
   backup/            (phase 12)
   s3/                (phase 11)
   cronctl/           (phase 10)

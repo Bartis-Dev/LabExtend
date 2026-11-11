@@ -11,7 +11,7 @@ import (
 // has date granularity) and stream two different archives into it, then both
 // record success with different checksums.
 func TestRunnerClaimRejectsSecondRunOfSamePlan(t *testing.T) {
-	r := NewRunner(nil, nil, nil, "")
+	r := NewRunner(nil, nil, nil, "", nil)
 
 	if !r.claim("plan-a") {
 		t.Fatal("first claim should succeed")
@@ -29,7 +29,7 @@ func TestRunnerClaimRejectsSecondRunOfSamePlan(t *testing.T) {
 }
 
 func TestRunnerClaimIsExclusiveUnderConcurrency(t *testing.T) {
-	r := NewRunner(nil, nil, nil, "")
+	r := NewRunner(nil, nil, nil, "", nil)
 
 	const goroutines = 64
 	var wg sync.WaitGroup

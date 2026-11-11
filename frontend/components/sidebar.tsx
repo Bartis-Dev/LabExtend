@@ -2,57 +2,67 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import {
-  Server, Boxes, Bell, Webhook, FolderOpen, Clock,
-  HardDrive, Database, LogOut, Users, ScrollText, UserCircle, RefreshCw, ChartColumn,
+  Server, Boxes, Webhook, FolderOpen, Clock,
+  HardDrive, Database, LogOut, ScrollText, UserCircle, RefreshCw, ChartColumn, Settings,
 } from 'lucide-react';
-import { api, setCSRFToken, type ApiError } from '@/lib/api';
+import { api, errText, setCSRFToken } from '@/lib/api';
+import type { UserInfo } from '@/lib/types';
+import { NotificationBell } from './notifications';
+import { confirmDialog } from './confirm';
+import { toast } from './toast';
+import { Tooltip } from './tooltip';
+
+const NAV_ITEM_IDLE =
+  'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-900 active:bg-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-zinc-100 dark:active:bg-zinc-800';
 
 const NAV = [
   { href: '/nodes',      label: 'Nodes',     icon: Server },
   { href: '/containers', label: 'Containers',icon: Boxes },
   { href: '/analytics',  label: 'Web Analytics', icon: ChartColumn },
-  { href: '/alerts',     label: 'Alerts',    icon: Bell },
   { href: '/webhooks',   label: 'Webhooks',  icon: Webhook },
   { href: '/files',      label: 'Files',     icon: FolderOpen },
   { href: '/cronjobs',   label: 'Cron',      icon: Clock },
   { href: '/s3',         label: 'S3',        icon: HardDrive },
   { href: '/backups',    label: 'Backups',   icon: Database },
-  { href: '/users',      label: 'Users',     icon: Users },
   { href: '/audit',      label: 'Audit',     icon: ScrollText },
+  { href: '/settings',   label: 'Settings',  icon: Settings },
   { href: '/account',    label: 'Account',   icon: UserCircle },
 ];
 
-export function Sidebar({ userEmail }: { userEmail?: string }) {
+export function Sidebar({ user }: { user: UserInfo }) {
   const pathname = usePathname();
+  const nav = NAV.filter((item) =>
+    (item.href !== '/audit' || user.audit_enabled) &&
+    (item.href !== '/settings' || user.is_admin));
   return (
-    <aside className="flex h-screen w-60 flex-col border-r border-zinc-200 bg-white px-3 py-4 dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="px-2 pb-4">
-        <div className="text-sm font-semibold tracking-tight">LabExtend</div>
-        <div className="text-[11px] text-zinc-500">{userEmail ?? ''}</div>
+    <aside className="flex h-screen w-64 flex-col overflow-y-auto border-r border-zinc-200 bg-white px-3 py-5 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex items-start justify-between gap-2 px-2 pb-4">
+        <div className="min-w-0">
+          <div className="text-base font-semibold tracking-tight">LabExtend</div>
+          <div className="truncate text-2xs text-zinc-500">{user.email}</div>
+        </div>
+        <NotificationBell />
       </div>
 
-      <nav className="flex-1 space-y-0.5">
-        {NAV.map((item) => {
+      <nav className="flex-1 space-y-0.5" aria-label="Main">
+        {nav.map((item) => {
           const Icon = item.icon;
           const active = pathname === item.href || pathname.startsWith(item.href + '/');
           return (
             <Link
               key={item.href}
               href={item.href}
+              aria-current={active ? 'page' : undefined}
               className={clsx(
-                'group flex items-center justify-between rounded-md px-2.5 py-1.5 text-sm transition',
-                active
-                  ? 'bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-800 dark:text-white'
-                  : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100'
+                NAV_ITEM_IDLE,
+                active && 'bg-zinc-100 font-medium text-zinc-950 dark:bg-zinc-800 dark:text-white',
               )}
             >
-              <span className="inline-flex items-center gap-2.5">
-                <Icon className="h-4 w-4" />
-                {item.label}
-              </span>
+              <Icon className={clsx('h-4 w-4', active ? 'text-accent' : 'text-zinc-500 dark:text-zinc-400')} />
+              {item.label}
             </Link>
           );
         })}
@@ -69,7 +79,7 @@ export function Sidebar({ userEmail }: { userEmail?: string }) {
           setCSRFToken(null);
           window.location.href = '/login';
         }}
-        className="mt-1 inline-flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+        className={NAV_ITEM_IDLE + ' mt-1'}
       >
         <LogOut className="h-4 w-4" /> Sign out
       </button>
@@ -88,18 +98,17 @@ const RESTART_COOLDOWN_KEY = 'portainer-restart-cooldown-until';
 // Guarded by a confirm dialog and a per-browser cooldown.
 function RestartPortainerButton() {
   const [busy, setBusy] = useState(false);
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [note, setNote] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [remaining, setRemaining] = useState(0);
-  const confirmRef = useRef<HTMLButtonElement>(null);
 
   // Restore an in-flight cooldown across reloads.
   useEffect(() => {
-    const raw = window.localStorage.getItem(RESTART_COOLDOWN_KEY);
-    const until = raw ? Number(raw) : 0;
-    if (until > Date.now()) setCooldownUntil(until);
-    else if (raw) window.localStorage.removeItem(RESTART_COOLDOWN_KEY);
+    try {
+      const raw = window.localStorage.getItem(RESTART_COOLDOWN_KEY);
+      const until = raw ? Number(raw) : 0;
+      if (until > Date.now()) setCooldownUntil(until);
+      else if (raw) window.localStorage.removeItem(RESTART_COOLDOWN_KEY);
+    } catch { /* blocked storage: no cooldown carried over */ }
   }, []);
 
   // Tick the remaining-seconds counter while a cooldown is active.
@@ -113,7 +122,7 @@ function RestartPortainerButton() {
       if (ms <= 0) {
         setRemaining(0);
         setCooldownUntil(0);
-        window.localStorage.removeItem(RESTART_COOLDOWN_KEY);
+        try { window.localStorage.removeItem(RESTART_COOLDOWN_KEY); } catch { /* ignore */ }
       } else {
         setRemaining(Math.ceil(ms / 1000));
       }
@@ -123,107 +132,56 @@ function RestartPortainerButton() {
     return () => clearInterval(id);
   }, [cooldownUntil]);
 
-  // Auto-dismiss the result note so it does not linger over the countdown.
-  useEffect(() => {
-    if (!note) return;
-    const t = setTimeout(() => setNote(null), 5000);
-    return () => clearTimeout(t);
-  }, [note]);
-
-  // Focus the confirm button on open; close on Escape (unless mid-request).
-  useEffect(() => {
-    if (!confirmOpen) return;
-    confirmRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busy) setConfirmOpen(false);
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [confirmOpen, busy]);
-
   const disabled = busy || remaining > 0;
 
   const doRestart = async () => {
+    const ok = await confirmDialog({
+      title: 'Restart Portainer agent?',
+      confirmLabel: 'Restart now',
+      body: (
+        <>
+          Runs{' '}
+          <code className="rounded bg-zinc-100 px-1 py-0.5 text-xs dark:bg-zinc-800">
+            docker service update --force portainer_agent
+          </code>{' '}
+          on the manager and redeploys every agent task with the same image. Expect a brief disruption while tasks restart.
+        </>
+      ),
+    });
+    if (!ok) return;
     setBusy(true);
-    setNote(null);
     try {
       await api('/api/services/portainer-agent/restart', { method: 'POST' });
-      setNote({ kind: 'ok', text: 'Portainer agent redeployed' });
+      toast.success('Portainer agent redeployed.');
       const until = Date.now() + RESTART_COOLDOWN_MS;
       setCooldownUntil(until);
-      window.localStorage.setItem(RESTART_COOLDOWN_KEY, String(until));
+      try { window.localStorage.setItem(RESTART_COOLDOWN_KEY, String(until)); } catch { /* ignore */ }
     } catch (e) {
-      const body = (e as ApiError)?.body;
-      const text =
-        body && typeof body === 'object' && 'error' in body
-          ? String((body as { error: unknown }).error)
-          : 'Restart failed';
-      setNote({ kind: 'err', text });
+      toast.error('Restart failed: ' + errText(e, 'no answer from the leader'));
     } finally {
       setBusy(false);
-      setConfirmOpen(false);
     }
   };
 
   return (
     <div className="mt-3">
-      {(note || remaining > 0) && (
-        <div
-          className={clsx(
-            'mb-1 rounded-md px-2.5 py-1 text-[11px] leading-snug',
-            note?.kind === 'ok'
-              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-              : note?.kind === 'err'
-                ? 'bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300'
-                : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'
-          )}
-        >
-          {note ? note.text : `Wieder nutzbar in ${remaining}s`}
+      {remaining > 0 && (
+        <div className="mb-1 rounded-md bg-zinc-100 px-2.5 py-1 text-2xs leading-snug text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+          Available again in {remaining}s
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={() => { if (!disabled) setConfirmOpen(true); }}
-        disabled={disabled}
-        title="docker service update --force portainer_agent"
-        className="inline-flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
-      >
-        <RefreshCw className={clsx('h-4 w-4', busy && 'animate-spin')} />
-        {busy ? 'Restarting…' : 'Restart Portainer'}
-      </button>
-
-      {confirmOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => { if (!busy) setConfirmOpen(false); }}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="restart-portainer-title"
+      <Tooltip className="flex" label={<span className="font-mono">docker service update --force portainer_agent</span>}>
+        <button
+          type="button"
+          onClick={() => { if (!disabled) doRestart(); }}
+          disabled={disabled}
+          className={NAV_ITEM_IDLE + ' w-full disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent'}
         >
-          <div className="card w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
-            <h3 id="restart-portainer-title" className="mb-2 text-base font-semibold">
-              Restart Portainer agent?
-            </h3>
-            <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
-              Runs{' '}
-              <code className="rounded bg-zinc-100 px-1 py-0.5 text-[12px] dark:bg-zinc-800">
-                docker service update --force portainer_agent
-              </code>{' '}
-              on the manager and redeploys every agent task with the same image. Expect a brief disruption while tasks restart.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button type="button" className="btn-ghost" onClick={() => setConfirmOpen(false)} disabled={busy}>
-                Cancel
-              </button>
-              <button ref={confirmRef} type="button" className="btn-primary" onClick={doRestart} disabled={busy}>
-                {busy && <RefreshCw className="h-4 w-4 animate-spin" />}
-                {busy ? 'Restarting…' : 'Restart now'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          <RefreshCw className={clsx('h-4 w-4', busy && 'motion-safe:animate-spin')} />
+          {busy ? 'Restarting…' : 'Restart Portainer'}
+        </button>
+      </Tooltip>
     </div>
   );
 }

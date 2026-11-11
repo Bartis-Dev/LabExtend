@@ -17,6 +17,7 @@ import (
 	"github.com/Bartis-Dev/LabExtend/internal/backup"
 	"github.com/Bartis-Dev/LabExtend/internal/config"
 	"github.com/Bartis-Dev/LabExtend/internal/frontend"
+	"github.com/Bartis-Dev/LabExtend/internal/notify"
 )
 
 // leaderDeps bundles every shared piece an HTTP handler may need.
@@ -28,9 +29,8 @@ type leaderDeps struct {
 	Containers *containerStore
 	Logs       *logStore
 	Analytics  *webAnalytics
-	Alerts     *AlertEngine
+	Events     *notify.Center
 	Audit      *AuditLogger
-	TOTP       *auth.TOTPManager
 	Scheduler  *backup.Scheduler
 	SecretsKey string
 }
@@ -59,13 +59,16 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 	}()
 
 	authDeps := &AuthDeps{
-		DB: deps.DB, Sessions: sessions, TOTP: deps.TOTP,
-		LoginLimiter: newAttemptLimiter(10, 5*time.Minute),
-		TOTPLimiter:  newAttemptLimiter(5, 15*time.Minute),
+		DB: deps.DB, Sessions: sessions, Audit: deps.Audit,
+		ProviderName: cfg.OIDCName,
+		ProviderURL:  cfg.OIDCIssuer,
+		UserGroup:    cfg.OIDCUserGroup,
+		AdminGroup:   cfg.OIDCAdminGroup,
+		FileBrowser:  cfg.FileBrowser,
 	}
 	monDeps := &MonitoringDeps{
 		DB: deps.DB, Registry: deps.Registry, Metrics: deps.Metrics,
-		Containers: deps.Containers, Logs: deps.Logs, Alerts: deps.Alerts,
+		Containers: deps.Containers, Logs: deps.Logs,
 		// Swarm labels come from the manager socket, which only the leader's
 		// own in-process agent can reach.
 		Swarm: newSwarmTopology(deps.Registry, cfg.AgentHostID),
@@ -74,16 +77,15 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 	cronDeps := &CronDeps{DB: deps.DB, Registry: deps.Registry, Audit: deps.Audit}
 	s3Deps := &S3Deps{DB: deps.DB, SecretsKey: deps.SecretsKey, Audit: deps.Audit}
 	backupDeps := &BackupDeps{DB: deps.DB, Scheduler: deps.Scheduler, Audit: deps.Audit}
-	usersDeps := &UsersDeps{DB: deps.DB, Audit: deps.Audit}
 	serviceDeps := &ServiceDeps{
 		Registry:     deps.Registry,
 		Audit:        deps.Audit,
 		LeaderNodeID: cfg.AgentHostID,
 		ServiceName:  cfg.PortainerService,
 	}
-	accountDeps := &AccountDeps{AuthDeps: authDeps, TOTP: deps.TOTP, Audit: deps.Audit}
-	oidcDeps := newOIDCDeps(ctx, cfg, authDeps, accountDeps, deps.Audit)
+	oidcDeps := newOIDCDeps(ctx, cfg, authDeps, deps.Audit)
 	auditDeps := &AuditDeps{DB: deps.DB}
+	settingsDeps := &SettingsDeps{Audit: deps.Audit}
 
 	r := chi.NewRouter()
 	r.Use(realIP(cfg.TrustedProxies))
@@ -105,9 +107,6 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 
 	r.Route("/api", func(api chi.Router) {
 		// ── public ────────────────────────────────────────────────────────
-		api.Get("/setup/status", authDeps.SetupStatus)
-		api.Post("/setup/initialize", authDeps.SetupInitialize)
-		api.Post("/auth/login", authDeps.Login)
 		api.Get("/auth/oidc/config", oidcDeps.Config)
 		api.Get("/auth/oidc/login", oidcDeps.Login)
 		api.Get("/auth/oidc/callback", oidcDeps.Callback)
@@ -115,14 +114,7 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 			writeJSON(w, http.StatusOK, map[string]any{"pong": true, "ts": time.Now().Unix()})
 		})
 
-		// 2FA verify: needs cookie + CSRF but NOT requireAuth (because the
-		// session IS 2FA-pending).
-		api.Group(func(g chi.Router) {
-			g.Use(csrfMiddleware)
-			g.Post("/auth/2fa/verify", authDeps.Verify2FA)
-		})
-
-		// ── authenticated (session + 2FA promoted) ────────────────────────
+		// ── authenticated ─────────────────────────────────────────────────
 		api.Group(func(authed chi.Router) {
 			authed.Use(requireAuth)
 			authed.Use(csrfMiddleware)
@@ -149,28 +141,15 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 			authed.Get("/analytics/hosts", analyticsHosts(deps.Analytics))
 			authed.Get("/analytics/report", analyticsReport(deps.Analytics))
 
-			authed.Get("/alert-rules", monDeps.ListAlertRules)
-			authed.Post("/alert-rules", monDeps.CreateAlertRule)
-			authed.Put("/alert-rules/{id}", monDeps.UpdateAlertRule)
-			authed.Delete("/alert-rules/{id}", monDeps.DeleteAlertRule)
-			authed.Get("/alert-history", monDeps.ListAlertHistory)
+			authed.Get("/notifications", listNotifications(deps.Events))
+			authed.Post("/notifications/read-all", markNotificationsRead(deps.Events))
+			authed.Post("/notifications/{id}/read", markNotificationsRead(deps.Events))
 
 			authed.Get("/webhooks", monDeps.ListWebhooks)
 			authed.Post("/webhooks", monDeps.CreateWebhook)
 			authed.Put("/webhooks/{id}", monDeps.UpdateWebhook)
 			authed.Delete("/webhooks/{id}", monDeps.DeleteWebhook)
 			authed.Post("/webhooks/{id}/test", monDeps.TestWebhook)
-
-			// ── account self-service (any logged-in user) ─────────────
-			authed.Get("/account/totp", accountDeps.TOTPStatus)
-			authed.Post("/account/totp/begin", accountDeps.TOTPBegin)
-			authed.Post("/account/totp/confirm", accountDeps.TOTPConfirm)
-			authed.Post("/account/totp/disable", accountDeps.TOTPDisable)
-			authed.Post("/account/totp/recovery-codes", accountDeps.TOTPRegenerateRecovery)
-			authed.Post("/account/password", accountDeps.ChangePassword)
-			authed.Get("/account/oidc", oidcDeps.Status)
-			authed.Post("/account/oidc/link", oidcDeps.Link)
-			authed.Post("/account/oidc/unlink", oidcDeps.Unlink)
 
 			// ── admin only ────────────────────────────────────
 			// Files, cron, swarm services, S3 and backups all reach the host
@@ -179,17 +158,18 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 			authed.Group(func(admin chi.Router) {
 				admin.Use(requireAdmin(deps.DB))
 
-				admin.Get("/users", usersDeps.List)
-				admin.Post("/users", usersDeps.Create)
-				admin.Put("/users/{id}", usersDeps.Update)
-				admin.Delete("/users/{id}", usersDeps.Delete)
 				admin.Get("/audit", auditDeps.List)
+				admin.Get("/settings", settingsDeps.Get)
+				admin.Put("/settings", settingsDeps.Update)
 
-				// ── files (per-node) ──────────────────────────────────────
-				admin.Get("/nodes/{id}/paths", filesDeps.ListPaths)
-				admin.Post("/nodes/{id}/paths", filesDeps.CreatePath)
-				admin.Delete("/nodes/{id}/paths/{pid}", filesDeps.DeletePath)
-				admin.Get("/nodes/{id}/files", filesDeps.ListFiles)
+				// ── files (per-node), only with BPM_FILEBROWSER ──────────
+				admin.Group(func(files chi.Router) {
+					files.Use(requireFileBrowser(cfg.FileBrowser))
+					files.Get("/nodes/{id}/paths", filesDeps.ListPaths)
+					files.Post("/nodes/{id}/paths", filesDeps.CreatePath)
+					files.Delete("/nodes/{id}/paths/{pid}", filesDeps.DeletePath)
+					files.Get("/nodes/{id}/files", filesDeps.ListFiles)
+				})
 
 				// ── cron ──────────────────────────────────────────────────
 				admin.Get("/cronjobs", cronDeps.List)

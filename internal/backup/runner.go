@@ -19,6 +19,7 @@ import (
 
 	"github.com/Bartis-Dev/LabExtend/internal/discord"
 	pb "github.com/Bartis-Dev/LabExtend/internal/grpc/pb"
+	"github.com/Bartis-Dev/LabExtend/internal/notify"
 )
 
 // AgentRequester is the slim interface the runner needs from leader. We
@@ -45,12 +46,13 @@ type Publisher interface {
 
 // Runner orchestrates one plan execution: resolve scope → fan out gRPC
 // commands to each in-scope agent → collect per-node results → prune
-// retention → fire webhook.
+// retention → emit backup.failed / post the success summary.
 type Runner struct {
 	db         *sql.DB
 	agents     AgentRequester
 	pub        Publisher
 	secretsKey string // hex AES-256-GCM key for decrypting S3 + webhook creds
+	events     *notify.Center
 
 	// inflight holds the plans that currently have a run executing. Nothing
 	// prevented a plan from running twice at once: RunPlan starts a goroutine
@@ -68,9 +70,9 @@ type Runner struct {
 // is still executing.
 var ErrPlanRunning = errors.New("a run for this plan is already in progress")
 
-func NewRunner(db *sql.DB, agents AgentRequester, pub Publisher, secretsKey string) *Runner {
+func NewRunner(db *sql.DB, agents AgentRequester, pub Publisher, secretsKey string, events *notify.Center) *Runner {
 	return &Runner{
-		db: db, agents: agents, pub: pub, secretsKey: secretsKey,
+		db: db, agents: agents, pub: pub, secretsKey: secretsKey, events: events,
 		inflight: make(map[string]struct{}),
 	}
 }
@@ -193,12 +195,13 @@ func (r *Runner) run(planID, planName, runID, triggeredBy string) {
 
 	r.markFinished(ctx, runID, status, "", results)
 
-	// Retention prune (best-effort).
-	if plan.RetentionKeep > 0 {
-		if err := r.pruneRetention(ctx, plan, s3Cfg); err != nil {
-			slog.Warn("backup: retention prune skipped — old objects remain in the bucket",
-				"plan", planID, "retention_keep", plan.RetentionKeep, "err", err)
-		}
+	// A run that failed on every node uploaded nothing that could make an
+	// older archive redundant.
+	if plan.RetentionKeep > 0 && failures < len(results) {
+		r.applyRetention(ctx, plan, runID, s3Cfg)
+	}
+	if err := cleanupExpired(context.WithoutCancel(ctx), r.db, time.Now()); err != nil {
+		slog.Warn("backup: removing expired failed runs failed", "err", err)
 	}
 
 	r.notify(ctx, plan, status, "", planName, runID, totalBytes, time.Since(started), results)
@@ -267,25 +270,6 @@ func (r *Runner) runOneNode(ctx context.Context, plan plan, target AgentInfo, ru
 		"bytes": rb.BytesUploaded, "files": rb.FileCount, "key": rb.S3Key,
 	})
 	return res
-}
-
-// ─── retention prune ────────────────────────────────────────────────────────
-
-// ErrRetentionNotImplemented reports that retention_keep is configured but
-// nothing prunes anything.
-//
-// This has never deleted an object. It returned nil, and the caller only logs
-// on error, so a successful no-op was indistinguishable from a successful
-// prune: an operator who set "keep 7" on a nightly plan watched the bucket grow
-// without bound until the provider refused an upload mid-run. Being loud about
-// it is the honest state until the prune is actually built — and building it
-// means deleting objects from an operator's bucket based on a key template
-// whose shape the plan author chooses, which needs its own design pass rather
-// than a quick list-and-delete loop.
-var ErrRetentionNotImplemented = errors.New("retention pruning is not implemented; old objects are never deleted")
-
-func (r *Runner) pruneRetention(_ context.Context, _ plan, _ s3EndpointCfg) error {
-	return ErrRetentionNotImplemented
 }
 
 // ─── DB helpers ─────────────────────────────────────────────────────────────
@@ -471,6 +455,27 @@ func (r *Runner) markFinished(ctx context.Context, runID, status, errSummary str
 // its terminal status, and such a row is neither deletable nor cleanable
 // through the API.
 func (r *Runner) ReconcileStaleRuns(ctx context.Context) {
+	type stale struct{ runID, planName string }
+	var runs []stale
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT br.id, COALESCE(bp.name, br.plan_id)
+		  FROM backup_runs br LEFT JOIN backup_plans bp ON bp.id = br.plan_id
+		 WHERE br.status IN ('pending', 'running')`)
+	if err != nil {
+		slog.Warn("backup: listing stale runs failed", "err", err)
+		return
+	}
+	for rows.Next() {
+		var s stale
+		if rows.Scan(&s.runID, &s.planName) == nil {
+			runs = append(runs, s)
+		}
+	}
+	_ = rows.Close()
+	if len(runs) == 0 {
+		return
+	}
+
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE backup_runs
 		   SET status = 'failed',
@@ -485,6 +490,9 @@ func (r *Runner) ReconcileStaleRuns(ctx context.Context) {
 	if n, _ := res.RowsAffected(); n > 0 {
 		slog.Warn("backup: marked stale in-flight runs as failed", "count", n)
 	}
+	for _, s := range runs {
+		r.emitFailed(ctx, s.planName, s.runID, "failed", "leader restarted while the run was in flight", nil)
+	}
 }
 
 func (r *Runner) publish(topic string, data any) {
@@ -495,7 +503,9 @@ func (r *Runner) publish(topic string, data any) {
 
 // ─── webhook ────────────────────────────────────────────────────────────────
 
-// notify decides whether a finished run warrants a Discord message.
+// notify announces a finished run: a failed or partial run becomes a
+// backup.failed event for every subscribed webhook and the panel, a success is
+// posted only to the plan's own webhook and only with webhook_mode=always.
 //
 // It exists as its own method because run() can end in four places: three
 // early failures that never touch a node, and the normal path at the bottom.
@@ -509,25 +519,52 @@ func (r *Runner) publish(topic string, data any) {
 // NodeResults to derive one from; it is empty on the normal path.
 func (r *Runner) notify(ctx context.Context, p plan, status, errSummary, planName, runID string,
 	bytes uint64, dur time.Duration, results []NodeResult) {
-	if p.WebhookID == "" {
+	if status != "success" {
+		r.emitFailed(ctx, planName, runID, status, errSummary, results)
 		return
 	}
-	switch p.WebhookMode {
-	case "always":
-	case "on-error":
-		if status == "success" {
-			return
-		}
-	default:
-		return
+	if p.WebhookID != "" && p.WebhookMode == "always" {
+		r.postSuccess(ctx, p, planName, runID, bytes, dur, results)
 	}
-	r.fireWebhook(ctx, p, status, errSummary, planName, runID, bytes, dur, results)
 }
 
-func (r *Runner) fireWebhook(ctx context.Context, p plan, status, errSummary, planName, runID string,
+// emitFailed raises backup.failed for a failed or partial run.
+func (r *Runner) emitFailed(ctx context.Context, planName, runID, status, errSummary string, results []NodeResult) {
+	title, severity := "Backup failed · "+planName, notify.SeverityCritical
+	if status == "partial" {
+		title, severity = "Backup partially failed · "+planName, notify.SeverityWarning
+	}
+	var lines []string
+	if errSummary != "" {
+		lines = append(lines, truncate(errSummary, 1000))
+	}
+	failedNodes := []string{}
+	for _, n := range results {
+		if n.Status != "success" {
+			failedNodes = append(failedNodes, n.NodeID)
+			// 400 chars per node still shows the AWS error code
+			// (AccessDenied / SignatureDoesNotMatch), which always sits past
+			// the first 100.
+			lines = append(lines, n.NodeID+": "+truncate(n.Error, 400))
+		}
+	}
+	if len(results) > 0 {
+		lines = append(lines, fmt.Sprintf("%d of %d nodes failed.", len(failedNodes), len(results)))
+	}
+	r.events.Emit(ctx, notify.Event{
+		Type: notify.BackupFailed, Severity: severity, Title: title,
+		Body: strings.Join(lines, "\n"),
+		Link: "/backups?run=" + runID,
+		Details: map[string]any{
+			"plan_name": planName, "run_id": runID, "status": status,
+			"failed_nodes": failedNodes, "error": errSummary,
+		},
+	})
+}
+
+func (r *Runner) postSuccess(ctx context.Context, p plan, planName, runID string,
 	bytes uint64, dur time.Duration, results []NodeResult) {
-	// Same reason as markFinished: a run that hit its 4h deadline arrives here
-	// with a dead context, and that is precisely a run worth announcing.
+	// Same reason as markFinished: the run context may be past its deadline.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 
@@ -543,30 +580,9 @@ func (r *Runner) fireWebhook(ctx context.Context, p plan, status, errSummary, pl
 		{Name: "Duration", Value: dur.Round(time.Second).String(), Inline: true},
 		{Name: "Nodes", Value: fmt.Sprintf("%d", len(results)), Inline: true},
 	}
-	// An early failure has no NodeResults, so without this the embed would say
-	// "failed" and give the reader nothing to act on.
-	if errSummary != "" {
-		fields = append(fields, discord.Field{Name: "Error", Value: truncate(errSummary, 1000)})
-	}
-	if status != "success" {
-		var failed []string
-		for _, n := range results {
-			if n.Status != "success" {
-				// 400 chars per node — leaves room for ~3 failing nodes
-				// inside Discord's 1024-char field cap and actually shows
-				// the AWS error code (AccessDenied / SignatureDoesNotMatch)
-				// that always sits after the truncation point at 100.
-				failed = append(failed, n.NodeID+": "+truncate(n.Error, 400))
-			}
-		}
-		if len(failed) > 0 {
-			fields = append(fields, discord.Field{Name: "Failures", Value: strings.Join(failed, "\n")})
-		}
-	}
-	c := discord.NewClient(url)
-	if err := c.Post(context.Background(),
-		discord.BackupSummary(planName, runID, status, fields, "labextend", time.Now())); err != nil {
-		slog.Warn("backup: webhook post failed", "err", err)
+	if err := discord.NewClient(url).Post(ctx,
+		discord.BackupSummary(planName, runID, "success", fields, "labextend", time.Now())); err != nil {
+		slog.Warn("backup: webhook post failed", "plan", p.ID, "err", err)
 	}
 }
 

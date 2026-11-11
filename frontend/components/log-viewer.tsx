@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
+import { Download, Eraser, Pause, Play } from 'lucide-react';
 import type { LogEntry } from '@/lib/types';
 
 interface Props {
@@ -67,9 +68,10 @@ export function LogViewer({ nodeID, containerID }: Props) {
 
   return (
     <div className="flex h-[60vh] flex-col">
-      <div className="mb-2 flex items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
           placeholder="filter…"
+          aria-label="Filter log lines"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="input w-56"
@@ -86,12 +88,14 @@ export function LogViewer({ nodeID, containerID }: Props) {
           }}
           className={paused ? 'btn-primary' : 'btn-ghost'}
         >
-          {paused ? `▶ resume (${bufferRef.current.length})` : '⏸ pause'}
+          {paused
+            ? <><Play className="h-4 w-4" /> Resume ({bufferRef.current.length})</>
+            : <><Pause className="h-4 w-4" /> Pause</>}
         </button>
         <button
           onClick={() => setLines([])}
           className="btn-ghost"
-        >clear</button>
+        ><Eraser className="h-4 w-4" /> Clear</button>
         <button
           onClick={() => {
             const blob = new Blob(filtered.map((l) => l.line + '\n'), { type: 'text/plain' });
@@ -101,16 +105,16 @@ export function LogViewer({ nodeID, containerID }: Props) {
             a.click();
           }}
           className="btn-ghost"
-        >download</button>
-        <div className="ml-auto text-[11px] text-zinc-500">
-          {connected ? <span className="text-emerald-600">● live</span> : <span className="text-amber-600">● connecting…</span>}
+        ><Download className="h-4 w-4" /> Download</button>
+        <div className="ml-auto text-2xs text-zinc-500">
+          {connected ? <span className="text-emerald-700 dark:text-emerald-400">● live</span> : <span className="text-amber-700 dark:text-amber-400">● connecting…</span>}
           {' · '}{filtered.length} lines
         </div>
       </div>
       <div
         ref={containerRef}
         onScroll={onScroll}
-        className="scroll-thin flex-1 overflow-auto rounded-md border border-zinc-200 bg-zinc-950 p-3 font-mono text-[12px] leading-snug text-zinc-200 dark:border-zinc-800"
+        className="flex-1 overflow-auto rounded-md border border-zinc-200 bg-zinc-950 p-3 font-mono text-xs leading-snug text-zinc-200 dark:border-zinc-800"
       >
         {filtered.map((l) => (
           <div key={l.id || `${l.ts_ms}-${Math.random()}`} className={clsx('whitespace-pre-wrap', l.stream === 'stderr' && 'text-red-400')}>

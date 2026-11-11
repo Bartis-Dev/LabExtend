@@ -3,11 +3,14 @@
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { api } from '@/lib/api';
+import { api, errText } from '@/lib/api';
 import type { NodeView } from '@/lib/types';
-import { AuthShell } from '@/components/auth-shell';
+import { AuthShell, useMe } from '@/components/auth-shell';
 import { fmtBytes, fmtAbsTime } from '@/lib/format';
-import { Folder, File as FileIcon, ChevronRight, RefreshCw, HardDrive } from 'lucide-react';
+import { Folder, File as FileIcon, ChevronRight, RefreshCw, HardDrive, Lock, Server } from 'lucide-react';
+import { DelayedSpinner, EmptyState, ErrorState, TableSkeleton } from '@/components/feedback';
+import { Field, inputCls } from '@/components/field';
+import { toast } from '@/components/toast';
 
 interface NodePath {
   id: number;
@@ -35,10 +38,31 @@ interface FileEntry {
 export default function FilesPage() {
   return (
     <AuthShell>
-      <Suspense fallback={<div className="p-8 text-sm text-zinc-500">Loading…</div>}>
-        <Files />
+      <Suspense fallback={<div className="page"><TableSkeleton /></div>}>
+        <FilesGate />
       </Suspense>
     </AuthShell>
+  );
+}
+
+function FilesGate() {
+  const me = useMe();
+  if (me.filebrowser) return <Files />;
+  return (
+    <div className="page">
+      <h1 className="page-title">Files</h1>
+      <div className="card mt-6 flex max-w-2xl items-start gap-3">
+        <Lock className="mt-0.5 h-5 w-5 shrink-0 text-zinc-400" aria-hidden />
+        <div>
+          <h2 className="text-sm font-semibold">The file browser is disabled</h2>
+          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+            It reads the host filesystem of every node, so it is off unless the leader runs with{' '}
+            <code className="rounded bg-zinc-100 px-1 py-0.5 text-xs dark:bg-zinc-800">BPM_FILEBROWSER=true</code>.
+            Set that on the leader service and redeploy to turn it on. It cannot be enabled from here.
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -66,15 +90,21 @@ function Files() {
   const [showHidden, setShowHidden] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [nodesLoaded, setNodesLoaded] = useState(false);
+  const [nodesErr, setNodesErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await api<{ nodes: NodeView[] }>('/api/nodes');
-        setNodes(r.nodes ?? []);
-      } catch { /* */ }
-    })();
+  const loadNodes = useCallback(async () => {
+    try {
+      const r = await api<{ nodes: NodeView[] }>('/api/nodes');
+      setNodes(r.nodes ?? []);
+      setNodesErr(null);
+    } catch (e) {
+      setNodesErr(errText(e, 'Could not load nodes.'));
+    } finally {
+      setNodesLoaded(true);
+    }
   }, []);
+  useEffect(() => { loadNodes(); }, [loadNodes]);
 
   useEffect(() => {
     if (!nodeID) return;
@@ -96,8 +126,7 @@ function Files() {
       );
       setEntries(r.entries ?? []);
     } catch (e: unknown) {
-      const er = e as { body?: { error?: string } };
-      setErr(er?.body?.error ?? 'failed');
+      setErr(errText(e, 'Could not read this directory.'));
       setEntries([]);
     } finally {
       setBusy(false);
@@ -120,31 +149,36 @@ function Files() {
   };
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-8">
-      <header className="mb-4 flex items-end justify-between">
+    <div className="page">
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Files</h1>
-          <p className="text-xs text-zinc-500">
+          <h1 className="page-title">Files</h1>
+          <p className="page-sub">
             Read-only per-node browser. Full filesystem by default, optional Path Profiles as shortcuts.
           </p>
         </div>
-        <div className="flex gap-2 text-xs">
-          <button onClick={loadEntries} className="btn-ghost"><RefreshCw className="h-3.5 w-3.5" /> refresh</button>
-          <label className="ml-2 flex cursor-pointer items-center gap-1 text-zinc-500">
-            <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} /> hidden
+        <div className="flex items-center gap-3 text-sm">
+          <label className="flex cursor-pointer items-center gap-2 text-zinc-700 dark:text-zinc-300">
+            <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} /> Show hidden files
           </label>
+          <button onClick={loadEntries} disabled={!nodeID || busy} className="btn-ghost"><RefreshCw className="h-4 w-4" /> Refresh</button>
         </div>
       </header>
 
+      {nodesErr && <ErrorState message={nodesErr} onRetry={loadNodes} />}
+
       <div className="grid grid-cols-12 gap-4">
-        <aside className="col-span-12 md:col-span-3">
+        <aside className="col-span-12 md:col-span-4 lg:col-span-3 3xl:col-span-2">
           <div className="card p-3">
-            <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">Nodes</div>
+            <div className="section-title mb-2 px-2">Nodes</div>
+            {!nodesLoaded && <div className="space-y-2 px-2 py-1">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-4" />)}</div>}
+            {nodesLoaded && nodes.length === 0 && !nodesErr && <p className="px-2 py-1 text-xs text-zinc-500">No nodes connected.</p>}
             <ul className="space-y-1">
               {nodes.map((n) => (
                 <li key={n.id}>
                   <Link href={`/files?node=${encodeURIComponent(n.id)}`}
-                    className={`block rounded-md px-2 py-1 text-sm ${n.id === nodeID ? 'bg-zinc-100 dark:bg-zinc-800' : 'hover:bg-zinc-100 dark:hover:bg-zinc-900'}`}
+                    aria-current={n.id === nodeID ? 'page' : undefined}
+                    className={`${NAV_LINK} ${n.id === nodeID ? 'bg-zinc-100 font-medium dark:bg-zinc-800' : ''}`}
                   >{n.hostname}</Link>
                 </li>
               ))}
@@ -152,11 +186,11 @@ function Files() {
           </div>
           {nodeID && (
             <div className="card mt-3 p-3">
-              <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">Roots</div>
+              <div className="section-title mb-2 px-2">Roots</div>
               <ul className="space-y-1">
                 <li>
                   <Link href={`/files?node=${encodeURIComponent(nodeID)}&root=${encodeURIComponent('/')}`}
-                    className={`block rounded-md px-2 py-1 text-sm ${root === '/' ? 'bg-zinc-100 dark:bg-zinc-800' : 'hover:bg-zinc-100 dark:hover:bg-zinc-900'}`}
+                    className={`${NAV_LINK} ${root === '/' ? 'bg-zinc-100 font-medium dark:bg-zinc-800' : ''}`}
                   >
                     <div className="inline-flex items-center gap-1.5">
                       <HardDrive className="h-3.5 w-3.5 text-zinc-500" />
@@ -166,82 +200,94 @@ function Files() {
                 </li>
               </ul>
 
-              <div className="mt-3 mb-1 text-[11px] uppercase tracking-wide text-zinc-500">Path Profiles</div>
+              <div className="section-title mb-2 mt-4 px-2">Path Profiles</div>
               <ul className="space-y-1">
-                {paths.length === 0 && <li className="text-xs text-zinc-500">none yet — add one as a shortcut to a directory</li>}
+                {paths.length === 0 && <li className="px-2 text-xs text-zinc-500">None yet. Add one as a shortcut to a directory.</li>}
                 {paths.map((p) => (
                   <li key={p.id}>
                     <Link href={`/files?node=${encodeURIComponent(nodeID)}&root=${encodeURIComponent(p.path)}`}
-                      className={`block rounded-md px-2 py-1 text-sm ${p.path === root ? 'bg-zinc-100 dark:bg-zinc-800' : 'hover:bg-zinc-100 dark:hover:bg-zinc-900'}`}
+                      className={`${NAV_LINK} ${p.path === root ? 'bg-zinc-100 font-medium dark:bg-zinc-800' : ''}`}
                     >
                       <div>{p.label}</div>
-                      <div className="font-mono text-[11px] text-zinc-500">{p.path}</div>
+                      <div className="font-mono text-2xs text-zinc-500">{p.path}</div>
                     </Link>
                   </li>
                 ))}
               </ul>
               <AddRootForm nodeID={nodeID} onAdded={async () => {
-                const r = await api<{ paths: NodePath[] }>(`/api/nodes/${encodeURIComponent(nodeID)}/paths`);
-                setPaths(r.paths ?? []);
+                try {
+                  const r = await api<{ paths: NodePath[] }>(`/api/nodes/${encodeURIComponent(nodeID)}/paths`);
+                  setPaths(r.paths ?? []);
+                } catch { /* the new root shows after the next reload */ }
               }} />
             </div>
           )}
         </aside>
 
-        <section className="col-span-12 md:col-span-9">
+        <section className="col-span-12 min-w-0 md:col-span-8 lg:col-span-9 3xl:col-span-10">
           <div className="card overflow-hidden p-0">
-            <div className="flex items-center gap-1 border-b border-zinc-200 px-4 py-2 font-mono text-[11px] text-zinc-500 dark:border-zinc-800">
-              <span>{root || '— pick a root —'}</span>
+            <div className="flex items-center gap-1 border-b border-zinc-200 px-4 py-2.5 font-mono text-xs text-zinc-500 dark:border-zinc-800">
+              <span>{root || 'pick a root'}</span>
               {sub.split('/').filter(Boolean).map((seg, i) => (
                 <span key={i} className="flex items-center gap-1">
                   <ChevronRight className="h-3 w-3" />
                   <span className="text-zinc-700 dark:text-zinc-300">{seg}</span>
                 </span>
               ))}
-              {root && <span className="ml-auto text-zinc-400">{entries.length} entries</span>}
+              <span className="ml-auto inline-flex items-center gap-2 text-zinc-400"><DelayedSpinner active={busy} />{nodeID && `${entries.length} entries`}</span>
             </div>
 
-            {err && <div className="px-4 py-3 text-sm text-red-600">{err}</div>}
-            {busy && <div className="px-4 py-3 text-xs text-zinc-500">Loading…</div>}
+            {err && <div className="px-4 pt-4"><ErrorState message={err} onRetry={loadEntries} /></div>}
 
-            {root ? (
-              <table className="w-full text-sm">
-                <thead className="border-b border-zinc-200 text-left text-[11px] uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
+            {nodeID ? (
+              <div className="overflow-x-auto">
+              <table className="w-full min-w-[40rem] text-sm">
+                <thead className="border-b border-zinc-200 dark:border-zinc-800">
                   <tr>
-                    <th className="px-4 py-2">Name</th>
-                    <th className="px-4 py-2">Size</th>
-                    <th className="px-4 py-2">Owner</th>
-                    <th className="px-4 py-2">Modified</th>
+                    <th className="th">Name</th>
+                    <th className="th">Size</th>
+                    <th className="th">Owner</th>
+                    <th className="th">Modified</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sub && (
-                    <tr className="cursor-pointer border-b border-zinc-100 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900" onClick={goUp}>
-                      <td colSpan={4} className="px-4 py-2 font-mono text-zinc-500">..</td>
+                    <tr className="border-b border-zinc-100 dark:border-zinc-800">
+                      <td colSpan={4} className="p-0">
+                        <button onClick={goUp} className="w-full px-4 py-2.5 text-left font-mono text-zinc-500 transition hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent focus-visible:ring-offset-0 dark:hover:bg-zinc-800/50">
+                          .. <span className="sr-only">up one level</span>
+                        </button>
+                      </td>
                     </tr>
                   )}
                   {entries.map((e) => (
-                    <tr key={e.name} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900">
-                      <td className="px-4 py-2" onClick={() => goTo(e.name, e.is_dir)} role={e.is_dir ? 'button' : undefined}>
-                        <span className="inline-flex items-center gap-2">
-                          {e.is_dir ? <Folder className="h-4 w-4 text-amber-500" /> : <FileIcon className="h-4 w-4 text-zinc-500" />}
-                          <span className={e.is_dir ? 'cursor-pointer font-medium hover:underline' : ''}>{e.name}</span>
-                        </span>
+                    <tr key={e.name} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50">
+                      <td className="td">
+                        {e.is_dir ? (
+                          <button onClick={() => goTo(e.name, true)} className="inline-flex items-center gap-2 rounded font-medium hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+                            <Folder className="h-4 w-4 text-amber-500" aria-hidden />{e.name}
+                          </button>
+                        ) : (
+                          <span className="inline-flex items-center gap-2">
+                            <FileIcon className="h-4 w-4 text-zinc-500" aria-hidden />{e.name}
+                          </span>
+                        )}
                       </td>
-                      <td className="px-4 py-2 font-mono text-[12px] text-zinc-500">{e.is_dir ? '—' : fmtBytes(e.size)}</td>
-                      <td className="px-4 py-2 font-mono text-[12px] text-zinc-500">{e.owner_name || (e.uid ?? 0)}:{e.group_name || (e.gid ?? 0)}</td>
-                      <td className="px-4 py-2 text-[11px] text-zinc-500">{fmtAbsTime(e.mtime_ms)}</td>
+                      <td className="td font-mono text-xs text-zinc-500">{e.is_dir ? '-' : fmtBytes(e.size)}</td>
+                      <td className="td font-mono text-xs text-zinc-500">{e.owner_name || (e.uid ?? 0)}:{e.group_name || (e.gid ?? 0)}</td>
+                      <td className="td text-2xs text-zinc-500">{fmtAbsTime(e.mtime_ms)}</td>
                     </tr>
                   ))}
-                  {!busy && entries.length === 0 && (
-                    <tr><td colSpan={4} className="px-4 py-6 text-center text-zinc-500">Empty.</td></tr>
+                  {!busy && !err && entries.length === 0 && (
+                    <tr><td colSpan={4}><EmptyState title="This directory is empty">{showHidden ? undefined : 'Hidden files are not shown. Turn on Show hidden files to include them.'}</EmptyState></td></tr>
                   )}
                 </tbody>
               </table>
-            ) : (
-              <div className="p-8 text-center text-sm text-zinc-500">
-                Pick a node from the sidebar.
               </div>
+            ) : (
+              <EmptyState className="min-h-[40vh] justify-center" icon={<Server className="h-6 w-6" />} title="Pick a node">
+                Choose a node on the left to browse its filesystem.
+              </EmptyState>
             )}
           </div>
         </section>
@@ -254,33 +300,57 @@ function AddRootForm({ nodeID, onAdded }: { nodeID: string; onAdded: () => void 
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState('');
   const [path, setPath] = useState('');
+  const [errs, setErrs] = useState<Record<string, string>>({});
+  const [formErr, setFormErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)} className="mt-3 w-full rounded-md border border-dashed border-zinc-300 px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-900">
-        + add root
+      <button onClick={() => setOpen(true)} className="mt-4 w-full rounded-md border border-dashed border-zinc-300 px-2 py-2 text-xs font-medium text-zinc-700 transition hover:border-zinc-400 hover:bg-zinc-50 active:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800/50">
+        Add path profile
       </button>
     );
   }
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const next: Record<string, string> = {};
+    if (!label.trim()) next.label = 'Give it a label.';
+    if (!path.startsWith('/')) next.path = 'Use an absolute path, starting with /.';
+    setErrs(next);
+    if (Object.keys(next).length) return;
+    setSaving(true);
+    setFormErr(null);
+    try {
+      await api(`/api/nodes/${encodeURIComponent(nodeID)}/paths`, {
+        method: 'POST', body: { label: label.trim(), path },
+      });
+      toast.success(`Path profile ${label.trim()} added.`);
+      setOpen(false); setLabel(''); setPath('');
+      onAdded();
+    } catch (err) {
+      setFormErr(errText(err, 'Adding the path profile failed.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <div className="mt-3 space-y-2 rounded-md border border-zinc-200 p-2 text-xs dark:border-zinc-800">
-      <input placeholder="label" value={label} onChange={(e) => setLabel(e.target.value)} className="input h-8 text-xs" />
-      <input placeholder="/abs/path" value={path} onChange={(e) => setPath(e.target.value)} className="input h-8 font-mono text-xs" />
+    <form noValidate onSubmit={submit} className="mt-4 space-y-3 rounded-md border border-zinc-200 p-3 text-xs dark:border-zinc-800">
+      <Field label="Label" error={errs.label}>
+        <input placeholder="App data" value={label} onChange={(e) => setLabel(e.target.value)} className={inputCls(errs.label, 'h-8 text-xs')} />
+      </Field>
+      <Field label="Path" error={errs.path}>
+        <input placeholder="/srv/app" value={path} onChange={(e) => setPath(e.target.value)} className={inputCls(errs.path, 'h-8 font-mono text-xs')} />
+      </Field>
+      {formErr && <p role="alert" className="field-error">{formErr}</p>}
       <div className="flex justify-end gap-1">
-        <button onClick={() => setOpen(false)} className="btn-ghost">cancel</button>
-        <button
-          onClick={async () => {
-            try {
-              await api(`/api/nodes/${encodeURIComponent(nodeID)}/paths`, {
-                method: 'POST', body: { label, path },
-              });
-              setOpen(false); setLabel(''); setPath('');
-              onAdded();
-            } catch (e) { alert('add failed: ' + String(e)); }
-          }}
-          className="btn-primary"
-        >save</button>
+        <button type="button" onClick={() => { setOpen(false); setErrs({}); setFormErr(null); }} disabled={saving} className="btn-ghost btn-sm">Cancel</button>
+        <button type="submit" disabled={saving} className="btn-primary btn-sm">{saving ? 'Saving…' : 'Save'}</button>
       </div>
-    </div>
+    </form>
   );
 }
+
+const NAV_LINK =
+  'block rounded-md px-2 py-1.5 text-sm transition hover:bg-zinc-100 active:bg-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent focus-visible:ring-offset-0 dark:hover:bg-zinc-800 dark:active:bg-zinc-700';

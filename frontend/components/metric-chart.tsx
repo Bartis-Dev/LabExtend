@@ -32,7 +32,7 @@ interface Props {
  *   • Empty / single-point series render gracefully
  */
 export function MetricChart({
-  timestamps, series, height = 160, yMax, formatY, fill = true,
+  timestamps, series, height = 200, yMax, formatY, fill = true,
 }: Props) {
   const data = useMemo(() => {
     if (timestamps.length === 0 || series.every((s) => s.values.length === 0)) {
@@ -52,7 +52,7 @@ export function MetricChart({
   }, [timestamps, series, yMax]);
 
   if (!data) {
-    return <div className="flex h-40 items-center justify-center text-xs text-zinc-500">No data in window.</div>;
+    return <div className="flex items-center justify-center text-sm text-zinc-500" style={{ height }}>No data in this window yet.</div>;
   }
 
   // 1000-wide viewBox, height as-given. Right margin for y-axis labels.
@@ -118,12 +118,12 @@ export function MetricChart({
           );
         })}
       </svg>
-      <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-zinc-500">
+      <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-zinc-500">
         {series.map((s, i) => {
           const last = s.values[s.values.length - 1] ?? 0;
           return (
             <span key={i} className="inline-flex items-center gap-1">
-              <span className="inline-block h-2 w-2 rounded-sm" style={{ background: s.color }} />
+              <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />
               {s.label}: <span className="font-mono text-zinc-700 dark:text-zinc-300">{labelFmt(last)}</span>
             </span>
           );

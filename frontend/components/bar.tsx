@@ -30,12 +30,12 @@ export function Bar({ label, value, detail, className, tone = 'auto' }: BarProps
   return (
     <div className={clsx('w-full', className)}>
       {(label || detail) && (
-        <div className="mb-1 flex items-center justify-between text-xs">
+        <div className="mb-1.5 flex items-center justify-between text-xs">
           {label ? <span className="text-zinc-500">{label}</span> : <span />}
           {detail && <span className="font-mono text-zinc-700 dark:text-zinc-300">{detail}</span>}
         </div>
       )}
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+      <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
         <div
           className={clsx('h-full rounded-full transition-all duration-300', color)}
           style={{ width: `${clamped}%` }}

@@ -2,6 +2,81 @@
 
 ## Unreleased
 
+### Changed
+
+- **Larger UI that uses the full width.** The root font size is 120% from
+  1024px up (106% on phones), so text, spacing, table rows, bars, charts,
+  cards and the sidebar grow by about a fifth in one place. Data pages (nodes,
+  node detail, containers, container detail, backups, analytics, audit, files,
+  webhooks, cron, S3) drop their centered max-width and use the whole page;
+  settings and account stay at a readable width. Grids add columns on 1536px
+  and 1920px screens. Below 1024px the sidebar becomes a drawer behind a menu
+  button.
+- **One dialog and message system.** Every `alert()` and `confirm()` is gone.
+  Confirmations use a shared dialog built on the app's modal (focus trap,
+  Escape, focus returns to the opener, only the top dialog reacts when two are
+  stacked); success and error messages use one toast stack. The hand-rolled
+  overlays on Backups, Cron, S3 and the Portainer restart now use the shared
+  modal. Forms (backup plan, cron job, S3 endpoint, webhook, path profile)
+  validate on submit with inline field errors instead of browser bubbles, and
+  server errors stay in the dialog instead of being lost. Saving a backup plan
+  or S3 endpoint no longer fails silently.
+- **No browser defaults left.** Checkboxes, radios, selects, file inputs,
+  scrollbars, focus rings, placeholders, selection and disabled states follow
+  the design tokens. Icon buttons and status dots get real tooltips. The
+  accent is now `#2563EB` so white text on it passes WCAG AA.
+- **Loading, empty and error states on every data page.** Nothing shows for the
+  first 400ms, then a skeleton; empty lists explain what to do next; load
+  errors show the server's reason with a Retry button.
+
+- **Event notifications replace alert rules.** Threshold alert rules, the
+  Alerts page and the `/api/alert-rules` and `/api/alert-history` routes are
+  removed. The leader now emits `backup.failed` (failed or partial run, with
+  failed nodes and error), `backup.retention_failed`, `node.offline` (no
+  heartbeat for 60s), `node.online` (connected again for 30s) and
+  `container.crashloop` (once per transition). They are kept as notifications
+  (newest 500, at most 90 days) and shown under a bell in the sidebar with the
+  unread count, a list with severity, time and details, mark one or all as
+  read, a link to the backup run, node or container, live updates over SSE and
+  a toast for each new critical one. Webhooks subscribe to event types with
+  checkboxes; every event goes to every enabled webhook subscribed to it. A
+  failed post is logged and shown on the notification. "Send test" now reports
+  Discord's actual answer. Migration 0012 drops `alert_rules` and
+  `alert_history`, adds `notifications` and `webhook_configs.event_types`, and
+  subscribes every existing webhook to all five types, so the webhook that got
+  backup errors and alerts before keeps getting them.
+- **Backup failures no longer depend on the plan's webhook setting.** Failed and
+  partial runs always raise `backup.failed`, also for plans with
+  `webhook_mode=off` or no webhook. The plan's webhook only receives the summary
+  of successful runs, and only with `webhook_mode=always`. A run cut off by a
+  leader restart is now announced as failed too.
+- **Pocket ID is the only login.** Passwords, password change, TOTP 2FA and
+  recovery codes, the first-boot setup wizard, the Users page and the
+  Connect/Disconnect Pocket ID flow are removed. Access and role come from
+  Pocket ID groups on every login: members of `BPM_OIDC_USER_GROUP` (default
+  `labextend`) sign in as users, members of `BPM_OIDC_ADMIN_GROUP` (default
+  `labextend-admins`) as admins, everyone else is refused and loses any session
+  they still hold. An unknown subject in one of the groups gets a user row
+  (username from `preferred_username`, collisions get `-2`, `-3`, ...); an
+  existing one is matched by issuer and subject only and has role, email and
+  name refreshed. The `groups` scope is requested in addition. Without
+  `BPM_OIDC_*` the leader logs an error, keeps running, and the login page says
+  what to set. The Account page shows the profile read-only and links to Pocket
+  ID for passkeys. Migration 0011 drops `totp_secrets`, `users.password_hash`,
+  `users.is_active`, `sessions.is_2fa_pending` and the `setup_completed` flag;
+  existing user rows, sessions and audit history stay. `BPM_TOTP_KEY`,
+  `BPM_TOTP_ISSUER` and `BPM_PASSWORD_LOGIN` are no longer read (a still
+  mounted value is ignored). Break-glass: a Pocket ID one-time login link, see
+  README.
+- **Audit log mode on a new Settings page** (admin only): `auto` (default) keeps
+  the full log with two or more users and only the newest 100 entries with a
+  single user, `on` keeps everything, `off` records nothing and hides the Audit
+  page. A single-user instance trims its existing log to 100 rows at the first
+  start. Replaces `BPM_DISABLE_AUDIT`, which is no longer read.
+- **The file browser is off unless `BPM_FILEBROWSER=true`** on the leader. All
+  file routes answer 403 otherwise, and the Files page explains how to enable
+  it.
+
 ### Security
 
 - **A TOTP code can no longer be replayed.** `totp.Validate` accepts one 30s
@@ -107,6 +182,23 @@
   used to answer `200` while leaving the password unchanged.
 
 ### Added
+
+- **Backup retention is enforced.** After every run that uploaded at least one
+  archive, each plan keeps the newest `retention_keep` successful archives per
+  node and deletes the older objects from the bucket (batched `DeleteObjects`,
+  1000 keys per call), then their item rows, and a run row once it has no items
+  left. A row is only removed when the provider confirmed the delete (an
+  already missing key counts as deleted), the current run is never touched, an
+  object another row still references (same-day re-runs under a `{date}`
+  template) is kept, and `retention_keep` 0 keeps everything. Prune errors are
+  logged and noted in the run's error summary without failing the backup.
+  Failed runs and items, which hold no object, are removed after 30 days.
+- **`bpm retention-dry-run`** prints per plan and node what the prune would
+  delete and keep (items, objects, bytes) against the real DB, without the HTTP
+  server and without deleting anything. `-list-bucket` also lists each plan's
+  key prefix and reports unreferenced objects (never deleted) and rows whose
+  object is missing; it needs `BPM_SECRETS_KEY`. `-db` overrides
+  `$DATA_DIR/labextend.db`.
 
 - **Sign in with Pocket ID (OIDC).** Optional login through any OIDC provider:
   authorization code flow with PKCE, state and nonce. Accounts are connected
@@ -327,14 +419,6 @@
   rather than discarded.
 
 ### Known gaps
-
-- **`retention_keep` does not delete anything and never has.** `pruneRetention`
-  was a stub returning nil, and the caller only logs on error, so a successful
-  no-op looked exactly like a successful prune while the bucket grew without
-  bound. It now returns an explicit error so the skip is visible in the log, and
-  the plan editor says so. Implementing it means deleting objects from an
-  operator's bucket based on a key template the plan author chose, which needs
-  its own design pass rather than a list-and-delete loop.
 
 - A file that changes size while it is being archived no longer aborts the
   whole node's backup. The tar header takes its size from the directory walk's

@@ -52,22 +52,21 @@ type Config struct {
 
 	// At-rest encryption keys (leader only)
 	SecretsKey string // 32-byte hex for AES-GCM of S3 creds, webhook URLs
-	TOTPKey    string // 32-byte hex for AES-GCM of TOTP secrets
-	TOTPIssuer string
 
-	// Optional OIDC login (e.g. Pocket ID). Enabled only when issuer, client
-	// ID and client secret are all set; see OIDCEnabled.
+	// OIDC login (e.g. Pocket ID), the only way to sign in. Usable only when
+	// issuer, client ID and client secret are all set; see OIDCEnabled.
 	OIDCIssuer       string
 	OIDCClientID     string
 	OIDCClientSecret string // BPM_OIDC_CLIENT_SECRET or BPM_OIDC_CLIENT_SECRET_FILE
 	OIDCName         string
-
-	// PasswordLogin=false turns off the password form, but only takes effect
-	// while OIDC is enabled, so a misconfigured instance cannot lock everyone out.
-	PasswordLogin bool
+	// Membership in one of these provider groups is what grants access; the
+	// admin group additionally grants admin.
+	OIDCUserGroup  string
+	OIDCAdminGroup string
 
 	// Feature flags
-	AllowExec bool
+	AllowExec   bool
+	FileBrowser bool // BPM_FILEBROWSER: the leader's file browser routes
 
 	// Swarm service control. Default service force-updated by the "Restart
 	// Portainer Agent" button (leader-side, runs against the leader's manager
@@ -80,9 +79,8 @@ type Config struct {
 	HeartbeatInterval time.Duration
 
 	// Misc
-	LogLevel     string
-	CORSOrigins  []string
-	DisableAudit bool
+	LogLevel    string
+	CORSOrigins []string
 
 	// TrustedProxies lists IPs/CIDRs whose X-Forwarded-For header may be
 	// believed. Empty (the default) means no peer is trusted and the TCP peer
@@ -133,14 +131,14 @@ func Load() (*Config, error) {
 		GRPCTLSKey:          os.Getenv("BPM_GRPC_TLS_KEY"),
 		GRPCTLSClientCA:     os.Getenv("BPM_GRPC_TLS_CLIENT_CA"),
 		SecretsKey:          os.Getenv("BPM_SECRETS_KEY"),
-		TOTPKey:             os.Getenv("BPM_TOTP_KEY"),
-		TOTPIssuer:          stringEnv("BPM_TOTP_ISSUER", "labextend"),
 		OIDCIssuer:          strings.TrimSpace(os.Getenv("BPM_OIDC_ISSUER")),
 		OIDCClientID:        strings.TrimSpace(os.Getenv("BPM_OIDC_CLIENT_ID")),
 		OIDCClientSecret:    oidcSecret,
 		OIDCName:            stringEnv("BPM_OIDC_NAME", "Pocket ID"),
-		PasswordLogin:       boolEnv("BPM_PASSWORD_LOGIN", true),
+		OIDCUserGroup:       stringEnv("BPM_OIDC_USER_GROUP", "labextend"),
+		OIDCAdminGroup:      stringEnv("BPM_OIDC_ADMIN_GROUP", "labextend-admins"),
 		AllowExec:           boolEnv("BPM_ALLOW_EXEC", false),
+		FileBrowser:         boolEnv("BPM_FILEBROWSER", false),
 		PortainerService:    stringEnv("BPM_PORTAINER_SERVICE", "portainer_agent"),
 		AgentHostID:         os.Getenv("BPM_AGENT_HOST_ID"),
 		AgentLabels:         parseLabels(os.Getenv("BPM_AGENT_LABELS")),
@@ -148,7 +146,6 @@ func Load() (*Config, error) {
 		LogLevel:            stringEnv("BPM_LOG_LEVEL", "info"),
 		CORSOrigins:         splitCSV(os.Getenv("CORS_ORIGINS")),
 		TrustedProxies:      splitCSV(os.Getenv("BPM_TRUSTED_PROXIES")),
-		DisableAudit:        boolEnv("BPM_DISABLE_AUDIT", false),
 
 		AnalyticsImagePrefix:   stringEnv("BPM_ANALYTICS_IMAGE_PREFIX", "traefik"),
 		AnalyticsRetentionDays: intEnv("BPM_ANALYTICS_RETENTION_DAYS", 400),
@@ -197,9 +194,6 @@ func (c *Config) validate() error {
 		}
 		if c.SecretsKey == "" {
 			return errors.New("BPM_SECRETS_KEY missing (auto-gen failed — check DATA_DIR perms)")
-		}
-		if c.TOTPKey == "" {
-			return errors.New("BPM_TOTP_KEY missing (auto-gen failed — check DATA_DIR perms)")
 		}
 	case RoleAgent:
 		if c.AgentToken == "" {

@@ -9,23 +9,22 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/Bartis-Dev/LabExtend/internal/discord"
+	"github.com/Bartis-Dev/LabExtend/internal/notify"
 )
 
-// MonitoringDeps groups what every monitoring/alerts handler needs.
+// MonitoringDeps groups what every monitoring/webhook handler needs.
 type MonitoringDeps struct {
 	DB         *sql.DB
 	Registry   *AgentRegistry
 	Metrics    *metricsStore
 	Containers *containerStore
 	Logs       *logStore
-	Alerts     *AlertEngine
 	Swarm      *swarmTopology
 }
 
@@ -185,9 +184,8 @@ func (d *MonitoringDeps) CleanupNodes(w http.ResponseWriter, r *http.Request) {
 		d.Containers.MarkNodeOffline(v.id)
 	}
 
-	// Audit log via the alert engine's registry — but we don't have an audit
-	// logger here. The handler is admin-only via the router; the action is
-	// non-destructive for live nodes (only offline-and-stale rows go).
+	// No audit entry: the action is non-destructive for live nodes (only
+	// offline-and-stale rows go).
 	writeJSON(w, http.StatusOK, map[string]any{
 		"deleted":          len(ids),
 		"ids":              ids,
@@ -404,189 +402,47 @@ func writeLogEvent(w http.ResponseWriter, e *LogEntry) {
 	fmt.Fprintf(w, "event: log\ndata: %s\n\n", b)
 }
 
-// ─── alert rules ────────────────────────────────────────────────────────────
-
-type alertRuleReq struct {
-	Name        string  `json:"name"`
-	Kind        string  `json:"kind"`
-	Comparator  string  `json:"comparator"`
-	Threshold   float64 `json:"threshold"`
-	DurationSec int     `json:"duration_sec"`
-	Scope       string  `json:"scope"`
-	WebhookID   string  `json:"webhook_id"`
-	CooldownSec int     `json:"cooldown_sec"`
-	Enabled     bool    `json:"enabled"`
-}
-
-func (d *MonitoringDeps) ListAlertRules(w http.ResponseWriter, r *http.Request) {
-	rows, err := d.DB.QueryContext(r.Context(), `
-		SELECT id, name, kind, comparator, threshold, duration_sec, scope,
-		       COALESCE(webhook_id,''), cooldown_sec, enabled, created_at, updated_at
-		FROM alert_rules ORDER BY created_at DESC
-	`)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	defer rows.Close()
-	out := []AlertRule{}
-	for rows.Next() {
-		var ar AlertRule
-		var wid string
-		var enabled int
-		if err := rows.Scan(&ar.ID, &ar.Name, &ar.Kind, &ar.Comparator, &ar.Threshold,
-			&ar.DurationSec, &ar.Scope, &wid, &ar.CooldownSec, &enabled,
-			&ar.CreatedAt, &ar.UpdatedAt); err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
-			return
-		}
-		ar.Enabled = enabled == 1
-		if wid != "" {
-			ar.WebhookID = &wid
-		}
-		out = append(out, ar)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"rules": out})
-}
-
-func (d *MonitoringDeps) CreateAlertRule(w http.ResponseWriter, r *http.Request) {
-	var req alertRuleReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	if req.Name == "" || req.Kind == "" {
-		writeErr(w, http.StatusBadRequest, errors.New("name + kind required"))
-		return
-	}
-	if req.Comparator == "" {
-		req.Comparator = ">"
-	}
-	if req.Scope == "" {
-		req.Scope = "all"
-	}
-	if req.CooldownSec == 0 {
-		req.CooldownSec = 300
-	}
-	id := uuid.NewString()
-	now := time.Now().Unix()
-	var widArg any
-	if req.WebhookID != "" {
-		widArg = req.WebhookID
-	}
-	_, err := d.DB.ExecContext(r.Context(), `
-		INSERT INTO alert_rules
-			(id, name, kind, comparator, threshold, duration_sec, scope,
-			 webhook_id, cooldown_sec, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, id, req.Name, req.Kind, req.Comparator, req.Threshold, req.DurationSec, req.Scope,
-		widArg, req.CooldownSec, boolI(req.Enabled), now, now)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id})
-}
-
-func (d *MonitoringDeps) UpdateAlertRule(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	var req alertRuleReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	var widArg any
-	if req.WebhookID != "" {
-		widArg = req.WebhookID
-	}
-	res, err := d.DB.ExecContext(r.Context(), `
-		UPDATE alert_rules SET
-			name = ?, kind = ?, comparator = ?, threshold = ?, duration_sec = ?,
-			scope = ?, webhook_id = ?, cooldown_sec = ?, enabled = ?, updated_at = ?
-		WHERE id = ?
-	`, req.Name, req.Kind, req.Comparator, req.Threshold, req.DurationSec,
-		req.Scope, widArg, req.CooldownSec, boolI(req.Enabled), time.Now().Unix(), id)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		writeErr(w, http.StatusNotFound, errors.New("rule not found"))
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"updated": n})
-}
-
-func (d *MonitoringDeps) DeleteAlertRule(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	res, err := d.DB.ExecContext(r.Context(), `DELETE FROM alert_rules WHERE id = ?`, id)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		writeErr(w, http.StatusNotFound, errors.New("rule not found"))
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": n})
-}
-
-func (d *MonitoringDeps) ListAlertHistory(w http.ResponseWriter, r *http.Request) {
-	limit := 100
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n < 1000 {
-			limit = n
-		}
-	}
-	rows, err := d.DB.QueryContext(r.Context(), `
-		SELECT h.id, h.rule_id, COALESCE(r.name,''), COALESCE(h.node_id,''),
-		       COALESCE(h.container_id,''), h.fired_at, h.state,
-		       COALESCE(h.value,0), h.message
-		FROM alert_history h LEFT JOIN alert_rules r ON r.id = h.rule_id
-		ORDER BY h.fired_at DESC LIMIT ?
-	`, limit)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	defer rows.Close()
-	out := []AlertHistoryRow{}
-	for rows.Next() {
-		var h AlertHistoryRow
-		if err := rows.Scan(&h.ID, &h.RuleID, &h.RuleName, &h.NodeID, &h.ContainerID,
-			&h.FiredAt, &h.State, &h.Value, &h.Message); err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
-			return
-		}
-		out = append(out, h)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"history": out})
-}
-
 // ─── webhooks ───────────────────────────────────────────────────────────────
 
 type WebhookConfig struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Kind      string `json:"kind"` // "discord" for v1
-	URL       string `json:"url,omitempty"`
-	Enabled   bool   `json:"enabled"`
-	CreatedAt int64  `json:"created_at"`
-	UpdatedAt int64  `json:"updated_at"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Kind       string   `json:"kind"` // "discord" for v1
+	URL        string   `json:"url,omitempty"`
+	Enabled    bool     `json:"enabled"`
+	EventTypes []string `json:"event_types"`
+	CreatedAt  int64    `json:"created_at"`
+	UpdatedAt  int64    `json:"updated_at"`
 }
 
 type webhookReq struct {
-	Name    string `json:"name"`
-	Kind    string `json:"kind"`
-	URL     string `json:"url"`
-	Enabled bool   `json:"enabled"`
+	Name       string   `json:"name"`
+	Kind       string   `json:"kind"`
+	URL        string   `json:"url"`
+	Enabled    bool     `json:"enabled"`
+	EventTypes []string `json:"event_types"`
+}
+
+// eventTypesJSON validates the requested subscriptions and encodes them for
+// webhook_configs.event_types.
+func eventTypesJSON(types []string) (string, error) {
+	out := []string{}
+	for _, t := range types {
+		if !notify.ValidType(t) {
+			return "", fmt.Errorf("unknown event type %q", t)
+		}
+		out = append(out, t)
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return "", fmt.Errorf("encode event types: %w", err)
+	}
+	return string(b), nil
 }
 
 func (d *MonitoringDeps) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 	rows, err := d.DB.QueryContext(r.Context(), `
-		SELECT id, name, kind, url, enabled, created_at, updated_at
+		SELECT id, name, kind, url, enabled, event_types, created_at, updated_at
 		FROM webhook_configs ORDER BY name
 	`)
 	if err != nil {
@@ -598,12 +454,14 @@ func (d *MonitoringDeps) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c WebhookConfig
 		var enabled int
-		if err := rows.Scan(&c.ID, &c.Name, &c.Kind, &c.URL, &enabled,
+		var types string
+		if err := rows.Scan(&c.ID, &c.Name, &c.Kind, &c.URL, &enabled, &types,
 			&c.CreatedAt, &c.UpdatedAt); err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
 		c.Enabled = enabled == 1
+		c.EventTypes = notify.ParseTypes(types)
 		c.URL = maskURL(c.URL)
 		out = append(out, c)
 	}
@@ -623,12 +481,17 @@ func (d *MonitoringDeps) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 	if req.Kind == "" {
 		req.Kind = "discord"
 	}
+	types, err := eventTypesJSON(req.EventTypes)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
 	id := uuid.NewString()
 	now := time.Now().Unix()
-	_, err := d.DB.ExecContext(r.Context(), `
-		INSERT INTO webhook_configs (id, name, kind, url, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, id, req.Name, req.Kind, req.URL, boolI(req.Enabled), now, now)
+	_, err = d.DB.ExecContext(r.Context(), `
+		INSERT INTO webhook_configs (id, name, kind, url, enabled, event_types, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, id, req.Name, req.Kind, req.URL, boolI(req.Enabled), types, now, now)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -643,26 +506,27 @@ func (d *MonitoringDeps) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	types, err := eventTypesJSON(req.EventTypes)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
 	// If URL is empty or masked-shape, keep the existing one.
 	var res sql.Result
-	var err error
 	if req.URL == "" || isMaskedURL(req.URL) {
 		res, err = d.DB.ExecContext(r.Context(), `
-			UPDATE webhook_configs SET name = ?, kind = ?, enabled = ?, updated_at = ?
+			UPDATE webhook_configs SET name = ?, kind = ?, enabled = ?, event_types = ?, updated_at = ?
 			WHERE id = ?
-		`, req.Name, req.Kind, boolI(req.Enabled), time.Now().Unix(), id)
+		`, req.Name, req.Kind, boolI(req.Enabled), types, time.Now().Unix(), id)
 	} else {
 		res, err = d.DB.ExecContext(r.Context(), `
-			UPDATE webhook_configs SET name = ?, kind = ?, url = ?, enabled = ?, updated_at = ?
+			UPDATE webhook_configs SET name = ?, kind = ?, url = ?, enabled = ?, event_types = ?, updated_at = ?
 			WHERE id = ?
-		`, req.Name, req.Kind, req.URL, boolI(req.Enabled), time.Now().Unix(), id)
+		`, req.Name, req.Kind, req.URL, boolI(req.Enabled), types, time.Now().Unix(), id)
 	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
-	}
-	if d.Alerts != nil {
-		d.Alerts.InvalidateWebhook(id)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -679,9 +543,6 @@ func (d *MonitoringDeps) DeleteWebhook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	if d.Alerts != nil {
-		d.Alerts.InvalidateWebhook(id)
-	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		writeErr(w, http.StatusNotFound, errors.New("webhook not found"))
@@ -690,32 +551,33 @@ func (d *MonitoringDeps) DeleteWebhook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": n})
 }
 
-// TestWebhook posts a one-shot probe payload so the user can verify the URL
-// from the UI.
+// TestWebhook posts a one-shot probe payload and reports Discord's answer, so
+// the user can verify the URL from the UI.
 func (d *MonitoringDeps) TestWebhook(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var url string
 	if err := d.DB.QueryRowContext(r.Context(),
 		`SELECT url FROM webhook_configs WHERE id = ?`, id).Scan(&url); err != nil {
-		writeErr(w, http.StatusNotFound, err)
+		writeErr(w, http.StatusNotFound, errors.New("webhook not found"))
 		return
 	}
-	go func(u string) {
-		c := discord.NewClient(u)
-		p := discord.Payload{
-			Username: "labextend",
-			Embeds: []discord.Embed{{
-				Title:     "Webhook test · success",
-				Color:     discord.ColorBlue,
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-				Footer:    &discord.Footer{Text: "labextend"},
-			}},
-		}
-		if err := c.Post(context.Background(), p); err != nil {
-			slog.Warn("webhook test failed", "id", id, "err", err)
-		}
-	}(url)
-	writeJSON(w, http.StatusOK, map[string]any{"queued": true})
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	p := discord.Payload{
+		Username: "LabExtend",
+		Embeds: []discord.Embed{{
+			Title:     "Webhook test · success",
+			Color:     discord.ColorBlue,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Footer:    &discord.Footer{Text: "LabExtend"},
+		}},
+	}
+	if err := discord.NewClient(url).Post(ctx, p); err != nil {
+		slog.Warn("webhook test failed", "id", id, "err", err)
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sent": true})
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -746,6 +608,3 @@ func isMaskedURL(u string) bool {
 	}
 	return false
 }
-
-// _ = sync.Once // keep import for future use
-var _ = sync.Once{}

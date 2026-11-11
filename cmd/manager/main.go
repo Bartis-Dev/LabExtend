@@ -27,6 +27,10 @@ func main() {
 	logger := newLogger()
 	slog.SetDefault(logger)
 
+	if len(os.Args) > 1 && os.Args[1] == "retention-dry-run" {
+		os.Exit(retentionDryRun(os.Args[2:]))
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("config load failed", "err", err)

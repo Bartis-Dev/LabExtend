@@ -76,3 +76,18 @@ export async function api<T = unknown>(path: string, opts: RequestOpts = {}): Pr
   }
   return data as T;
 }
+
+/**
+ * errText turns anything a failed api() call throws into a message a person
+ * can act on: the server's `{error}` text when there is one, else `fallback`,
+ * else the raw error message.
+ */
+export function errText(e: unknown, fallback?: string): string {
+  const body = (e as ApiError)?.body;
+  if (body && typeof body === 'object' && 'error' in body) {
+    const msg = (body as { error: unknown }).error;
+    if (typeof msg === 'string' && msg) return msg;
+  }
+  if (fallback) return fallback;
+  return e instanceof Error ? e.message : String(e);
+}

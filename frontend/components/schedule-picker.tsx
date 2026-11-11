@@ -91,57 +91,57 @@ export function SchedulePicker({ value, onChange, variant = 'cron' }: Props) {
 
   return (
     <div className="space-y-2">
-      <div className="inline-flex rounded-md border border-zinc-200 p-0.5 text-xs dark:border-zinc-700">
-        <button type="button" onClick={() => setMode('simple')}
-          className={`rounded px-2 py-1 ${mode === 'simple' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400'}`}>
+      <div className="seg" role="radiogroup" aria-label="Schedule mode">
+        <button type="button" role="radio" aria-checked={mode === 'simple'} onClick={() => setMode('simple')}
+          className={mode === 'simple' ? 'seg-item-active' : 'seg-item'}>
           Einfach
         </button>
-        <button type="button" onClick={() => setMode('cron')}
-          className={`rounded px-2 py-1 ${mode === 'cron' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400'}`}>
+        <button type="button" role="radio" aria-checked={mode === 'cron'} onClick={() => setMode('cron')}
+          className={mode === 'cron' ? 'seg-item-active' : 'seg-item'}>
           Cron-Ausdruck
         </button>
       </div>
 
       {mode === 'simple' && cur && (
-        <div className="space-y-2 rounded-md bg-zinc-50 p-3 dark:bg-zinc-900/40">
+        <div className="space-y-2 rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900/40">
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <select className="input h-8 w-36" value={preset} onChange={(e) => setPreset(e.target.value)}>
+            <select className="input h-9 w-40" aria-label="Repeat" value={preset} onChange={(e) => setPreset(e.target.value)}>
               {Object.entries(P).map(([k, p]) => <option key={k} value={k}>{p.label}</option>)}
             </select>
 
             {cur.needs.dow && (
-              <select className="input h-8 w-24" value={dow} onChange={(e) => setDow(+e.target.value)}>
+              <select className="input h-9 w-24" aria-label="Day of week" value={dow} onChange={(e) => setDow(+e.target.value)}>
                 {dows.map((d, i) => <option key={i} value={i}>{d}</option>)}
               </select>
             )}
             {cur.needs.dom && (
-              <select className="input h-8 w-20" value={dom} onChange={(e) => setDom(+e.target.value)}>
+              <select className="input h-9 w-20" aria-label="Day of month" value={dom} onChange={(e) => setDom(+e.target.value)}>
                 {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => <option key={d} value={d}>{d}.</option>)}
               </select>
             )}
             {cur.needs.hour && (
               <>
                 <span className="text-zinc-500">um</span>
-                <select className="input h-8 w-20" value={hour} onChange={(e) => setHour(+e.target.value)}>
+                <select className="input h-9 w-20" aria-label="Hour" value={hour} onChange={(e) => setHour(+e.target.value)}>
                   {Array.from({ length: 24 }, (_, i) => i).map((h) => <option key={h} value={h}>{String(h).padStart(2, '0')}</option>)}
                 </select>
                 <span className="text-zinc-500">:</span>
               </>
             )}
             {cur.needs.minute && (
-              <select className="input h-8 w-20" value={minute} onChange={(e) => setMinute(+e.target.value)}>
+              <select className="input h-9 w-20" aria-label="Minute" value={minute} onChange={(e) => setMinute(+e.target.value)}>
                 {Array.from({ length: 60 }, (_, i) => i).filter((m) => cur.needs.hour ? m % 5 === 0 : true).map((m) => <option key={m} value={m}>{String(m).padStart(2, '0')}</option>)}
               </select>
             )}
           </div>
-          <p className="font-mono text-[11px] text-zinc-500">→ {value || placeholder}</p>
+          <p className="font-mono text-2xs text-zinc-500">→ {value || placeholder}</p>
         </div>
       )}
 
       {mode === 'cron' && (
         <div>
-          <input className="input font-mono" placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
-          <p className="mt-1 text-[11px] text-zinc-500">
+          <input className="input font-mono" aria-label="Cron expression" placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
+          <p className="mt-1 text-2xs text-zinc-500">
             {variant === 'seconds'
               ? 'Format: sec min hour day-of-month month day-of-week'
               : 'Format: min hour day-of-month month day-of-week'}

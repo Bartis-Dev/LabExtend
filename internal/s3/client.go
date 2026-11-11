@@ -321,12 +321,32 @@ func (c *Client) GetObject(ctx context.Context, bucket, key string) (io.ReadClos
 
 // DeleteObjects batch-deletes up to 1000 keys per call.
 func (c *Client) DeleteObjects(ctx context.Context, bucket string, keys []string) (int, error) {
+	failed, err := c.DeleteKeys(ctx, bucket, keys)
+	if err != nil {
+		return 0, err
+	}
+	if len(failed) > 0 {
+		return len(keys) - len(failed), fmt.Errorf("partial delete: %d/%d failed", len(failed), len(keys))
+	}
+	return len(keys), nil
+}
+
+// DeleteError is one key that DeleteObjects reported as not deleted.
+type DeleteError struct {
+	Key     string
+	Code    string // e.g. NoSuchKey, AccessDenied
+	Message string
+}
+
+// DeleteKeys deletes up to 1000 keys in one call and returns the keys the
+// provider reported as not deleted. A nil error with no DeleteErrors means
+// every key was confirmed.
+func (c *Client) DeleteKeys(ctx context.Context, bucket string, keys []string) ([]DeleteError, error) {
 	if len(keys) == 0 {
-		return 0, nil
+		return nil, nil
 	}
 	objs := make([]s3types.ObjectIdentifier, 0, len(keys))
 	for _, k := range keys {
-		k := k
 		objs = append(objs, s3types.ObjectIdentifier{Key: aws.String(k)})
 	}
 	out, err := c.raw.DeleteObjects(ctx, &awss3.DeleteObjectsInput{
@@ -334,12 +354,35 @@ func (c *Client) DeleteObjects(ctx context.Context, bucket string, keys []string
 		Delete: &s3types.Delete{Objects: objs, Quiet: aws.Bool(true)},
 	})
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	if len(out.Errors) > 0 {
-		return len(keys) - len(out.Errors), fmt.Errorf("partial delete: %d/%d failed", len(out.Errors), len(keys))
+	failed := make([]DeleteError, 0, len(out.Errors))
+	for _, e := range out.Errors {
+		failed = append(failed, DeleteError{
+			Key: aws.ToString(e.Key), Code: aws.ToString(e.Code), Message: aws.ToString(e.Message),
+		})
 	}
-	return len(keys), nil
+	return failed, nil
+}
+
+// ListAllObjects lists every object under prefix recursively (no delimiter),
+// following continuation tokens.
+func (c *Client) ListAllObjects(ctx context.Context, bucket, prefix string) ([]Object, error) {
+	var objs []Object
+	in := &awss3.ListObjectsV2Input{Bucket: aws.String(bucket), Prefix: aws.String(prefix)}
+	for {
+		out, err := c.raw.ListObjectsV2(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		for _, o := range out.Contents {
+			objs = append(objs, Object{Key: aws.ToString(o.Key), Size: aws.ToInt64(o.Size)})
+		}
+		if !aws.ToBool(out.IsTruncated) || out.NextContinuationToken == nil {
+			return objs, nil
+		}
+		in.ContinuationToken = out.NextContinuationToken
+	}
 }
 
 // ─── Backup uploader (agent-side) ───────────────────────────────────────────

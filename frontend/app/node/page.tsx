@@ -3,18 +3,19 @@
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { api } from '@/lib/api';
+import { api, errText } from '@/lib/api';
 import { useSSE } from '@/lib/sse';
 import { fmtBytes, fmtBps, fmtPct, fmtRelative, fmtUptime } from '@/lib/format';
 import type { ContainerView, MetricsBucket, MetricsSample, NodeView } from '@/lib/types';
 import { Bar } from '@/components/bar';
 import { AuthShell } from '@/components/auth-shell';
 import { MetricChart } from '@/components/metric-chart';
+import { BlockSkeleton, EmptyState, ErrorState } from '@/components/feedback';
 
 export default function NodePage() {
   return (
     <AuthShell>
-      <Suspense fallback={<div className="p-8 text-sm text-zinc-500">Loading…</div>}>
+      <Suspense fallback={<div className="page"><BlockSkeleton /></div>}>
         <NodeDetail />
       </Suspense>
     </AuthShell>
@@ -38,13 +39,19 @@ function NodeDetail() {
   const [window, setWindow] = useState<Window>('1h');
   const [buckets, setBuckets] = useState<MetricsBucket[]>([]);
   const [containerFilter, setContainerFilter] = useState('');
+  const [err, setErr] = useState<string | null>(null);
 
   const loadHeader = useCallback(async () => {
     if (!id) return;
     try {
       const n = await api<NodeView>(`/api/nodes/${encodeURIComponent(id)}`);
       setNode(n);
-    } catch {/* */}
+      setErr(null);
+    } catch (e) {
+      setErr((e as { status?: number })?.status === 404
+        ? 'This node is not known to the leader. It may have been cleaned up.'
+        : errText(e, 'Could not load this node.'));
+    }
     try {
       const r = await api<{ containers: ContainerView[] }>('/api/containers');
       setContainers((r.containers ?? []).filter((c) => c.node_id === id));
@@ -111,7 +118,21 @@ function NodeDetail() {
     },
   });
 
-  if (!node) return <div className="p-8 text-sm text-zinc-500">Loading…</div>;
+  if (!id) {
+    return <div className="page"><ErrorState message="No node selected. Open a node from the Nodes page." /></div>;
+  }
+  if (!node) {
+    return (
+      <div className="page">
+        {err ? (
+          <>
+            <ErrorState message={err} onRetry={loadHeader} />
+            <Link href="/nodes" className="btn-ghost">Back to Nodes</Link>
+          </>
+        ) : <BlockSkeleton />}
+      </div>
+    );
+  }
 
   const m = node.metrics;
   const diskFree = m ? Math.max(0, m.disk_total_bytes - m.disk_used_bytes) : 0;
@@ -124,12 +145,13 @@ function NodeDetail() {
     : containers;
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-8">
-      <header className="mb-4 flex items-end justify-between">
+    <div className="page">
+      {err && <ErrorState message={err} onRetry={loadHeader} />}
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{node.hostname}</h1>
-          <p className="text-xs text-zinc-500">
-            {node.os}/{node.arch} · v{node.version || '—'}
+          <h1 className="page-title">{node.hostname}</h1>
+          <p className="page-sub">
+            {node.os}/{node.arch} · v{node.version || '-'}
             {m?.cpu_cores ? ` · ${m.cpu_cores} cores` : ''}
             {m?.uptime_seconds ? ` · up ${fmtUptime(m.uptime_seconds)}` : ''}
             {node.status === 'online'
@@ -144,15 +166,15 @@ function NodeDetail() {
 
       <div className="card">
         {m ? (
-          <div className="space-y-3">
+          <div className="space-y-4">
             <Bar label="CPU" value={m.cpu_percent} detail={fmtPct(m.cpu_percent, 1)} />
             <Bar label="RAM" value={m.mem_percent} detail={`${fmtBytes(m.mem_used_bytes)} / ${fmtBytes(m.mem_total_bytes)}`} />
             <Bar label="Disk" value={m.disk_percent} detail={`${fmtBytes(diskFree)} free · ${fmtBytes(m.disk_total_bytes)}`} />
-            <div className="grid grid-cols-2 gap-4 pt-2 text-xs text-zinc-500">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 pt-2 text-sm text-zinc-500 lg:grid-cols-4">
               <div>↓ Net <span className="font-mono text-zinc-700 dark:text-zinc-300">{fmtBps(m.net_rx_bps)}</span></div>
-              <div className="text-right">↑ Net <span className="font-mono text-zinc-700 dark:text-zinc-300">{fmtBps(m.net_tx_bps)}</span></div>
+              <div>↑ Net <span className="font-mono text-zinc-700 dark:text-zinc-300">{fmtBps(m.net_tx_bps)}</span></div>
               <div>Disk read <span className="font-mono text-zinc-700 dark:text-zinc-300">{fmtBps(m.disk_read_bps)}</span></div>
-              <div className="text-right">Disk write <span className="font-mono text-zinc-700 dark:text-zinc-300">{fmtBps(m.disk_write_bps)}</span></div>
+              <div>Disk write <span className="font-mono text-zinc-700 dark:text-zinc-300">{fmtBps(m.disk_write_bps)}</span></div>
             </div>
           </div>
         ) : (
@@ -160,27 +182,26 @@ function NodeDetail() {
         )}
       </div>
 
-      <div className="mt-6 mb-2 flex items-center gap-2 text-xs">
-        <span className="text-zinc-500">Window:</span>
-        {WINDOWS.map((w) => (
-          <button
-            key={w.v}
-            onClick={() => setWindow(w.v)}
-            className={
-              w.v === window
-                ? 'rounded-md bg-zinc-900 px-2.5 py-1 text-white dark:bg-zinc-100 dark:text-zinc-900'
-                : 'rounded-md px-2.5 py-1 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-            }
-          >{w.label}</button>
-        ))}
-        <span className="ml-2 text-[11px] text-zinc-500">
+      <div className="mb-3 mt-8 flex flex-wrap items-center gap-3 text-xs">
+        <span className="section-title">History</span>
+        <div className="seg" role="group" aria-label="Time window">
+          {WINDOWS.map((w) => (
+            <button
+              key={w.v}
+              onClick={() => setWindow(w.v)}
+              aria-pressed={w.v === window}
+              className={w.v === window ? 'seg-item-active' : 'seg-item'}
+            >{w.label}</button>
+          ))}
+        </div>
+        <span className="text-2xs text-zinc-500">
           {buckets.length} pts · step {WINDOWS.find((w) => w.v === window)!.stepSec}s
         </span>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2 3xl:grid-cols-3">
         <div className="card">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">CPU / RAM / Disk (%)</h3>
+          <h3 className="section-title mb-3">CPU / RAM / Disk (%)</h3>
           <MetricChart
             timestamps={timestamps}
             yMax={100}
@@ -193,7 +214,7 @@ function NodeDetail() {
           />
         </div>
         <div className="card">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Network (B/s)</h3>
+          <h3 className="section-title mb-3">Network (B/s)</h3>
           <MetricChart
             timestamps={timestamps}
             formatY={(v) => fmtBps(v).replace('/s', '')}
@@ -204,7 +225,7 @@ function NodeDetail() {
           />
         </div>
         <div className="card">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Disk I/O (B/s)</h3>
+          <h3 className="section-title mb-3">Disk I/O (B/s)</h3>
           <MetricChart
             timestamps={timestamps}
             formatY={(v) => fmtBps(v).replace('/s', '')}
@@ -216,23 +237,27 @@ function NodeDetail() {
         </div>
       </div>
 
-      <div className="mt-8 mb-2 flex items-end justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
+      <div className="mb-3 mt-10 flex flex-wrap items-end justify-between gap-3">
+        <h2 className="section-title">
           Containers ({filteredContainers.length})
         </h2>
         <input
           placeholder="filter…"
+          aria-label="Filter containers"
           value={containerFilter}
           onChange={(e) => setContainerFilter(e.target.value)}
-          className="input w-56"
+          className="input w-full sm:w-64"
         />
       </div>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {filteredContainers.map((c) => <ContainerCard key={c.container_id} c={c} />)}
-        {filteredContainers.length === 0 && (
-          <div className="card text-sm text-zinc-500">No containers.</div>
-        )}
-      </div>
+      {filteredContainers.length === 0 ? (
+        <div className="card p-0">
+          <EmptyState title={containerFilter ? 'No containers match the filter' : 'No containers on this node'} />
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 3xl:grid-cols-5">
+          {filteredContainers.map((c) => <ContainerCard key={c.container_id} c={c} />)}
+        </div>
+      )}
     </div>
   );
 }
@@ -249,17 +274,17 @@ function ContainerCard({ c }: { c: ContainerView }) {
   return (
     <Link
       href={`/container?node=${encodeURIComponent(c.node_id)}&id=${encodeURIComponent(c.container_id)}`}
-      className="card block transition hover:border-zinc-300 hover:shadow-sm dark:hover:border-zinc-700"
+      className="card block transition hover:border-zinc-300 hover:shadow-md active:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:border-zinc-700 dark:active:bg-zinc-800/60"
     >
-      <div className="mb-2 flex items-start justify-between gap-2">
+      <div className="mb-3 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold">{c.name}</div>
-          <div className="truncate text-[11px] text-zinc-500">{c.image}</div>
+          <div className="truncate text-2xs text-zinc-500">{c.image}</div>
         </div>
         <span className={stateBadge + ' shrink-0'}>{stateLabel}</span>
       </div>
       {c.state === 'running' ? (
-        <div className="space-y-1.5">
+        <div className="space-y-2.5">
           <Bar label="CPU" value={c.cpu_percent} detail={fmtPct(c.cpu_percent, 1)} />
           <Bar
             label="RAM"
@@ -267,13 +292,13 @@ function ContainerCard({ c }: { c: ContainerView }) {
             detail={`${fmtBytes(c.mem_used_bytes)}${c.mem_limit_bytes > 0 ? ` / ${fmtBytes(c.mem_limit_bytes)}` : ''}`}
             tone={c.mem_limit_bytes > 0 ? 'auto' : 'cool'}
           />
-          <div className="grid grid-cols-2 gap-2 pt-1 text-[11px] text-zinc-500">
+          <div className="grid grid-cols-2 gap-2 pt-1 text-2xs text-zinc-500">
             <div>↓ {fmtBps(c.net_rx_bps)}</div>
             <div className="text-right">↑ {fmtBps(c.net_tx_bps)}</div>
           </div>
         </div>
       ) : (
-        <div className="rounded-md bg-zinc-100 px-3 py-2 text-[11px] text-zinc-500 dark:bg-zinc-800/60">
+        <div className="rounded-md bg-zinc-100 px-3 py-2 text-2xs text-zinc-500 dark:bg-zinc-800/60">
           {c.state === 'exited' ? `exit ${c.exit_code} · ${fmtRelative(c.finished_at_ms)}` : c.state}
         </div>
       )}

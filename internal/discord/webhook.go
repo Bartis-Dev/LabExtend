@@ -1,6 +1,5 @@
-// Package discord posts payloads to a Discord webhook. The interface is also
-// reused for backup-result embeds; future channels (Slack/Teams/generic JSON)
-// should introduce a notifier.Notifier interface and rename this file.
+// Package discord posts payloads to a Discord webhook. Event notifications
+// (internal/notify) and backup success summaries both go through it.
 package discord
 
 import (
@@ -107,34 +106,6 @@ func parseRetryAfter(s string) time.Duration {
 		return time.Duration(n*1000) * time.Millisecond
 	}
 	return 2 * time.Second
-}
-
-// AlertEmbed builds a Payload for an alert trigger or recover.
-// state ∈ {"triggered","recovered"}.
-func AlertEmbed(state, ruleName, scope, message string, value float64, when time.Time) Payload {
-	color := ColorRed
-	title := "ALERT FIRED · " + ruleName
-	if state == "recovered" {
-		color = ColorGreen
-		title = "Alert recovered · " + ruleName
-	}
-	fields := []Field{
-		{Name: "Scope", Value: scope, Inline: true},
-		{Name: "Value", Value: fmt.Sprintf("%.2f", value), Inline: true},
-	}
-	if message != "" {
-		fields = append(fields, Field{Name: "Detail", Value: message})
-	}
-	return Payload{
-		Username: "LabExtend",
-		Embeds: []Embed{{
-			Title:     title,
-			Color:     color,
-			Timestamp: when.UTC().Format(time.RFC3339),
-			Fields:    fields,
-			Footer:    &Footer{Text: "LabExtend"},
-		}},
-	}
 }
 
 // BackupSummary builds a Payload for a finished backup run.

@@ -45,7 +45,6 @@ func EnsureLeaderSecrets(dataDir string) error {
 	required := map[string]int{
 		"BPM_AGENT_TOKEN": 32, // 32 bytes → hex 64 chars
 		"BPM_SECRETS_KEY": 32, // 32 bytes → AES-256-GCM key
-		"BPM_TOTP_KEY":    32, // 32 bytes → AES-256-GCM key
 	}
 
 	missing := make(map[string]string)

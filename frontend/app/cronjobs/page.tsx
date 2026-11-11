@@ -1,11 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { Clock } from 'lucide-react';
+import { api, errText } from '@/lib/api';
 import { AuthShell } from '@/components/auth-shell';
 import type { NodeView } from '@/lib/types';
 import { SchedulePicker } from '@/components/schedule-picker';
-import { Toast } from '@/components/toast';
+import { toast } from '@/components/toast';
+import { Modal } from '@/components/modal';
+import { Field, inputCls } from '@/components/field';
+import { confirmDialog } from '@/components/confirm';
+import { EmptyState, ErrorState, TableSkeleton } from '@/components/feedback';
+import { Tooltip } from '@/components/tooltip';
 
 interface CronJob {
   id: string;
@@ -25,8 +31,6 @@ interface ApplyResult {
   apply_error?: string;
 }
 
-const errMsg = (e: unknown) => (e as { body?: { error?: string } })?.body?.error ?? String(e);
-
 export default function CronJobsPage() {
   return <AuthShell><Cron /></AuthShell>;
 }
@@ -36,10 +40,11 @@ function Cron() {
   const [jobs, setJobs] = useState<CronJob[]>([]);
   const [editing, setEditing] = useState<Partial<CronJob> | null>(null);
   const [filterNode, setFilterNode] = useState('');
+  const [loaded, setLoaded] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [formErr, setFormErr] = useState<string | null>(null);
+  const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
 
   const load = async () => {
     try {
@@ -50,13 +55,16 @@ function Cron() {
       setJobs(j.jobs ?? []);
       setLoadErr(null);
     } catch (e) {
-      setLoadErr(errMsg(e));
+      setLoadErr(errText(e, 'Could not load cron jobs.'));
+    } finally {
+      setLoaded(true);
     }
   };
   useEffect(() => { load(); }, [filterNode]);
 
   const openEditor = (j: Partial<CronJob>) => {
     setFormErr(null);
+    setFieldErr({});
     setEditing(j);
   };
 
@@ -64,13 +72,20 @@ function Cron() {
   // would claim something the host is not doing.
   const reportApply = (r: ApplyResult, node: string, done: string) => {
     if (r.applied === false) {
-      setToast({ tone: 'error', message: `${done}, but not applied to ${node}: ${r.apply_error ?? 'unknown error'}` });
+      toast.error(`${done}, but not applied to ${node}: ${r.apply_error ?? 'unknown error'}`);
     } else {
-      setToast({ tone: 'success', message: `${done} and applied to ${node}.` });
+      toast.success(`${done} and applied to ${node}.`);
     }
   };
 
   const save = async (j: Partial<CronJob>) => {
+    const errs: Record<string, string> = {};
+    if (!j.node_id) errs.node_id = 'Pick the node this job runs on.';
+    if (!j.command?.trim()) errs.command = 'Enter the command to run.';
+    if (!j.schedule?.trim() || j.schedule.trim().split(/\s+/).length !== 5) errs.schedule = 'Use five cron fields: min hour day-of-month month day-of-week.';
+    setFieldErr(errs);
+    if (Object.keys(errs).length) return;
+
     const payload = {
       node_id: j.node_id ?? '', schedule: j.schedule ?? '', command: j.command ?? '',
       run_as: j.run_as || 'root', comment: j.comment ?? '', enabled: j.enabled ?? true,
@@ -85,147 +100,148 @@ function Cron() {
       reportApply(r, payload.node_id, 'Saved');
       load();
     } catch (e) {
-      setFormErr(errMsg(e));
+      setFormErr(errText(e));
     } finally {
       setSaving(false);
     }
   };
   const remove = async (j: CronJob) => {
-    if (!confirm('Delete cronjob?')) return;
+    const ok = await confirmDialog({
+      title: 'Delete this cron job?',
+      body: <>The line <code className="font-mono text-xs">{j.schedule} {j.command}</code> is removed from <code className="font-mono text-xs">/etc/cron.d/bpm</code> on {j.node_id}.</>,
+      confirmLabel: 'Delete job',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       const r = await api<ApplyResult>(`/api/cronjobs/${j.id}`, { method: 'DELETE' });
       reportApply(r, j.node_id, 'Deleted');
       load();
     } catch (e) {
-      setToast({ tone: 'error', message: errMsg(e) });
+      toast.error(errText(e));
     }
   };
   const apply = async (node_id: string) => {
     try {
       await api(`/api/nodes/${encodeURIComponent(node_id)}/cronjobs/apply`, { method: 'POST' });
-      setToast({ tone: 'success', message: `Applied to ${node_id}.` });
+      toast.success(`Applied to ${node_id}.`);
     } catch (e) {
-      setToast({ tone: 'error', message: `Not applied to ${node_id}: ${errMsg(e)}` });
+      toast.error(`Not applied to ${node_id}: ${errText(e)}`);
     }
   };
 
+  const newJob = () => openEditor({ enabled: true, run_as: 'root' });
+
   return (
-    <div className="mx-auto max-w-6xl px-6 py-8">
-      <header className="mb-4 flex items-end justify-between">
+    <div className="page">
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Cron jobs</h1>
-          <p className="text-xs text-zinc-500">Written atomically to <code>/etc/cron.d/bpm</code> on each agent.</p>
+          <h1 className="page-title">Cron jobs</h1>
+          <p className="page-sub">Written atomically to <code>/etc/cron.d/bpm</code> on each agent.</p>
         </div>
-        <div className="flex gap-2">
-          <select className="input w-44" value={filterNode} onChange={(e) => setFilterNode(e.target.value)}>
-            <option value="">— all nodes —</option>
+        <div className="flex flex-wrap gap-2">
+          <select className="input w-48" aria-label="Filter by node" value={filterNode} onChange={(e) => setFilterNode(e.target.value)}>
+            <option value="">All nodes</option>
             {nodes.map((n) => <option key={n.id} value={n.id}>{n.hostname}</option>)}
           </select>
-          <button onClick={() => openEditor({ enabled: true, run_as: 'root' })} className="btn-primary">New job</button>
+          <button onClick={newJob} className="btn-primary">New job</button>
         </div>
       </header>
 
-      {loadErr && (
-        <p className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-          {loadErr}
-        </p>
-      )}
+      {loadErr && <ErrorState message={loadErr} onRetry={load} />}
 
-      <div className="card overflow-hidden p-0">
-        <table className="w-full text-sm">
-          <thead className="border-b border-zinc-200 text-left text-[11px] uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
+      {!loaded ? <TableSkeleton cols={5} /> : (
+      <div className="card overflow-x-auto p-0">
+        <table className="w-full min-w-[44rem] text-sm">
+          <thead className="border-b border-zinc-200 dark:border-zinc-800">
             <tr>
-              <th className="px-4 py-2">Node</th>
-              <th className="px-4 py-2">Schedule</th>
-              <th className="px-4 py-2">Command</th>
-              <th className="px-4 py-2">User</th>
-              <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2"></th>
+              <th className="th">Node</th>
+              <th className="th">Schedule</th>
+              <th className="th">Command</th>
+              <th className="th">User</th>
+              <th className="th">Status</th>
+              <th className="th"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {jobs.map((j) => (
-              <tr key={j.id} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
-                <td className="px-4 py-2 font-mono text-[12px]">{j.node_id}</td>
-                <td className="px-4 py-2 font-mono text-[12px]">{j.schedule}</td>
-                <td className="px-4 py-2 font-mono text-[11px]">{j.command}</td>
-                <td className="px-4 py-2 text-zinc-500">{j.run_as}</td>
-                <td className="px-4 py-2"><span className={j.enabled ? 'badge-green' : 'badge-zinc'}>{j.enabled ? 'enabled' : 'disabled'}</span></td>
-                <td className="px-4 py-2 text-right">
-                  <button onClick={() => apply(j.node_id)} className="btn-ghost" title="re-apply to host">apply</button>
-                  <button onClick={() => openEditor(j)} className="btn-ghost">edit</button>
-                  <button onClick={() => remove(j)} className="btn-ghost text-red-600">delete</button>
+              <tr key={j.id}>
+                <td className="td font-mono text-xs">{j.node_id}</td>
+                <td className="td font-mono text-xs">{j.schedule}</td>
+                <td className="td font-mono text-xs">{j.command}</td>
+                <td className="td text-zinc-500">{j.run_as}</td>
+                <td className="td"><span className={j.enabled ? 'badge-green' : 'badge-zinc'}>{j.enabled ? 'enabled' : 'disabled'}</span></td>
+                <td className="td whitespace-nowrap text-right">
+                  <Tooltip label="Write the cron file to the host again">
+                    <button onClick={() => apply(j.node_id)} className="btn-ghost btn-sm">Apply</button>
+                  </Tooltip>
+                  <button onClick={() => openEditor(j)} className="btn-ghost btn-sm">Edit</button>
+                  <button onClick={() => remove(j)} className="btn-ghost-danger btn-sm">Delete</button>
                 </td>
               </tr>
             ))}
-            {jobs.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-center text-zinc-500">No jobs.</td></tr>}
+            {jobs.length === 0 && (
+              <tr><td colSpan={6}>
+                <EmptyState
+                  icon={<Clock className="h-6 w-6" />}
+                  title={filterNode ? 'No cron jobs on this node' : 'No cron jobs yet'}
+                  action={<button onClick={newJob} className="btn-primary">New job</button>}
+                >
+                  Jobs run on the host as the chosen user, independent of containers.
+                </EmptyState>
+              </td></tr>
+            )}
           </tbody>
         </table>
       </div>
-
-      {editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEditing(null)}>
-          <div className="card w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
-            <h3 className="mb-3 text-base font-semibold">{editing.id ? 'Edit job' : 'New job'}</h3>
-            <div className="space-y-3 text-sm">
-              <label className="block">
-                <span className="text-xs text-zinc-500">Node</span>
-                <select className="input mt-1" value={editing.node_id ?? ''} onChange={(e) => setEditing({ ...editing, node_id: e.target.value })}>
-                  <option value="">— select node —</option>
-                  {nodes.map((n) => <option key={n.id} value={n.id}>{n.hostname}</option>)}
-                </select>
-              </label>
-              <div>
-                <span className="text-xs text-zinc-500">Schedule</span>
-                <div className="mt-1">
-                  <SchedulePicker
-                    variant="cron"
-                    value={editing.schedule ?? '0 3 * * *'}
-                    onChange={(v) => setEditing({ ...editing, schedule: v })}
-                  />
-                </div>
-              </div>
-              <label className="block">
-                <span className="text-xs text-zinc-500">Command</span>
-                <input className="input mt-1 font-mono text-[12px]" placeholder="echo hello >> /tmp/log" value={editing.command ?? ''} onChange={(e) => setEditing({ ...editing, command: e.target.value })} />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block">
-                  <span className="text-xs text-zinc-500">User</span>
-                  <input className="input mt-1" value={editing.run_as ?? 'root'} onChange={(e) => setEditing({ ...editing, run_as: e.target.value })} />
-                </label>
-                <label className="block">
-                  <span className="text-xs text-zinc-500">Comment</span>
-                  <input className="input mt-1" value={editing.comment ?? ''} onChange={(e) => setEditing({ ...editing, comment: e.target.value })} />
-                </label>
-              </div>
-              <label className="flex items-center gap-2">
-                <input type="checkbox" checked={editing.enabled ?? true} onChange={(e) => setEditing({ ...editing, enabled: e.target.checked })} />
-                Enabled
-              </label>
-            </div>
-            {formErr && (
-              <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-                {formErr}
-              </p>
-            )}
-            <div className="mt-4 flex justify-end gap-2">
-              <button onClick={() => setEditing(null)} className="btn-ghost">Cancel</button>
-              <button onClick={() => save(editing)} disabled={saving} className="btn-primary">
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
-      {toast && (
-        <Toast
-          message={toast.message}
-          tone={toast.tone}
-          timeoutMs={toast.tone === 'error' ? 10_000 : 4000}
-          onDone={() => setToast(null)}
-        />
+      {editing && (
+        <Modal
+          title={editing.id ? 'Edit job' : 'New job'}
+          onClose={() => setEditing(null)}
+          dismissable={!saving}
+          footer={
+            <>
+              <button type="button" onClick={() => setEditing(null)} disabled={saving} className="btn-ghost">Cancel</button>
+              <button type="submit" form="cron-form" disabled={saving} className="btn-primary">
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </>
+          }
+        >
+          <form id="cron-form" noValidate onSubmit={(e) => { e.preventDefault(); save(editing); }} className="space-y-4 text-sm">
+            <Field label="Node" error={fieldErr.node_id}>
+              <select className={inputCls(fieldErr.node_id)} value={editing.node_id ?? ''} onChange={(e) => setEditing({ ...editing, node_id: e.target.value })}>
+                <option value="">Select a node</option>
+                {nodes.map((n) => <option key={n.id} value={n.id}>{n.hostname}</option>)}
+              </select>
+            </Field>
+            <Field label="Schedule" group error={fieldErr.schedule}>
+              <SchedulePicker
+                variant="cron"
+                value={editing.schedule ?? '0 3 * * *'}
+                onChange={(v) => setEditing((cur) => (cur ? { ...cur, schedule: v } : cur))}
+              />
+            </Field>
+            <Field label="Command" error={fieldErr.command}>
+              <input className={inputCls(fieldErr.command, 'font-mono text-xs')} placeholder="echo hello >> /tmp/log" value={editing.command ?? ''} onChange={(e) => setEditing({ ...editing, command: e.target.value })} />
+            </Field>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="User">
+                <input className="input" value={editing.run_as ?? 'root'} onChange={(e) => setEditing({ ...editing, run_as: e.target.value })} />
+              </Field>
+              <Field label="Comment">
+                <input className="input" value={editing.comment ?? ''} onChange={(e) => setEditing({ ...editing, comment: e.target.value })} />
+              </Field>
+            </div>
+            <label className="flex cursor-pointer items-center gap-2">
+              <input type="checkbox" checked={editing.enabled ?? true} onChange={(e) => setEditing({ ...editing, enabled: e.target.checked })} />
+              Enabled
+            </label>
+            {formErr && <p role="alert" className="alert-error">{formErr}</p>}
+          </form>
+        </Modal>
       )}
     </div>
   );

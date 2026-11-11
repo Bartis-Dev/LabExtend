@@ -27,7 +27,7 @@ export function LabelChips({
   ].sort((a, b) => a.k.localeCompare(b.k));
 
   if (items.length === 0) {
-    return <span className="text-[11px] text-zinc-400 dark:text-zinc-600">—</span>;
+    return <span className="text-2xs text-zinc-400 dark:text-zinc-600">-</span>;
   }
 
   const shown = expanded ? items : items.slice(0, max);
@@ -52,7 +52,7 @@ export function LabelChips({
       {hidden > 0 && (
         <button
           onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
-          className="rounded px-1 text-[11px] text-zinc-500 underline-offset-2 transition hover:text-zinc-800 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:text-zinc-200"
+          className="rounded px-1 text-2xs text-zinc-500 underline-offset-2 transition hover:text-zinc-800 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:text-zinc-200"
         >
           +{hidden}
         </button>
@@ -60,7 +60,7 @@ export function LabelChips({
       {expanded && items.length > max && (
         <button
           onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
-          className="rounded px-1 text-[11px] text-zinc-500 underline-offset-2 transition hover:text-zinc-800 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:text-zinc-200"
+          className="rounded px-1 text-2xs text-zinc-500 underline-offset-2 transition hover:text-zinc-800 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:text-zinc-200"
         >
           less
         </button>

@@ -30,8 +30,9 @@ type fakeIDP struct {
 
 	mu        sync.Mutex
 	subject   string
-	nonce     string // nonce to put into the next ID token
-	challenge string // expected S256 code_challenge
+	claims    map[string]any // extra ID token claims (email, groups, ...)
+	nonce     string         // nonce to put into the next ID token
+	challenge string         // expected S256 code_challenge
 }
 
 func newFakeIDP(t *testing.T) *fakeIDP {
@@ -40,7 +41,10 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeIDP{key: key, subject: "sub-alice"}
+	f := &fakeIDP{key: key, subject: "sub-alice", claims: map[string]any{
+		"email": "alice@example.com", "name": "Alice", "preferred_username": "alice",
+		"groups": []string{"labextend"},
+	}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -70,6 +74,10 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 		sum := sha256.Sum256([]byte(r.PostForm.Get("code_verifier")))
 		f.mu.Lock()
 		challenge, nonce, sub := f.challenge, f.nonce, f.subject
+		claims := map[string]any{}
+		for k, v := range f.claims {
+			claims[k] = v
+		}
 		f.mu.Unlock()
 		if b64(sum[:]) != challenge {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid_grant"})
@@ -77,10 +85,11 @@ func newFakeIDP(t *testing.T) *fakeIDP {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"access_token": "at", "token_type": "Bearer", "expires_in": 3600,
-			"id_token": f.sign(t, map[string]any{
-				"iss": f.srv.URL, "sub": sub, "aud": "labextend", "nonce": nonce,
-				"iat": time.Now().Unix(), "exp": time.Now().Add(5 * time.Minute).Unix(),
-			}),
+			"id_token": f.sign(t, func() map[string]any {
+				claims["iss"], claims["sub"], claims["aud"], claims["nonce"] = f.srv.URL, sub, "labextend", nonce
+				claims["iat"], claims["exp"] = time.Now().Unix(), time.Now().Add(5*time.Minute).Unix()
+				return claims
+			}()),
 		})
 	})
 	f.srv = httptest.NewServer(mux)
@@ -122,38 +131,45 @@ func newOIDCEnv(t *testing.T) *oidcEnv {
 	}
 	idp := newFakeIDP(t)
 	store := auth.NewSessionStore(d, "bpm_session", time.Hour, false)
-	authDeps := &AuthDeps{DB: d, Sessions: store}
+	audit := newAuditLogger(d)
+	authDeps := &AuthDeps{DB: d, Sessions: store, Audit: audit}
 	return &oidcEnv{
 		idp: idp, db: d, store: store,
 		deps: &OIDCDeps{
-			Auth: authDeps, Account: &AccountDeps{AuthDeps: authDeps},
-			Audit:   newAuditLogger(d, false),
+			Auth: authDeps, Audit: audit,
 			Enabled: true, Name: "Pocket ID", Issuer: idp.srv.URL,
 			ClientID: "labextend", ClientSecret: "s3cret",
 			RedirectURL: "http://labextend.test/api/auth/oidc/callback",
+			UserGroup:   "labextend", AdminGroup: "labextend-admins",
 		},
 	}
 }
 
-func (e *oidcEnv) addUser(t *testing.T, email, password string, active bool, subject string) int64 {
+// setClaims replaces the extra claims of the next ID token.
+func (e *oidcEnv) setClaims(c map[string]any) {
+	e.idp.mu.Lock()
+	e.idp.claims = c
+	e.idp.mu.Unlock()
+}
+
+func (e *oidcEnv) setGroups(groups ...string) {
+	e.idp.mu.Lock()
+	e.idp.claims["groups"] = groups
+	e.idp.mu.Unlock()
+}
+
+// addUser inserts a user, linked to the fake issuer when subject is set.
+func (e *oidcEnv) addUser(t *testing.T, email, username string, admin bool, subject string) int64 {
 	t.Helper()
-	hash := "x"
-	if password != "" {
-		var err error
-		if hash, err = auth.HashPassword(password); err != nil {
-			t.Fatal(err)
-		}
-	}
-	var iss, sub any
+	var iss, sub, uname any
 	if subject != "" {
 		iss, sub = e.idp.srv.URL, subject
 	}
-	act := 0
-	if active {
-		act = 1
+	if username != "" {
+		uname = username
 	}
-	res, err := e.db.Exec(`INSERT INTO users (email, password_hash, is_active, created_at, updated_at, oidc_issuer, oidc_subject)
-		VALUES (?, ?, ?, 0, 0, ?, ?)`, email, hash, act, iss, sub)
+	res, err := e.db.Exec(`INSERT INTO users (email, username, is_admin, created_at, updated_at, oidc_issuer, oidc_subject)
+		VALUES (?, ?, ?, 0, 0, ?, ?)`, email, uname, boolInt(admin), iss, sub)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,51 +264,206 @@ func wantRejected(t *testing.T, rec *httptest.ResponseRecorder, page string) {
 	}
 }
 
-func TestOIDCLoginLinkedUser(t *testing.T) {
-	e := newOIDCEnv(t)
-	id := e.addUser(t, "alice@example.com", "", true, "sub-alice")
-	// TOTP on the account must not turn the OIDC session into a pending one.
-	if _, err := e.db.Exec(`INSERT INTO totp_secrets (user_id, secret_enc, enabled) VALUES (?, X'00', 1)`, id); err != nil {
-		t.Fatal(err)
-	}
-
+// login runs one full flow and returns the callback response.
+func (e *oidcEnv) login(t *testing.T) *httptest.ResponseRecorder {
+	t.Helper()
 	s := e.startLogin(t, "")
-	rec := e.callback(t, s.state, s.cookie)
+	return e.callback(t, s.state, s.cookie)
+}
+
+func wantSignedIn(t *testing.T, rec *httptest.ResponseRecorder) *http.Cookie {
+	t.Helper()
 	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/nodes" {
-		t.Fatalf("got %d %q", rec.Code, rec.Header().Get("Location"))
+		t.Fatalf("want sign-in, got %d %q", rec.Code, rec.Header().Get("Location"))
 	}
 	c := findCookie(rec, "bpm_session")
 	if c == nil {
 		t.Fatal("no session cookie")
 	}
-	var uid int64
-	var pending int
-	if err := e.db.QueryRow(`SELECT user_id, is_2fa_pending FROM sessions WHERE id = ?`, c.Value).Scan(&uid, &pending); err != nil {
+	return c
+}
+
+type userRow struct {
+	ID       int64
+	Email    string
+	Username string
+	Name     string
+	Admin    bool
+}
+
+func (e *oidcEnv) userBySubject(t *testing.T, sub string) userRow {
+	t.Helper()
+	var u userRow
+	var admin int
+	if err := e.db.QueryRow(`SELECT id, email, COALESCE(username,''), display_name, is_admin
+		FROM users WHERE oidc_issuer = ? AND oidc_subject = ?`, e.idp.srv.URL, sub).
+		Scan(&u.ID, &u.Email, &u.Username, &u.Name, &admin); err != nil {
+		t.Fatalf("user %s: %v", sub, err)
+	}
+	u.Admin = admin == 1
+	return u
+}
+
+func userCount(t *testing.T, d *sql.DB) int {
+	var n int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if uid != id || pending != 0 {
-		t.Fatalf("session user=%d pending=%d, want user=%d pending=0", uid, pending, id)
+	return n
+}
+
+func lastAudit(t *testing.T, d *sql.DB, action string) string {
+	t.Helper()
+	var details string
+	_ = d.QueryRow(`SELECT details_json FROM audit_log WHERE action = ? ORDER BY id DESC LIMIT 1`, action).Scan(&details)
+	return details
+}
+
+// adminCheck runs a request with the given session cookie through the real
+// middleware chain and returns the status requireAdmin answers with.
+func (e *oidcEnv) adminCheck(t *testing.T, c *http.Cookie) int {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/audit", nil)
+	req.AddCookie(c)
+	rec := httptest.NewRecorder()
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	sessionMiddleware(e.store)(requireAuth(requireAdmin(e.db)(ok))).ServeHTTP(rec, req)
+	return rec.Code
+}
+
+func TestOIDCProvisionsUserInGroup(t *testing.T) {
+	e := newOIDCEnv(t)
+	wantSignedIn(t, e.login(t))
+	u := e.userBySubject(t, "sub-alice")
+	if u.Email != "alice@example.com" || u.Username != "alice" || u.Name != "Alice" || u.Admin {
+		t.Fatalf("provisioned %+v", u)
 	}
-	var action string
-	_ = e.db.QueryRow(`SELECT action FROM audit_log ORDER BY id DESC LIMIT 1`).Scan(&action)
-	if action != "auth.oidc.login" {
-		t.Fatalf("last audit action = %q", action)
+	if lastAudit(t, e.db, "auth.oidc.provision") == "" {
+		t.Fatal("no auth.oidc.provision audit row")
 	}
 }
 
-func TestOIDCUnknownSubjectRejected(t *testing.T) {
+func TestOIDCProvisionsAdmin(t *testing.T) {
 	e := newOIDCEnv(t)
-	e.addUser(t, "alice@example.com", "", true, "someone-else")
-	s := e.startLogin(t, "")
-	wantRejected(t, e.callback(t, s.state, s.cookie), "/login")
+	e.setGroups("labextend-admins")
+	wantSignedIn(t, e.login(t))
+	if !e.userBySubject(t, "sub-alice").Admin {
+		t.Fatal("member of the admin group was not made admin")
+	}
+}
+
+func TestOIDCRejectsWithoutGroup(t *testing.T) {
+	e := newOIDCEnv(t)
+	e.setGroups("someone-elses-app")
+	wantRejected(t, e.login(t), "/login")
+	if sessionCount(t, e.db) != 0 || userCount(t, e.db) != 0 {
+		t.Fatal("a user outside both groups got a session or a user row")
+	}
+	if !strings.Contains(lastAudit(t, e.db, "auth.oidc.failed"), "not in group") {
+		t.Fatalf("audit reason = %s", lastAudit(t, e.db, "auth.oidc.failed"))
+	}
+
+	// No groups claim at all (scope not granted) is the same refusal.
+	e.setClaims(map[string]any{"email": "alice@example.com"})
+	wantRejected(t, e.login(t), "/login")
+	if userCount(t, e.db) != 0 {
+		t.Fatal("user created without groups claim")
+	}
+}
+
+func TestOIDCRemovalFromGroupsRevokesSessions(t *testing.T) {
+	e := newOIDCEnv(t)
+	c := wantSignedIn(t, e.login(t))
+	e.setGroups()
+	wantRejected(t, e.login(t), "/login")
 	if sessionCount(t, e.db) != 0 {
-		t.Fatal("session created for unknown subject")
+		t.Fatal("old session survived removal from the groups")
+	}
+	if code := e.adminCheck(t, c); code != http.StatusUnauthorized {
+		t.Fatalf("old cookie still accepted: %d", code)
+	}
+}
+
+func TestOIDCAdminPromotionAndDemotion(t *testing.T) {
+	e := newOIDCEnv(t)
+	userCookie := wantSignedIn(t, e.login(t))
+	if code := e.adminCheck(t, userCookie); code != http.StatusForbidden {
+		t.Fatalf("non-admin passed requireAdmin: %d", code)
+	}
+
+	e.setGroups("labextend", "labextend-admins")
+	wantSignedIn(t, e.login(t))
+	if !e.userBySubject(t, "sub-alice").Admin {
+		t.Fatal("not promoted")
+	}
+	// The role lives in the DB and is read per request, so a session from
+	// before the promotion gets it too.
+	if code := e.adminCheck(t, userCookie); code != http.StatusOK {
+		t.Fatalf("existing session not promoted: %d", code)
+	}
+	if !strings.Contains(lastAudit(t, e.db, "auth.oidc.role_change"), `"admin":true`) {
+		t.Fatal("promotion not audited")
+	}
+
+	e.setGroups("labextend")
+	wantSignedIn(t, e.login(t))
+	if e.userBySubject(t, "sub-alice").Admin {
+		t.Fatal("not demoted after leaving the admin group")
+	}
+	if code := e.adminCheck(t, userCookie); code != http.StatusForbidden {
+		t.Fatalf("existing session kept admin after demotion: %d", code)
+	}
+}
+
+func TestOIDCExistingSubjectMatched(t *testing.T) {
+	e := newOIDCEnv(t)
+	// The production shape: one admin, already linked, with a username.
+	id := e.addUser(t, "old@example.com", "bartis", true, "sub-alice")
+	// An unlinked user holding the email the provider now reports must not be
+	// matched by that email.
+	other := e.addUser(t, "alice@example.com", "", false, "")
+	e.setGroups("labextend-admins")
+
+	wantSignedIn(t, e.login(t))
+	u := e.userBySubject(t, "sub-alice")
+	if u.ID != id || !u.Admin || u.Username != "bartis" || u.Name != "Alice" {
+		t.Fatalf("matched %+v, want id %d kept as admin bartis", u, id)
+	}
+	// alice@example.com is taken by the unlinked row, so the placeholder is used.
+	if u.Email != "sub-alice@oidc.invalid" {
+		t.Fatalf("email = %q", u.Email)
+	}
+	if userCount(t, e.db) != 2 {
+		t.Fatal("a new user row was created for a known subject")
+	}
+	var sessUser int64
+	_ = e.db.QueryRow(`SELECT user_id FROM sessions`).Scan(&sessUser)
+	if sessUser != id {
+		t.Fatalf("session user = %d, want %d", sessUser, id)
+	}
+
+	// Once the address is free, the next login picks it up.
+	if _, err := e.db.Exec(`DELETE FROM users WHERE id = ?`, other); err != nil {
+		t.Fatal(err)
+	}
+	wantSignedIn(t, e.login(t))
+	if got := e.userBySubject(t, "sub-alice").Email; got != "alice@example.com" {
+		t.Fatalf("email not refreshed: %q", got)
+	}
+}
+
+func TestOIDCUsernameCollision(t *testing.T) {
+	e := newOIDCEnv(t)
+	e.addUser(t, "a@x", "alice", false, "sub-other")
+	e.addUser(t, "b@x", "alice-2", false, "sub-other2")
+	wantSignedIn(t, e.login(t))
+	if got := e.userBySubject(t, "sub-alice").Username; got != "alice-3" {
+		t.Fatalf("username = %q, want alice-3", got)
 	}
 }
 
 func TestOIDCBadStateRejected(t *testing.T) {
 	e := newOIDCEnv(t)
-	e.addUser(t, "alice@example.com", "", true, "sub-alice")
 	s := e.startLogin(t, "")
 
 	// Valid state but no cookie: a callback link handed to another browser.
@@ -308,11 +479,8 @@ func TestOIDCBadStateRejected(t *testing.T) {
 
 func TestOIDCReplayedStateRejected(t *testing.T) {
 	e := newOIDCEnv(t)
-	e.addUser(t, "alice@example.com", "", true, "sub-alice")
 	s := e.startLogin(t, "")
-	if rec := e.callback(t, s.state, s.cookie); rec.Header().Get("Location") != "/nodes" {
-		t.Fatalf("first callback failed: %q", rec.Header().Get("Location"))
-	}
+	wantSignedIn(t, e.callback(t, s.state, s.cookie))
 	wantRejected(t, e.callback(t, s.state, s.cookie), "/login")
 	if sessionCount(t, e.db) != 1 {
 		t.Fatalf("sessions = %d, want 1", sessionCount(t, e.db))
@@ -321,7 +489,6 @@ func TestOIDCReplayedStateRejected(t *testing.T) {
 
 func TestOIDCNonceMismatchRejected(t *testing.T) {
 	e := newOIDCEnv(t)
-	e.addUser(t, "alice@example.com", "", true, "sub-alice")
 	s := e.startLogin(t, "not-the-nonce")
 	wantRejected(t, e.callback(t, s.state, s.cookie), "/login")
 	if sessionCount(t, e.db) != 0 {
@@ -329,96 +496,40 @@ func TestOIDCNonceMismatchRejected(t *testing.T) {
 	}
 }
 
-func TestOIDCDisabledUserRejected(t *testing.T) {
+func TestOIDCPKCEVerifierChecked(t *testing.T) {
 	e := newOIDCEnv(t)
-	e.addUser(t, "alice@example.com", "", false, "sub-alice")
 	s := e.startLogin(t, "")
-	rec := e.callback(t, s.state, s.cookie)
-	wantRejected(t, rec, "/login")
+	// The IdP now expects a challenge the leader's verifier does not hash to.
+	e.idp.mu.Lock()
+	e.idp.challenge = b64([]byte("some-other-challenge"))
+	e.idp.mu.Unlock()
+	wantRejected(t, e.callback(t, s.state, s.cookie), "/login")
 	if sessionCount(t, e.db) != 0 {
-		t.Fatal("session created for disabled user")
-	}
-
-	// Indistinguishable from an unknown subject, like the password login.
-	e2 := newOIDCEnv(t)
-	s2 := e2.startLogin(t, "")
-	unknown := e2.callback(t, s2.state, s2.cookie)
-	if rec.Header().Get("Location") != unknown.Header().Get("Location") {
-		t.Fatalf("disabled and unknown answer differently:\n%s\n%s",
-			rec.Header().Get("Location"), unknown.Header().Get("Location"))
+		t.Fatal("session created despite PKCE mismatch")
 	}
 }
 
-func TestOIDCLinkStoresSubject(t *testing.T) {
+func TestOIDCNotConfigured(t *testing.T) {
 	e := newOIDCEnv(t)
-	id := e.addUser(t, "alice@example.com", "correct horse battery", true, "")
-
-	// Signed-in browser.
-	login := httptest.NewRecorder()
-	sess, err := e.store.Create(context.Background(), login, httptest.NewRequest(http.MethodPost, "/", nil), id, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sessCookie := findCookie(login, "bpm_session")
-
-	link := func(pw string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "/api/account/oidc/link", strings.NewReader(`{"password":"`+pw+`"}`))
-		req = req.WithContext(context.WithValue(req.Context(), authCtxKey{}, sess))
-		rec := httptest.NewRecorder()
-		e.deps.Link(rec, req)
-		return rec
-	}
-	if rec := link("wrong"); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("link with wrong password: %d", rec.Code)
-	}
-	rec := link("correct horse battery")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("link start: %d %s", rec.Code, rec.Body)
-	}
-	var body struct {
-		RedirectURL string `json:"redirect_url"`
-	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &body)
-	s := e.arm(t, body.RedirectURL, "")
-	stateCookie := findCookie(rec, oidcStateCookie)
-
-	// Finishing the link in a browser that is not signed in as that user fails.
-	wantRejected(t, e.callback(t, s.state, stateCookie), "/account")
-
-	rec = link("correct horse battery")
-	s = e.arm(t, func() string { _ = json.Unmarshal(rec.Body.Bytes(), &body); return body.RedirectURL }(), "")
-	cb := e.callback(t, s.state, findCookie(rec, oidcStateCookie), sessCookie)
-	if cb.Code != http.StatusFound || cb.Header().Get("Location") != "/account?oidc=linked" {
-		t.Fatalf("link callback: %d %q", cb.Code, cb.Header().Get("Location"))
-	}
-	var iss, sub string
-	if err := e.db.QueryRow(`SELECT oidc_issuer, oidc_subject FROM users WHERE id = ?`, id).Scan(&iss, &sub); err != nil {
-		t.Fatal(err)
-	}
-	if iss != e.idp.srv.URL || sub != "sub-alice" {
-		t.Fatalf("stored (%q, %q)", iss, sub)
-	}
-
-	// And the linked subject now signs in.
-	ls := e.startLogin(t, "")
-	if loc := e.callback(t, ls.state, ls.cookie).Header().Get("Location"); loc != "/nodes" {
-		t.Fatalf("login after link: %q", loc)
-	}
-}
-
-func TestPasswordLoginForbiddenWhenDisabled(t *testing.T) {
-	e := newOIDCEnv(t)
-	e.addUser(t, "alice@example.com", "correct horse battery", true, "")
-	e.deps.Auth.PasswordLoginDisabled = true
-	e.deps.Auth.SSOName = "Pocket ID"
-
+	e.deps.Enabled = false
 	rec := httptest.NewRecorder()
-	e.deps.Auth.Login(rec, httptest.NewRequest(http.MethodPost, "/api/auth/login",
-		strings.NewReader(`{"identifier":"alice@example.com","password":"correct horse battery"}`)))
-	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "Pocket ID") {
-		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	e.deps.Config(rec, httptest.NewRequest(http.MethodGet, "/api/auth/oidc/config", nil))
+	if !strings.Contains(rec.Body.String(), "BPM_OIDC_ISSUER") {
+		t.Fatalf("config body = %s", rec.Body)
 	}
-	if sessionCount(t, e.db) != 0 {
-		t.Fatal("session created although password login is disabled")
+	rec = httptest.NewRecorder()
+	e.deps.Login(rec, httptest.NewRequest(http.MethodGet, "/api/auth/oidc/login", nil))
+	wantRejected(t, rec, "/login")
+}
+
+// Production's admin predates usernames; the first OIDC login must fill it.
+func TestOIDCFillsMissingUsername(t *testing.T) {
+	e := newOIDCEnv(t)
+	e.addUser(t, "old@example.com", "", true, "sub-alice")
+	e.setGroups("labextend-admins")
+
+	wantSignedIn(t, e.login(t))
+	if u := e.userBySubject(t, "sub-alice"); u.Username == "" {
+		t.Fatalf("username still empty: %+v", u)
 	}
 }

@@ -4,50 +4,242 @@
 
 @layer base {
   :root {
-    color-scheme: dark light;
+    color-scheme: light dark;
   }
+
+  /*
+   * The UI scale lives here and nowhere else. Tailwind spacing, type, widths
+   * and bar heights are all rem, so the root size scales the whole app at once.
+   * Phones stay near the browser default; from lg up everything is 20% larger.
+   */
+  html {
+    font-size: 106.25%;
+    -webkit-text-size-adjust: 100%;
+  }
+  @media (min-width: 1024px) {
+    html {
+      font-size: 120%;
+    }
+  }
+
   body {
     @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
+
+  ::selection {
+    @apply bg-accent/20 text-inherit;
+  }
+
+  /* One focus ring for everything that does not bring its own. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-white dark:ring-offset-zinc-950;
+  }
+
+  ::placeholder {
+    @apply text-zinc-400 opacity-100 dark:text-zinc-500;
+  }
+
+  /* Scrollbars: thin, neutral, no OS chrome. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: theme('colors.zinc.300') transparent;
+  }
+  @media (prefers-color-scheme: dark) {
+    * {
+      scrollbar-color: theme('colors.zinc.700') transparent;
+    }
+  }
+  ::-webkit-scrollbar {
+    width: 0.5rem;
+    height: 0.5rem;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-zinc-300 dark:bg-zinc-700;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-zinc-400 dark:bg-zinc-600;
+  }
+
+  /* Checkbox and radio: drawn by us, not the OS. */
+  input[type='checkbox'],
+  input[type='radio'] {
+    @apply inline-grid h-4 w-4 shrink-0 cursor-pointer place-content-center border border-zinc-300 bg-white
+           align-middle transition-colors dark:border-zinc-600 dark:bg-zinc-900;
+    appearance: none;
+  }
+  input[type='checkbox'] {
+    @apply rounded;
+  }
+  input[type='radio'] {
+    @apply rounded-full;
+  }
+  input[type='checkbox']:hover:not(:disabled),
+  input[type='radio']:hover:not(:disabled) {
+    @apply border-zinc-400 dark:border-zinc-500;
+  }
+  input[type='checkbox']:checked {
+    @apply border-accent bg-accent;
+    background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M4 8.5l2.5 2.5L12 5.5' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
+    background-size: 100% 100%;
+  }
+  input[type='radio']:checked {
+    @apply border-accent bg-white dark:bg-zinc-900;
+    border-width: 0.3125rem;
+  }
+  input[type='checkbox']:active:not(:disabled),
+  input[type='radio']:active:not(:disabled) {
+    @apply scale-95;
+  }
+  input[type='checkbox']:disabled,
+  input[type='radio']:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    input[type='checkbox']:active:not(:disabled),
+    input[type='radio']:active:not(:disabled) {
+      transform: none;
+    }
+  }
+
+  /* Select: own chevron, no OS arrow. */
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M4 6l4 4 4-4' stroke='%2371717a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1rem 1rem;
+    padding-right: 2rem !important;
+  }
+  select option {
+    @apply bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100;
+  }
+
+  /* File input: the picker button looks like .btn-ghost with a border. */
+  input[type='file'] {
+    @apply text-sm text-zinc-600 dark:text-zinc-400;
+  }
+  input[type='file']::file-selector-button {
+    @apply mr-3 h-9 cursor-pointer rounded-md border border-zinc-300 bg-white px-3 text-sm font-medium
+           text-zinc-800 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900
+           dark:text-zinc-200 dark:hover:bg-zinc-800;
+  }
+
+  /* Number inputs: drop the spinner arrows, keyboard arrows still work. */
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
 }
 
 @layer components {
+  /* Page container. Data pages use the full width; .page-narrow caps forms. */
+  .page {
+    @apply w-full px-4 py-6 sm:px-6 lg:px-8 lg:py-8;
+  }
+  .page-narrow {
+    @apply page max-w-4xl;
+  }
+  .page-title {
+    @apply text-2xl font-semibold tracking-tight;
+  }
+  .page-sub {
+    @apply mt-0.5 text-sm text-zinc-500;
+  }
+  .section-title {
+    @apply text-xs font-semibold uppercase tracking-wide text-zinc-500;
+  }
+
   .card {
-    @apply rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900;
+    @apply relative rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900;
   }
   .input {
-    @apply h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm shadow-sm
-           outline-none transition focus:border-accent focus:ring-1 focus:ring-accent
-           dark:border-zinc-700 dark:bg-zinc-900 dark:focus:border-accent;
+    @apply h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm
+           outline-none transition hover:border-zinc-400 focus:border-accent focus:ring-1 focus:ring-accent
+           focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:opacity-60
+           dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:border-zinc-600
+           dark:focus:border-accent dark:disabled:bg-zinc-800;
   }
+  textarea.input {
+    @apply h-auto py-2;
+  }
+  .input-invalid {
+    @apply border-red-500 focus:border-red-500 focus:ring-red-500 dark:border-red-500;
+  }
+  .label {
+    @apply text-xs font-medium text-zinc-600 dark:text-zinc-400;
+  }
+  .hint {
+    @apply text-2xs text-zinc-500;
+  }
+  .field-error {
+    @apply text-xs text-red-600 dark:text-red-400;
+  }
+  .alert-error {
+    @apply rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800
+           dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200;
+  }
+
   .btn {
-    @apply inline-flex h-9 select-none items-center justify-center gap-1.5 rounded-md
-           px-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex h-9 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md
+           px-3 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
+           focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed
+           disabled:opacity-50 dark:focus-visible:ring-offset-zinc-900;
   }
   .btn-primary {
-    @apply btn bg-accent text-accent-fg hover:bg-blue-600;
+    @apply btn bg-accent text-accent-fg hover:bg-accent-hover active:bg-accent-active disabled:hover:bg-accent;
   }
+  /* Ghost buttons sit on white or zinc-50, never on a colored surface. */
   .btn-ghost {
-    @apply btn text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800;
+    @apply btn text-zinc-800 hover:bg-zinc-100 hover:text-zinc-950 active:bg-zinc-200
+           disabled:hover:bg-transparent dark:text-zinc-200 dark:hover:bg-zinc-800 dark:hover:text-white
+           dark:active:bg-zinc-700;
+  }
+  .btn-icon {
+    @apply btn h-8 w-8 px-0 text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950 active:bg-zinc-200
+           disabled:hover:bg-transparent dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white
+           dark:active:bg-zinc-700;
+  }
+  .btn-ghost-danger {
+    @apply btn text-red-600 hover:bg-red-50 active:bg-red-100 disabled:hover:bg-transparent
+           dark:text-red-400 dark:hover:bg-red-950/40 dark:active:bg-red-950/70;
   }
   .btn-danger {
-    @apply btn bg-red-500 text-white hover:bg-red-600;
+    @apply btn bg-red-600 text-white hover:bg-red-700 active:bg-red-800 disabled:hover:bg-red-600;
   }
+
+  /* After the variants so it wins over their h-9. */
+  .btn-sm {
+    @apply h-8 gap-1 px-2.5 text-xs;
+  }
+
   .badge {
-    @apply inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium;
+    @apply inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-2xs font-medium;
   }
   .badge-green {
-    @apply badge bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300;
+    @apply badge bg-emerald-50 text-emerald-800 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-900/40 dark:text-emerald-200 dark:ring-emerald-400/20;
   }
   .badge-amber {
-    @apply badge bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300;
+    @apply badge bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-600/20 dark:bg-amber-900/40 dark:text-amber-200 dark:ring-amber-400/20;
   }
   .badge-red {
-    @apply badge bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300;
+    @apply badge bg-red-50 text-red-800 ring-1 ring-inset ring-red-600/20 dark:bg-red-900/40 dark:text-red-200 dark:ring-red-400/20;
   }
+  /* Neutral badge: near-black text on a light neutral, not gray on gray. */
   .badge-zinc {
-    @apply badge bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300;
+    @apply badge bg-zinc-100 text-zinc-800 ring-1 ring-inset ring-zinc-500/15 dark:bg-zinc-800 dark:text-zinc-200 dark:ring-white/10;
+  }
+  .badge-accent {
+    @apply badge bg-accent/10 font-mono text-accent ring-1 ring-inset ring-accent/20 dark:text-blue-300;
   }
   .badge-outline {
     @apply badge border border-zinc-200 bg-transparent font-mono text-zinc-600
@@ -56,30 +248,38 @@
 
   /* Dense list views: one row per node/container instead of a card grid. */
   .th {
-    @apply px-3 py-2 text-left text-[10px] font-medium uppercase tracking-wider text-zinc-500;
+    @apply whitespace-nowrap px-4 py-2.5 text-left text-2xs font-medium uppercase tracking-wider text-zinc-500;
   }
   .td {
-    @apply px-3 py-2 align-middle;
+    @apply px-4 py-3 align-middle;
   }
   .row-link {
-    @apply cursor-pointer transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900/60;
+    @apply cursor-pointer transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50;
   }
   /* Segmented control used for the list filters. */
   .seg {
-    @apply flex overflow-hidden rounded-md border border-zinc-300 text-xs dark:border-zinc-700;
+    @apply inline-flex overflow-hidden rounded-md border border-zinc-300 text-xs dark:border-zinc-700;
   }
   .seg-item {
-    @apply px-2.5 py-1 text-zinc-500 transition hover:bg-zinc-100 focus:outline-none
-           focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent
-           dark:hover:bg-zinc-800;
+    @apply px-3 py-1.5 text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none
+           focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent focus-visible:ring-offset-0
+           active:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100;
   }
   .seg-item-active {
-    @apply bg-zinc-900 px-2.5 py-1 text-white focus:outline-none focus-visible:ring-2
-           focus-visible:ring-inset focus-visible:ring-accent dark:bg-zinc-100 dark:text-zinc-900;
+    @apply bg-zinc-900 px-3 py-1.5 text-white focus:outline-none focus-visible:ring-2
+           focus-visible:ring-inset focus-visible:ring-accent focus-visible:ring-offset-0
+           dark:bg-zinc-100 dark:text-zinc-900;
+  }
+
+  .skeleton {
+    @apply rounded bg-zinc-200 motion-safe:animate-pulse dark:bg-zinc-800;
   }
 
   .modal-panel {
-    animation: modal-in 140ms cubic-bezier(0.16, 1, 0.3, 1);
+    animation: modal-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .fade-in {
+    animation: fade-in 160ms ease-out;
   }
 }
 
@@ -93,19 +293,18 @@
     transform: none;
   }
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .modal-panel {
-    animation: none;
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
   }
 }
 
-/* Subtle scrollbar in the log viewer */
-.scroll-thin::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.scroll-thin::-webkit-scrollbar-thumb {
-  background: rgb(115 115 115 / 0.4);
-  border-radius: 6px;
+@media (prefers-reduced-motion: reduce) {
+  .modal-panel,
+  .fade-in {
+    animation: none;
+  }
 }

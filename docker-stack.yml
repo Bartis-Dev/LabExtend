@@ -11,7 +11,7 @@
 #   docker node update --label-add labextend_leader=true <leader-node-id>
 #   export BPM_AGENT_TOKEN=$(openssl rand -hex 32)
 #   export BPM_SECRETS_KEY=$(openssl rand -hex 32)
-#   export BPM_TOTP_KEY=$(openssl rand -hex 32)
+#   export BPM_OIDC_CLIENT_ID=... BPM_OIDC_CLIENT_SECRET=...   (Pocket ID client)
 #   docker stack deploy -c docker-stack.yml labextend
 
 version: "3.9"
@@ -66,21 +66,23 @@ services:
       EXTERNAL_URL: "${EXTERNAL_URL:-https://labextend.bartis.dev}"
       BPM_AGENT_TOKEN: "${BPM_AGENT_TOKEN}"
       BPM_SECRETS_KEY: "${BPM_SECRETS_KEY}"
-      BPM_TOTP_KEY: "${BPM_TOTP_KEY}"
       SESSION_SECURE_COOKIE: "true"
       BPM_LOG_LEVEL: "info"
       BPM_LOG_MAX_LINES: "5000"          # per container ringbuffer cap
       BPM_LOG_RETENTION_HOURS: "0"       # 0 = no time-based prune (cap-only)
       BPM_METRIC_RETENTION_HOURS: "168"  # 7 days of minute buckets
       BPM_DOCKER_SOCKET: "/host/var/run/docker.sock"
-      # Optional Pocket ID login. Empty values keep OIDC off. For the secret,
-      # either export BPM_OIDC_CLIENT_SECRET or use the Swarm secret below.
-      BPM_OIDC_ISSUER: "${BPM_OIDC_ISSUER:-}"
+      # Pocket ID is the only login; with these empty nobody can sign in. For
+      # the secret, either export BPM_OIDC_CLIENT_SECRET or use the Swarm
+      # secret below.
+      BPM_OIDC_ISSUER: "${BPM_OIDC_ISSUER:-https://id.bartis.dev}"
       BPM_OIDC_CLIENT_ID: "${BPM_OIDC_CLIENT_ID:-}"
       BPM_OIDC_CLIENT_SECRET: "${BPM_OIDC_CLIENT_SECRET:-}"
       # BPM_OIDC_CLIENT_SECRET_FILE: "/run/secrets/labextend_oidc_client_secret"
       BPM_OIDC_NAME: "${BPM_OIDC_NAME:-Pocket ID}"
-      BPM_PASSWORD_LOGIN: "${BPM_PASSWORD_LOGIN:-true}"
+      BPM_OIDC_USER_GROUP: "${BPM_OIDC_USER_GROUP:-labextend}"
+      BPM_OIDC_ADMIN_GROUP: "${BPM_OIDC_ADMIN_GROUP:-labextend-admins}"
+      BPM_FILEBROWSER: "${BPM_FILEBROWSER:-false}"
     # Uncomment together with the top-level secrets block once the secret exists:
     #   printf %s "<secret>" | docker secret create labextend_oidc_client_secret -
     # secrets:

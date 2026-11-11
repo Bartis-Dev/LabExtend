@@ -13,9 +13,6 @@ require (
 	// Scheduling
 	github.com/robfig/cron/v3 v3.0.1
 
-	// Auth
-	golang.org/x/crypto v0.50.0 // for argon2 + bcrypt fallback
-
 	// gRPC
 	google.golang.org/grpc v1.82.1
 	google.golang.org/protobuf v1.36.11
@@ -57,7 +54,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.103.1
 	github.com/aws/smithy-go v1.27.0
 	github.com/coreos/go-oidc/v3 v3.19.0
-	github.com/pquerna/otp v1.5.0
 	golang.org/x/oauth2 v0.36.0
 )
 
@@ -75,6 +71,5 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.31.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.36.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.43.1 // indirect
-	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 )

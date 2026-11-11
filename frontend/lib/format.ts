@@ -20,7 +20,7 @@ export function fmtPct(n: number | undefined | null, decimals = 0): string {
 }
 
 export function fmtUptime(seconds: number | undefined | null): string {
-  if (!seconds || seconds <= 0) return '—';
+  if (!seconds || seconds <= 0) return '-';
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -30,7 +30,7 @@ export function fmtUptime(seconds: number | undefined | null): string {
 }
 
 export function fmtRelative(unixSecOrMs: number | undefined | null): string {
-  if (!unixSecOrMs) return '—';
+  if (!unixSecOrMs) return '-';
   // Detect ms vs s.
   const ms = unixSecOrMs > 1e12 ? unixSecOrMs : unixSecOrMs * 1000;
   const diff = Date.now() - ms;
@@ -42,7 +42,7 @@ export function fmtRelative(unixSecOrMs: number | undefined | null): string {
 }
 
 export function fmtAbsTime(unixSecOrMs: number | undefined | null): string {
-  if (!unixSecOrMs) return '—';
+  if (!unixSecOrMs) return '-';
   const ms = unixSecOrMs > 1e12 ? unixSecOrMs : unixSecOrMs * 1000;
   return new Date(ms).toLocaleString();
 }

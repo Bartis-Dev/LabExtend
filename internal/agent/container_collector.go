@@ -187,7 +187,7 @@ func (c *containerCollector) buildSnapshot(ctx, statsCtx context.Context, s cont
 // the last minute. The first sighting only sets the baseline: the counter
 // covers the container's whole life, and stamping all of it "now" made every
 // agent start report long-lived containers as crash-looping — a false
-// container_crashed alert on every rollout.
+// container.crashloop notification on every rollout.
 func (c *containerCollector) recordRestarts(id string, count int, now time.Time) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()

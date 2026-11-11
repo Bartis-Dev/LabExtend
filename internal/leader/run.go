@@ -1,5 +1,5 @@
 // Package leader hosts the WebUI HTTP server, the gRPC server that agents
-// connect to, the SSE hub, the alert engine, and the backup scheduler.
+// connect to, the SSE hub, the event watcher, and the backup scheduler.
 // Everything orchestrating across the cluster lives here.
 package leader
 
@@ -13,15 +13,15 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Bartis-Dev/LabExtend/internal/auth"
 	"github.com/Bartis-Dev/LabExtend/internal/backup"
 	"github.com/Bartis-Dev/LabExtend/internal/config"
 	"github.com/Bartis-Dev/LabExtend/internal/db"
+	"github.com/Bartis-Dev/LabExtend/internal/notify"
 )
 
 // Run boots the leader: opens the DB, starts the gRPC server (for agents),
 // starts the HTTP server (for the WebUI + SSE), starts background loops for
-// metrics persistence + alert evaluation + backup scheduling. Blocks until
+// metrics persistence + event detection + backup scheduling. Blocks until
 // ctx is done.
 func Run(ctx context.Context, cfg *config.Config) error {
 	slog.Info("leader: starting", "data_dir", cfg.DataDir)
@@ -67,12 +67,11 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			slog.Warn("web analytics: final flush failed", "err", err)
 		}
 	}()
-	alerts := newAlertEngine(database, metrics, containers, registry, hub)
-	audit := newAuditLogger(database, cfg.DisableAudit)
-
-	totpMgr, err := auth.NewTOTPManager(database, cfg.TOTPIssuer, cfg.TOTPKey)
-	if err != nil {
-		return fmt.Errorf("totp manager: %w", err)
+	events := notify.New(database, hub)
+	watcher := newEventWatcher(database, registry, containers, events)
+	audit := newAuditLogger(database)
+	if err := audit.Load(ctx); err != nil {
+		return fmt.Errorf("audit: %w", err)
 	}
 
 	backupRunner := backup.NewRunner(
@@ -80,6 +79,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 		newRegistryAdapter(registry),
 		newHubPublisher(hub),
 		cfg.SecretsKey,
+		events,
 	)
 	backupScheduler := backup.NewScheduler(database, backupRunner)
 
@@ -87,7 +87,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	go metrics.RunPruneLoop(ctx, bucketRetention, sampleRetention)
 	go logs.RunRetentionLoop(ctx, logRetention)
 	go logs.RunOrphanLoop(ctx, 15*time.Minute)
-	go alerts.Run(ctx)
+	go watcher.Run(ctx)
 	go analytics.Run(ctx, 30*time.Second)
 	go func() {
 		if err := backupScheduler.Run(ctx); err != nil {
@@ -112,9 +112,8 @@ func Run(ctx context.Context, cfg *config.Config) error {
 			Containers: containers,
 			Logs:       logs,
 			Analytics:  analytics,
-			Alerts:     alerts,
+			Events:     events,
 			Audit:      audit,
-			TOTP:       totpMgr,
 			Scheduler:  backupScheduler,
 			SecretsKey: cfg.SecretsKey,
 		}

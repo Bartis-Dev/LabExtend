@@ -86,31 +86,24 @@ export interface LogEntry {
   line: string;
 }
 
-export interface AlertRule {
-  id: string;
-  name: string;
-  kind: string;
-  comparator: '>' | '>=' | '<' | '<=';
-  threshold: number;
-  duration_sec: number;
-  scope: string;
-  webhook_id?: string | null;
-  cooldown_sec: number;
-  enabled: boolean;
-  created_at: number;
-  updated_at: number;
-}
+export type EventType =
+  | 'backup.failed'
+  | 'backup.retention_failed'
+  | 'node.offline'
+  | 'node.online'
+  | 'container.crashloop';
 
-export interface AlertHistoryRow {
+export interface Notification {
   id: number;
-  rule_id: string;
-  rule_name?: string;
-  node_id?: string;
-  container_id?: string;
-  fired_at: number;
-  state: 'triggered' | 'recovered';
-  value: number;
-  message: string;
+  ts: number;
+  type: EventType;
+  severity: 'critical' | 'warning' | 'info';
+  title: string;
+  body: string;
+  link?: string;
+  details: Record<string, unknown>;
+  read_at: number | null;
+  delivery_error?: string;
 }
 
 export interface WebhookConfig {
@@ -119,6 +112,7 @@ export interface WebhookConfig {
   kind: string;
   url?: string;
   enabled: boolean;
+  event_types: EventType[];
   created_at: number;
   updated_at: number;
 }
@@ -126,9 +120,17 @@ export interface WebhookConfig {
 export interface UserInfo {
   id: number;
   email: string;
+  username?: string;
   display_name: string;
   is_admin: boolean;
   csrf_token: string;
+  // Instance facts from /api/me: where accounts live and what is switched on.
+  provider_name: string;
+  provider_url: string;
+  user_group: string;
+  admin_group: string;
+  filebrowser: boolean;
+  audit_enabled: boolean;
 }
 
 // ─── Web Analytics ──────────────────────────────────────────────────────────

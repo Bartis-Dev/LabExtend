@@ -1,13 +1,21 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { X } from 'lucide-react';
 
+const FOCUSABLE =
+  'input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+
+// Open dialogs, innermost last. Only the top one answers Escape, so a confirm
+// opened over an edit dialog does not close both.
+const stack: symbol[] = [];
+
 /**
- * Modal is the shared dialog shell. The pre-existing dialogs were a bare
- * backdrop div with a click handler: no Escape, no focus handling, no scroll
- * lock, and a backdrop that swallowed a click that started inside the panel and
- * ended outside it (a text selection drag would close the dialog).
+ * Modal is the shared dialog shell: backdrop, focus trap, Escape to close,
+ * focus back to the opener on close, scroll lock, aria-modal.
+ *
+ * Initial focus goes to an element marked data-autofocus, else the first field
+ * in the body, else the panel itself (never the close button).
  */
 export function Modal({
   title,
@@ -16,7 +24,8 @@ export function Modal({
   onClose,
   children,
   footer,
-  width = 'max-w-md',
+  width = 'max-w-lg',
+  dismissable = true,
 }: {
   title: string;
   subtitle?: React.ReactNode;
@@ -25,44 +34,65 @@ export function Modal({
   children: React.ReactNode;
   footer?: React.ReactNode;
   width?: string;
+  /** false while a request runs: Escape, backdrop and X do nothing. */
+  dismissable?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const titleId = useId();
   // Tracks where the pointer went down, so releasing outside after starting
   // inside (a selection drag) does not count as a backdrop click.
   const downOnBackdrop = useRef(false);
+  // Callers often pass an inline arrow; reading it through a ref keeps the
+  // mount effect from re-running (and re-focusing) on every keystroke.
+  const close = useRef(onClose);
+  close.current = onClose;
+  const canClose = useRef(dismissable);
+  canClose.current = dismissable;
 
   useEffect(() => {
+    const me = Symbol('modal');
+    stack.push(me);
+    const opener = document.activeElement as HTMLElement | null;
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && stack[stack.length - 1] === me && canClose.current) {
+        e.stopPropagation();
+        close.current();
+      }
     };
     document.addEventListener('keydown', onKey);
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
-    // Move focus into the dialog so the keyboard lands somewhere sensible.
-    const first = panel.current?.querySelector<HTMLElement>(
-      'input:not([type=hidden]), select, textarea, button, [href], [tabindex]:not([tabindex="-1"])',
-    );
-    (first ?? panel.current)?.focus();
+    const target =
+      panel.current?.querySelector<HTMLElement>('[data-autofocus]') ??
+      body.current?.querySelector<HTMLElement>(FOCUSABLE) ??
+      panel.current;
+    target?.focus();
 
     return () => {
       document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
+      const i = stack.indexOf(me);
+      if (i >= 0) stack.splice(i, 1);
+      if (stack.length === 0) document.body.style.overflow = prevOverflow;
+      // The opener may be gone (e.g. a deleted row); then focus just stays put.
+      if (opener && document.contains(opener)) opener.focus();
     };
-  }, [onClose]);
+  }, []);
 
   // Keep Tab inside the dialog: without this, tabbing walks the page behind it.
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== 'Tab' || !panel.current) return;
-    const focusable = Array.from(
-      panel.current.querySelectorAll<HTMLElement>(
-        'input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-      ),
-    ).filter((el) => el.offsetParent !== null);
-    if (focusable.length === 0) return;
+    const focusable = Array.from(panel.current.querySelectorAll<HTMLElement>(FOCUSABLE))
+      .filter((el) => el.offsetParent !== null);
+    if (focusable.length === 0) {
+      e.preventDefault();
+      return;
+    }
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) {
       e.preventDefault();
       last.focus();
     } else if (!e.shiftKey && document.activeElement === last) {
@@ -73,38 +103,42 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-zinc-950/50 p-4 backdrop-blur-[2px] sm:items-center"
+      className="fade-in fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-zinc-950/40 p-4 backdrop-blur-[2px] sm:items-center sm:p-6"
       onMouseDown={(e) => { downOnBackdrop.current = e.target === e.currentTarget; }}
-      onMouseUp={(e) => { if (downOnBackdrop.current && e.target === e.currentTarget) onClose(); }}
+      onMouseUp={(e) => {
+        if (downOnBackdrop.current && e.target === e.currentTarget && canClose.current) close.current();
+      }}
     >
       <div
         ref={panel}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className={`card modal-panel my-auto w-full ${width} p-0 shadow-xl outline-none`}
+        className={`card modal-panel my-auto w-full ${width} p-0 shadow-xl outline-none focus-visible:ring-0`}
       >
-        <header className="flex items-start gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <header className="flex items-start gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
           {icon && <span className="mt-0.5 shrink-0">{icon}</span>}
           <div className="min-w-0 flex-1">
-            <h2 className="text-[15px] font-semibold leading-tight">{title}</h2>
+            <h2 id={titleId} className="text-base font-semibold leading-tight">{title}</h2>
             {subtitle && <div className="mt-1 text-xs text-zinc-500">{subtitle}</div>}
           </div>
           <button
-            onClick={onClose}
+            type="button"
+            onClick={() => { if (canClose.current) close.current(); }}
+            disabled={!dismissable}
             aria-label="Close"
-            className="-mr-1 -mt-1 rounded-md p-1.5 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            className="btn-icon -mr-2 -mt-1"
           >
             <X className="h-4 w-4" />
           </button>
         </header>
 
-        <div className="px-5 py-4">{children}</div>
+        <div ref={body} className="px-6 py-5">{children}</div>
 
         {footer && (
-          <footer className="flex items-center justify-end gap-2 border-t border-zinc-200 px-5 py-3 dark:border-zinc-800">
+          <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-zinc-200 px-6 py-4 dark:border-zinc-800">
             {footer}
           </footer>
         )}

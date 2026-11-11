@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ChevronDown, ChevronRight, Layers, RotateCcw, Server } from 'lucide-react';
-import { api } from '@/lib/api';
+import { Boxes, ChevronDown, ChevronRight, Layers, RotateCcw, Server } from 'lucide-react';
+import { api, errText } from '@/lib/api';
 import { useSSE } from '@/lib/sse';
 import type { ContainerView } from '@/lib/types';
 import { fmtBytes, fmtBps, fmtPct, fmtRelative } from '@/lib/format';
 import { AuthShell } from '@/components/auth-shell';
+import { EmptyState, ErrorState, TableSkeleton } from '@/components/feedback';
+import { Tooltip } from '@/components/tooltip';
 
 export default function ContainersPage() {
   return (
@@ -63,7 +65,7 @@ function Containers() {
       setItems(r.containers ?? []);
       setErr(null);
     } catch (e: unknown) {
-      setErr((e as { body?: { error?: string } })?.body?.error ?? 'Could not load containers.');
+      setErr(errText(e, 'Could not load containers. Check that the leader is reachable.'));
     } finally {
       setLoaded(true);
     }
@@ -134,11 +136,11 @@ function Containers() {
   const stackCount = new Set(items.map((c) => stackOf(c)).filter(Boolean)).size;
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-8">
-      <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
+    <div className="page">
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Containers</h1>
-          <p className="text-xs text-zinc-500">
+          <h1 className="page-title">Containers</h1>
+          <p className="page-sub">
             {items.length} across {nodeCount} node{nodeCount === 1 ? '' : 's'}
             {stackCount > 0 && ` · ${stackCount} stack${stackCount === 1 ? '' : 's'}`}
           </p>
@@ -148,7 +150,7 @@ function Containers() {
             placeholder="filter name, image, node, stack…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="input w-64"
+            className="input w-full sm:w-72"
             aria-label="Filter containers"
           />
           <div className="seg" role="group" aria-label="State filter">
@@ -172,17 +174,22 @@ function Containers() {
         </div>
       </header>
 
-      {err && (
-        <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
-          {err}
-        </div>
-      )}
+      {err && <ErrorState message={err} onRetry={load} />}
 
       {!loaded ? (
-        <SkeletonList />
+        <TableSkeleton cols={7} />
       ) : filtered.length === 0 ? (
-        <div className="card py-12 text-center text-sm text-zinc-500">
-          {items.length === 0 ? 'No containers reported yet.' : 'No containers match the current filter.'}
+        <div className="card p-0">
+          {items.length === 0 ? (
+            <EmptyState icon={<Boxes className="h-6 w-6" />} title="No containers reported yet">
+              Agents report their containers every few seconds once they are connected.
+            </EmptyState>
+          ) : (
+            <EmptyState
+              title="No containers match the current filter"
+              action={<button className="btn-ghost" onClick={() => { setSearch(''); setFilter('all'); }}>Clear filters</button>}
+            />
+          )}
         </div>
       ) : (
         <div className="space-y-5">
@@ -230,7 +237,7 @@ function GroupBlock({ groupBy, label, rows, collapsed, onToggle }: {
       {!collapsed && (
         <div className="overflow-x-auto">
           {/* Fixed layout with shared widths keeps the columns aligned from one block to the next. */}
-          <table className="w-full min-w-[900px] table-fixed text-sm">
+          <table className="w-full min-w-[48rem] table-fixed text-sm">
             <colgroup>
               <col className="w-[22%]" />
               <col className="w-[26%]" />
@@ -317,60 +324,47 @@ function ContainerRow({ c, showNode }: { c: ContainerView; showNode: boolean }) 
 
       <td className="td max-w-[20rem]">
         <div className="flex items-baseline gap-1.5">
-          <span className="truncate font-mono text-[12px]" title={c.image}>
+          <span className="truncate font-mono text-xs" title={c.image}>
             {img.namespace && <span className="text-zinc-400">{img.namespace}/</span>}
-            {img.name || '—'}
+            {img.name || '-'}
           </span>
           {img.tag ? (
-            <span className="badge shrink-0 bg-accent/10 font-mono text-accent">{img.tag}</span>
+            <span className="badge-accent shrink-0">{img.tag}</span>
           ) : img.pinned ? (
-            <span className="badge-zinc shrink-0 font-mono" title="pinned by digest">digest</span>
+            <Tooltip label="Pinned by digest"><span className="badge-zinc shrink-0 font-mono">digest</span></Tooltip>
           ) : (
-            <span className="badge-zinc shrink-0 font-mono text-zinc-400">latest</span>
+            <span className="badge-zinc shrink-0 font-mono">latest</span>
           )}
         </div>
       </td>
 
-      {showNode && <td className="td truncate font-mono text-[11px] text-zinc-500">{c.node_id}</td>}
+      {showNode && <td className="td truncate font-mono text-2xs text-zinc-500">{c.node_id}</td>}
 
       <td className="td"><span className={badgeCls}>{badgeLabel}</span></td>
 
-      <td className="td text-right font-mono text-[12px]">{fmtPct(c.cpu_percent, 1)}</td>
+      <td className="td text-right font-mono text-xs">{fmtPct(c.cpu_percent, 1)}</td>
 
-      <td className="td text-right font-mono text-[12px]">
+      <td className="td text-right font-mono text-xs">
         {fmtBytes(c.mem_used_bytes)}
         {c.mem_limit_bytes > 0 && <span className="text-zinc-400"> / {fmtBytes(c.mem_limit_bytes)}</span>}
       </td>
 
-      <td className="td text-right font-mono text-[11px] text-zinc-500">
+      <td className="td whitespace-nowrap text-right font-mono text-2xs text-zinc-500">
         <div>↓ {fmtBps(c.net_rx_bps)}</div>
         <div>↑ {fmtBps(c.net_tx_bps)}</div>
       </td>
 
-      <td className="td text-right text-[11px] text-zinc-500">
+      <td className="td text-right text-2xs text-zinc-500">
         <div>{c.state === 'running' ? fmtRelative(c.started_at_ms) : c.state}</div>
         {c.restart_count > 0 && (
-          <div className="inline-flex items-center gap-1" title={`${c.restart_count} restarts total`}>
-            <RotateCcw className="h-3 w-3" />{c.restart_count}
-          </div>
+          <Tooltip label={`${c.restart_count} restarts total`}>
+            <span className="inline-flex items-center gap-1">
+              <RotateCcw className="h-3 w-3" aria-hidden />{c.restart_count}
+              <span className="sr-only">restarts</span>
+            </span>
+          </Tooltip>
         )}
       </td>
     </tr>
-  );
-}
-
-function SkeletonList() {
-  return (
-    <div className="card overflow-hidden p-0">
-      <div className="divide-y divide-zinc-100 dark:divide-zinc-800/80">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="flex items-center gap-4 px-3 py-3">
-            <div className="h-3 w-40 rounded bg-zinc-200 motion-safe:animate-pulse dark:bg-zinc-800" />
-            <div className="h-3 w-56 rounded bg-zinc-200 motion-safe:animate-pulse dark:bg-zinc-800" />
-            <div className="ml-auto h-3 w-16 rounded bg-zinc-200 motion-safe:animate-pulse dark:bg-zinc-800" />
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }

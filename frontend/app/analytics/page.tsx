@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, errText } from '@/lib/api';
 import type { WebCount, WebHost, WebReport } from '@/lib/types';
 import { AuthShell } from '@/components/auth-shell';
 import { MetricChart } from '@/components/metric-chart';
+import { BlockSkeleton, ErrorState } from '@/components/feedback';
 
 export default function AnalyticsPage() {
   return (
@@ -34,11 +35,7 @@ function writePref(key: string, value: string) {
   } catch {/* private mode: the choice just is not remembered */}
 }
 
-function errorText(e: unknown): string {
-  const body = (e as { body?: unknown })?.body;
-  if (body && typeof body === 'object' && 'error' in body) return String((body as { error: unknown }).error);
-  return 'Could not load analytics. Check that the leader is reachable and try again.';
-}
+const errorText = (e: unknown) => errText(e, 'Could not load analytics. Check that the leader is reachable and try again.');
 
 function Analytics() {
   const [hosts, setHosts] = useState<WebHost[] | null>(null);
@@ -110,20 +107,20 @@ function Analytics() {
   const current = report && report.host === host && report.range === range ? report : null;
 
   return (
-    <div className="mx-auto max-w-7xl px-6 py-8">
+    <div className="page">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Web Analytics</h1>
-          <p className="text-xs text-zinc-500">
+          <h1 className="page-title">Web Analytics</h1>
+          <p className="page-sub">
             Page views from Traefik access logs. No scripts on the sites, no IP addresses stored. Times in UTC.
           </p>
         </div>
         {hosts && hosts.length > 0 && (
           <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 text-xs text-zinc-500">
+            <label className="flex items-center gap-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">
               <span>Site</span>
               <select
-                className="input h-8 w-64 py-0"
+                className="input w-64"
                 value={host}
                 onChange={(e) => pickHost(e.target.value)}
               >
@@ -149,18 +146,14 @@ function Analytics() {
         )}
       </header>
 
-      {error && (
-        <div role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
-          {error}
-        </div>
-      )}
+      {error && <ErrorState message={error} onRetry={() => { loadHosts(); loadReport(host, range); }} />}
 
       {hosts === null ? (
-        <div className="text-sm text-zinc-500">Loading…</div>
+        <BlockSkeleton />
       ) : hosts.length === 0 ? (
         <EmptyState />
       ) : !current ? (
-        <div className="text-sm text-zinc-500">{loading ? 'Loading…' : ''}</div>
+        loading || !error ? <BlockSkeleton /> : null
       ) : (
         <ReportView report={current} />
       )}
@@ -170,15 +163,15 @@ function Analytics() {
 
 function EmptyState() {
   return (
-    <div className="card max-w-2xl">
+    <div className="card max-w-3xl">
       <h2 className="mb-1 text-sm font-semibold">No traffic recorded yet</h2>
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
         LabExtend counts page views from the access log of every container whose image starts with{' '}
-        <code className="rounded bg-zinc-100 px-1 py-0.5 text-[12px] dark:bg-zinc-800">traefik</code>{' '}
-        (<code className="rounded bg-zinc-100 px-1 py-0.5 text-[12px] dark:bg-zinc-800">BPM_ANALYTICS_IMAGE_PREFIX</code>).
+        <code className="rounded bg-zinc-100 px-1 py-0.5 text-xs dark:bg-zinc-800">traefik</code>{' '}
+        (<code className="rounded bg-zinc-100 px-1 py-0.5 text-xs dark:bg-zinc-800">BPM_ANALYTICS_IMAGE_PREFIX</code>).
         Traefik must write its access log as JSON to stdout, with the{' '}
-        <code className="rounded bg-zinc-100 px-1 py-0.5 text-[12px] dark:bg-zinc-800">User-Agent</code> and{' '}
-        <code className="rounded bg-zinc-100 px-1 py-0.5 text-[12px] dark:bg-zinc-800">Referer</code> headers kept.
+        <code className="rounded bg-zinc-100 px-1 py-0.5 text-xs dark:bg-zinc-800">User-Agent</code> and{' '}
+        <code className="rounded bg-zinc-100 px-1 py-0.5 text-xs dark:bg-zinc-800">Referer</code> headers kept.
         Numbers appear here within about 30 seconds of the first request.
       </p>
     </div>
@@ -193,7 +186,7 @@ function ReportView({ report }: { report: WebReport }) {
   const multiDay = report.bucket === 'day';
   return (
     <>
-      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Page views" value={t.pageviews} />
         <Stat
           label="Visitors"
@@ -205,23 +198,23 @@ function ReportView({ report }: { report: WebReport }) {
       </div>
 
       <div className="card mb-4">
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="section-title mb-3">
           Page views and visitors {multiDay ? 'per day' : 'per hour'}
         </h3>
         <MetricChart
           timestamps={series.map((p) => p.ts)}
           formatY={(v) => nf.format(Math.round(v))}
           series={[
-            { label: 'Page views', color: '#3B82F6', values: series.map((p) => p.pageviews) },
+            { label: 'Page views', color: '#2563EB', values: series.map((p) => p.pageviews) },
             { label: 'Visitors', color: '#10B981', values: series.map((p) => p.visitors) },
           ]}
         />
       </div>
 
       {report.range === '24h' && (
-        <p className="mb-2 text-[11px] text-zinc-500">Breakdowns are kept per day, so for 24h they cover today and yesterday (UTC).</p>
+        <p className="mb-2 text-2xs text-zinc-500">Breakdowns are kept per day, so for 24h they cover today and yesterday (UTC).</p>
       )}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 3xl:grid-cols-3">
         <Breakdown title="Top pages" rows={report.paths} mono className="lg:col-span-2" />
         <Breakdown title="Referrers" rows={report.referrers} />
         <Breakdown title="Status codes" rows={report.status} empty="No requests in this range." />
@@ -234,9 +227,10 @@ function ReportView({ report }: { report: WebReport }) {
 
 function Stat({ label, value, hint }: { label: string; value: number; hint?: string }) {
   return (
-    <div className="card" title={hint}>
-      <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums tracking-tight">{nf.format(value)}</div>
+    <div className="card">
+      <div className="text-2xs font-medium uppercase tracking-wide text-zinc-500">{label}</div>
+      <div className="mt-1 text-3xl font-semibold tabular-nums tracking-tight">{nf.format(value)}</div>
+      {hint && <p className="hint mt-2 leading-snug">{hint}</p>}
     </div>
   );
 }
@@ -254,13 +248,13 @@ function Breakdown({
   const total = list.reduce((s, r) => s + r.count, 0) || 1;
   return (
     <div className={`card overflow-hidden p-0 ${className ?? ''}`}>
-      <h3 className="border-b border-zinc-200 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:border-zinc-800">
+      <h3 className="section-title border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
         {title}
       </h3>
       {list.length === 0 ? (
-        <div className="px-4 py-6 text-center text-sm text-zinc-500">{empty}</div>
+        <div className="px-4 py-10 text-center text-sm text-zinc-500">{empty}</div>
       ) : (
-        <div className="scroll-thin max-h-80 overflow-auto">
+        <div className="max-h-96 overflow-auto">
           <table className="w-full text-sm">
             <thead className="sr-only">
               <tr><th>Value</th><th>Count</th><th>Share</th></tr>
@@ -276,12 +270,12 @@ function Breakdown({
                         className="absolute inset-y-1 left-0 rounded-r bg-accent/10"
                         style={{ width: `${pct}%` }}
                       />
-                      <span className={`relative block truncate ${mono ? 'font-mono text-[12px]' : ''}`} title={r.value}>
+                      <span className={`relative block truncate ${mono ? 'font-mono text-xs' : ''}`} title={r.value}>
                         {r.value}
                       </span>
                     </td>
-                    <td className="td text-right font-mono text-[12px] tabular-nums">{nf.format(r.count)}</td>
-                    <td className="td w-14 text-right text-[11px] tabular-nums text-zinc-500">{pct.toFixed(0)}%</td>
+                    <td className="td text-right font-mono text-xs tabular-nums">{nf.format(r.count)}</td>
+                    <td className="td w-14 text-right text-2xs tabular-nums text-zinc-500">{pct.toFixed(0)}%</td>
                   </tr>
                 );
               })}

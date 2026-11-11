@@ -12,6 +12,7 @@ import (
 	"time"
 
 	pb "github.com/Bartis-Dev/LabExtend/internal/grpc/pb"
+	"github.com/Bartis-Dev/LabExtend/internal/notify"
 
 	_ "modernc.org/sqlite"
 )
@@ -19,8 +20,8 @@ import (
 // A backup that dies before the fan-out used to be recorded as failed and
 // announced nowhere, because the webhook only fired at the bottom of run().
 // Six nightly runs were lost that way. These tests pin the two halves of that
-// contract: an early failure must reach the webhook, and a success under
-// on-error must still stay quiet.
+// contract: an early failure must reach the webhook (now as a backup.failed
+// event), and a success under on-error must still stay quiet.
 
 type fakeAgents struct{ list []AgentInfo }
 
@@ -73,7 +74,11 @@ func newTestDB(t *testing.T) *sql.DB {
 			secret_key TEXT, path_style INT);
 		CREATE TABLE webhook_configs (
 			id TEXT PRIMARY KEY, name TEXT, kind TEXT, url TEXT, enabled INT,
-			created_at INT, updated_at INT);
+			created_at INT, updated_at INT, event_types TEXT NOT NULL DEFAULT '[]');
+		CREATE TABLE notifications (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, ts INT, type TEXT, severity TEXT,
+			title TEXT, body TEXT, link TEXT, details_json TEXT, read_at INT,
+			delivery_error TEXT NOT NULL DEFAULT '');
 	`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatalf("schema: %v", err)
@@ -87,7 +92,7 @@ func newTestDB(t *testing.T) *sql.DB {
 func seedPlan(t *testing.T, db *sql.DB, webhookURL, mode, secretKey string) {
 	t.Helper()
 	if _, err := db.Exec(
-		`INSERT INTO webhook_configs (id, name, kind, url, enabled) VALUES ('wh', 'test', 'discord', ?, 1)`,
+		`INSERT INTO webhook_configs (id, name, kind, url, enabled, event_types) VALUES ('wh', 'test', 'discord', ?, 1, '["backup.failed"]')`,
 		webhookURL); err != nil {
 		t.Fatalf("seed webhook: %v", err)
 	}
@@ -126,7 +131,7 @@ func TestEarlyS3FailureFiresWebhook(t *testing.T) {
 	seedPlan(t, db, url, "on-error", "not-valid-ciphertext")
 
 	r := NewRunner(db, fakeAgents{list: []AgentInfo{{ID: "n1", Hostname: "node-1"}}}, nil,
-		"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
+		"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff", notify.New(db, nil))
 	r.run("p1", "Nightly", "run-1", "schedule")
 
 	bodies := cap.all()
@@ -149,6 +154,33 @@ func TestEarlyS3FailureFiresWebhook(t *testing.T) {
 	if status != "failed" {
 		t.Errorf("run status = %q, want failed", status)
 	}
+	n := onlyNotification(t, db)
+	if n.typ != notify.BackupFailed || n.severity != notify.SeverityCritical || n.link != "/backups?run=run-1" {
+		t.Errorf("notification = %+v", n)
+	}
+}
+
+type storedNotification struct{ typ, severity, title, body, link, details string }
+
+func onlyNotification(t *testing.T, db *sql.DB) storedNotification {
+	t.Helper()
+	rows, err := db.Query(`SELECT type, severity, title, body, link, details_json FROM notifications`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []storedNotification
+	for rows.Next() {
+		var n storedNotification
+		if err := rows.Scan(&n.typ, &n.severity, &n.title, &n.body, &n.link, &n.details); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, n)
+	}
+	if len(out) != 1 {
+		t.Fatalf("want exactly 1 notification, got %+v", out)
+	}
+	return out[0]
 }
 
 // An empty scope is the other pre-fan-out exit.
@@ -157,7 +189,7 @@ func TestEmptyScopeFiresWebhook(t *testing.T) {
 	cap, url := startCapture(t)
 	seedPlan(t, db, url, "on-error", "not-valid-ciphertext")
 
-	r := NewRunner(db, fakeAgents{list: nil}, nil, "deadbeef")
+	r := NewRunner(db, fakeAgents{list: nil}, nil, "deadbeef", notify.New(db, nil))
 	r.run("p1", "Nightly", "run-2", "schedule")
 
 	bodies := cap.all()
@@ -176,7 +208,7 @@ func TestOnErrorStaysQuietOnSuccess(t *testing.T) {
 	cap, url := startCapture(t)
 	seedPlan(t, db, url, "on-error", "not-valid-ciphertext")
 
-	r := NewRunner(db, fakeAgents{list: nil}, nil, "deadbeef")
+	r := NewRunner(db, fakeAgents{list: nil}, nil, "deadbeef", notify.New(db, nil))
 	p, err := r.loadPlan(context.Background(), "p1")
 	if err != nil {
 		t.Fatalf("load plan: %v", err)
@@ -188,19 +220,113 @@ func TestOnErrorStaysQuietOnSuccess(t *testing.T) {
 	}
 }
 
-// A plan with no webhook configured must not panic or post.
-func TestNoWebhookConfigured(t *testing.T) {
+// Failures no longer depend on the plan's own webhook: a plan without one still
+// reaches every webhook subscribed to backup.failed.
+func TestFailureWithoutPlanWebhookReachesSubscribers(t *testing.T) {
 	db := newTestDB(t)
 	cap, url := startCapture(t)
-	seedPlan(t, db, url, "on-error", "not-valid-ciphertext")
+	seedPlan(t, db, url, "off", "not-valid-ciphertext")
 	if _, err := db.Exec(`UPDATE backup_plans SET webhook_id = NULL WHERE id='p1'`); err != nil {
 		t.Fatalf("clear webhook: %v", err)
 	}
 
-	r := NewRunner(db, fakeAgents{list: nil}, nil, "deadbeef")
+	r := NewRunner(db, fakeAgents{list: nil}, nil, "deadbeef", notify.New(db, nil))
 	r.run("p1", "Nightly", "run-4", "schedule")
 
+	if got := len(cap.all()); got != 1 {
+		t.Fatalf("expected 1 webhook post, got %d", got)
+	}
+}
+
+// A webhook that did not subscribe to backup.failed hears nothing, but the
+// failure is still kept for the panel.
+func TestFailureSkipsUnsubscribedWebhook(t *testing.T) {
+	db := newTestDB(t)
+	cap, url := startCapture(t)
+	seedPlan(t, db, url, "on-error", "not-valid-ciphertext")
+	if _, err := db.Exec(`UPDATE webhook_configs SET event_types = '["node.offline"]'`); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRunner(db, fakeAgents{list: nil}, nil, "deadbeef", notify.New(db, nil))
+	r.run("p1", "Nightly", "run-5", "schedule")
+
 	if got := len(cap.all()); got != 0 {
-		t.Fatalf("expected no webhook post, got %d", got)
+		t.Fatalf("unsubscribed webhook got %d posts", got)
+	}
+	onlyNotification(t, db)
+}
+
+// A partial run names the nodes that failed and why.
+func TestPartialRunEmitsFailedNodes(t *testing.T) {
+	db := newTestDB(t)
+	cap, url := startCapture(t)
+	seedPlan(t, db, url, "on-error", "x")
+
+	r := NewRunner(db, fakeAgents{list: nil}, nil, "deadbeef", notify.New(db, nil))
+	p, err := r.loadPlan(context.Background(), "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.notify(context.Background(), p, "partial", "", "Nightly", "run-6", 10, time.Second, []NodeResult{
+		{NodeID: "n1", Status: "success"},
+		{NodeID: "n2", Status: "failed", Error: "AccessDenied: no write"},
+	})
+
+	n := onlyNotification(t, db)
+	if n.typ != notify.BackupFailed || n.severity != notify.SeverityWarning {
+		t.Errorf("notification = %+v", n)
+	}
+	if !strings.Contains(n.body, "n2: AccessDenied: no write") || strings.Contains(n.body, "n1") {
+		t.Errorf("body = %q", n.body)
+	}
+	if !strings.Contains(n.details, `"failed_nodes":["n2"]`) {
+		t.Errorf("details = %s", n.details)
+	}
+	if got := cap.all(); len(got) != 1 || !strings.Contains(got[0], "partially failed") {
+		t.Errorf("posts = %q", got)
+	}
+}
+
+// webhook_mode=always still announces successful runs on the plan's webhook,
+// as a summary rather than a notification.
+func TestAlwaysPostsSuccessToPlanWebhook(t *testing.T) {
+	db := newTestDB(t)
+	cap, url := startCapture(t)
+	seedPlan(t, db, url, "always", "x")
+
+	r := NewRunner(db, fakeAgents{list: nil}, nil, "deadbeef", notify.New(db, nil))
+	p, err := r.loadPlan(context.Background(), "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.notify(context.Background(), p, "success", "", "Nightly", "run-7", 10, time.Second, nil)
+
+	if got := cap.all(); len(got) != 1 || !strings.Contains(got[0], "Backup success") {
+		t.Fatalf("posts = %q", got)
+	}
+	var n int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM notifications`).Scan(&n)
+	if n != 0 {
+		t.Fatalf("a successful run created %d notifications", n)
+	}
+}
+
+// A run cut off by a leader restart is a failed backup like any other.
+func TestReconcileStaleRunsEmitsFailure(t *testing.T) {
+	db := newTestDB(t)
+	_, url := startCapture(t)
+	seedPlan(t, db, url, "on-error", "x")
+	if _, err := db.Exec(`INSERT INTO backup_runs (id, plan_id, triggered_by, started_at, status)
+		VALUES ('run-8', 'p1', 'schedule', 1, 'running')`); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRunner(db, fakeAgents{list: nil}, nil, "deadbeef", notify.New(db, nil))
+	r.ReconcileStaleRuns(context.Background())
+
+	n := onlyNotification(t, db)
+	if n.typ != notify.BackupFailed || !strings.Contains(n.title, "Nightly") || !strings.Contains(n.body, "leader restarted") {
+		t.Errorf("notification = %+v", n)
 	}
 }
