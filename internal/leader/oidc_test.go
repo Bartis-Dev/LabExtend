@@ -130,7 +130,7 @@ func newOIDCEnv(t *testing.T) *oidcEnv {
 		t.Fatal(err)
 	}
 	idp := newFakeIDP(t)
-	store := auth.NewSessionStore(d, "bpm_session", time.Hour, false)
+	store := auth.NewSessionStore(d, "bpm_session", time.Hour, 0, false)
 	audit := newAuditLogger(d)
 	authDeps := &AuthDeps{DB: d, Sessions: store, Audit: audit}
 	return &oidcEnv{
@@ -531,5 +531,26 @@ func TestOIDCFillsMissingUsername(t *testing.T) {
 	wantSignedIn(t, e.login(t))
 	if u := e.userBySubject(t, "sub-alice"); u.Username == "" {
 		t.Fatalf("username still empty: %+v", u)
+	}
+}
+
+// Starting a sign-in is not a failure: people behind one office NAT clicking
+// "Sign in" must not lock each other out. Failed callbacks are what count.
+func TestOIDCRateLimitCountsOnlyFailedCallbacks(t *testing.T) {
+	e := newOIDCEnv(t)
+	e.deps.Limiter = newAttemptLimiter(10, time.Minute)
+
+	for i := 0; i < 20; i++ {
+		e.startLogin(t, "") // fails the test unless it redirects to the provider
+	}
+	wantSignedIn(t, e.login(t))
+
+	for i := 0; i < 10; i++ {
+		wantRejected(t, e.callback(t, "forged-state"), "/login")
+	}
+	rec := httptest.NewRecorder()
+	e.deps.Login(rec, httptest.NewRequest(http.MethodGet, "/api/auth/oidc/login", nil))
+	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, "/login?oidc_error=Too+many") {
+		t.Fatalf("after 10 failed callbacks the IP must be blocked, got %d %q", rec.Code, loc)
 	}
 }

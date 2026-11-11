@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { api, errText } from '@/lib/api';
 import { useSSE } from '@/lib/sse';
 import { AuthShell } from '@/components/auth-shell';
@@ -38,7 +39,13 @@ interface WebhookMini { id: string; name: string }
 interface NodeMini { id: string; hostname: string; labels?: Record<string, string> }
 
 export default function BackupsPage() {
-  return <AuthShell><Backups /></AuthShell>;
+  return (
+    <AuthShell>
+      <Suspense fallback={<div className="page"><TableSkeleton rows={3} cols={6} /></div>}>
+        <Backups />
+      </Suspense>
+    </AuthShell>
+  );
 }
 
 function Backups() {
@@ -53,24 +60,29 @@ function Backups() {
   const [formErr, setFormErr] = useState<string | null>(null);
   const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  // Which list failed, so its empty state ("No plans yet") is not shown next
+  // to the load error as if the list were really empty.
+  const [failedList, setFailedList] = useState({ plans: false, runs: false });
+  // Plan ids whose "Back up now" request is in flight.
+  const [triggering, setTriggering] = useState<Set<string>>(new Set());
 
   const load = async () => {
     // Plans and runs are the page; the lookups below only feed the editor, so
     // their failures stay quiet and just leave a dropdown empty.
     let failed: string | null = null;
-    try { setPlans((await api<{ plans: BackupPlan[] }>('/api/backups/plans')).plans ?? []); } catch (e) { failed = errText(e, 'Could not load backup plans.'); }
-    try { setRuns((await api<{ runs: BackupRun[] }>('/api/backups/runs?limit=50')).runs ?? []); } catch (e) { failed ??= errText(e, 'Could not load backup runs.'); }
+    const bad = { plans: false, runs: false };
+    try { setPlans((await api<{ plans: BackupPlan[] }>('/api/backups/plans')).plans ?? []); } catch (e) { failed = errText(e, 'Could not load backup plans.'); bad.plans = true; }
+    try { setRuns((await api<{ runs: BackupRun[] }>('/api/backups/runs?limit=50')).runs ?? []); } catch (e) { failed ??= errText(e, 'Could not load backup runs.'); bad.runs = true; }
     setLoadErr(failed);
+    setFailedList(bad);
     setLoaded(true);
     try { setEndpoints(((await api<{ endpoints: S3EndpointMini[] }>('/api/s3/endpoints')).endpoints ?? []).map((e) => ({ id: e.id, name: e.name }))); } catch { /* */ }
     try { setWebhooks(((await api<{ webhooks: WebhookMini[] }>('/api/webhooks')).webhooks ?? []).map((w) => ({ id: w.id, name: w.name }))); } catch { /* */ }
     try { setNodes(((await api<{ nodes: NodeMini[] }>('/api/nodes')).nodes ?? []).map((n) => ({ id: n.id, hostname: n.hostname, labels: n.labels }))); } catch { /* */ }
   };
   useEffect(() => { load(); }, []);
-  // Static export: read ?run= directly instead of useSearchParams, which would
-  // need a Suspense boundary around the whole page.
-  const [focusRun, setFocusRun] = useState<string | null>(null);
-  useEffect(() => { setFocusRun(new URLSearchParams(window.location.search).get('run')); }, []);
+  // Reactive, so the bell's "Open" link re-highlights when already on /backups.
+  const focusRun = useSearchParams().get('run');
   useEffect(() => {
     if (focusRun && runs.some((r) => r.id === focusRun)) {
       document.getElementById(`run-${focusRun}`)?.scrollIntoView({ block: 'center' });
@@ -138,12 +150,16 @@ function Backups() {
     }
   };
   const trigger = async (p: BackupPlan) => {
+    if (triggering.has(p.id)) return;
+    setTriggering((s) => new Set(s).add(p.id));
     try {
       await api<{ run_id: string }>(`/api/backups/plans/${p.id}/trigger`, { method: 'POST' });
       toast.success(`Backup of ${p.name} started. It shows up under Recent runs.`);
       setTimeout(load, 1500);
     } catch (e) {
       toast.error('Could not start the backup: ' + errText(e, 'no answer from the leader'));
+    } finally {
+      setTriggering((s) => { const n = new Set(s); n.delete(p.id); return n; });
     }
   };
   const deleteRun = async (id: string) => {
@@ -218,8 +234,8 @@ function Backups() {
                 <td className="td"><span className={p.enabled ? 'badge-green' : 'badge-zinc'}>{p.enabled ? 'enabled' : 'disabled'}</span></td>
                 <td className="td text-right">
                   <div className="inline-flex items-center gap-1">
-                    <button onClick={() => trigger(p)} className="btn-primary btn-sm">
-                      <Play className="h-3.5 w-3.5" /> Back up now
+                    <button onClick={() => trigger(p)} disabled={triggering.has(p.id)} className="btn-primary btn-sm">
+                      <Play className="h-3.5 w-3.5" /> {triggering.has(p.id) ? 'Starting…' : 'Back up now'}
                     </button>
                     <Tooltip label="Edit plan">
                       <button onClick={() => openEditor(p)} className="btn-icon" aria-label={`Edit ${p.name}`}><Pencil className="h-4 w-4" /></button>
@@ -231,7 +247,7 @@ function Backups() {
                 </td>
               </tr>
             ))}
-            {plans.length === 0 && (
+            {plans.length === 0 && !failedList.plans && (
               <tr><td colSpan={7}>
                 <EmptyState
                   icon={<Database className="h-6 w-6" />}
@@ -296,7 +312,7 @@ function Backups() {
                 </tr>
               );
             })}
-            {runs.length === 0 && (
+            {runs.length === 0 && !failedList.runs && (
               <tr><td colSpan={7}>
                 <EmptyState icon={<History className="h-6 w-6" />} title="No runs yet">
                   Runs appear here when a plan fires on schedule or you start one with Back up now.

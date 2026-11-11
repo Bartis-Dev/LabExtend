@@ -137,20 +137,35 @@ func (lc *logCollector) tail(ctx context.Context, s *containerLogStream) {
 		short = short[:12]
 	}
 
-	insp, err := lc.docker.Inspect(ctx, s.containerID)
-	if err != nil {
-		slog.Warn("log tail: inspect failed", "container", short, "err", err)
-		return
+	backoff := 500 * time.Millisecond
+	maxBackoff := 30 * time.Second
+
+	// Retry until it works or Sync cancels us. Returning here left the entry
+	// in lc.streams, and Sync never started this container's logs again.
+	var insp *inspect
+	for {
+		ictx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		i, err := lc.docker.Inspect(ictx, s.containerID)
+		cancel()
+		if err == nil {
+			insp = i
+			break
+		}
+		slog.Warn("log tail: inspect failed, retrying", "container", short, "err", err, "backoff", backoff)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		backoff = min(backoff*2, maxBackoff)
 	}
+	backoff = 500 * time.Millisecond
 	isTty := insp.Config.Tty
 	name := insp.Name
 	if len(name) > 0 && name[0] == '/' {
 		name = name[1:]
 	}
 	slog.Info("log tail: started", "container", short, "name", name, "tty", isTty)
-
-	backoff := 500 * time.Millisecond
-	maxBackoff := 30 * time.Second
 
 	since := time.Time{}
 	if !lc.tailFromBeginning {

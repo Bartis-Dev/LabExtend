@@ -54,9 +54,6 @@ func retentionDB(t *testing.T) *sql.DB {
 	db := newTestDB(t)
 	// :memory: is per connection; one connection keeps every query on the same DB.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(`CREATE TABLE nodes (id TEXT PRIMARY KEY, hostname TEXT)`); err != nil {
-		t.Fatal(err)
-	}
 	return db
 }
 
@@ -373,5 +370,109 @@ func TestRetentionReportDeletesNothing(t *testing.T) {
 	}
 	if count(t, db, `SELECT COUNT(*) FROM backup_run_items`) != 2 {
 		t.Error("dry run deleted rows")
+	}
+}
+
+// A multi-DSN pgdump item owns several objects; all of them must go.
+func TestPruneDeletesEveryObjectOfAnItem(t *testing.T) {
+	db := retentionDB(t)
+	seedRetentionPlan(t, db, "p1", 1)
+	seedRun(t, db, "p1", "r1", 1000, "success", []string{"n1"})
+	seedRun(t, db, "p1", "r2", 2000, "success", []string{"n1"})
+	db.Exec(`UPDATE backup_run_items SET extra_s3_keys = '["' || s3_key || '.1"]'`)
+	del := &fakeDeleter{}
+	if _, err := pruneRetention(context.Background(), db, del, loadTestPlan(t, db, "p1"), "r2"); err != nil {
+		t.Fatal(err)
+	}
+	got := del.deleted()
+	if len(got) != 2 || !got["p1/n1/r1"] || !got["p1/n1/r1.1"] {
+		t.Errorf("deleted %v, want both objects of r1", got)
+	}
+	if runExists(t, db, "r1") {
+		t.Error("row kept although all its objects were deleted")
+	}
+}
+
+// If one object of an item fails to delete, the row must stay so the next
+// prune retries it.
+func TestPruneKeepsRowWhenOneOfItsObjectsFails(t *testing.T) {
+	db := retentionDB(t)
+	seedRetentionPlan(t, db, "p1", 1)
+	seedRun(t, db, "p1", "r1", 1000, "success", []string{"n1"})
+	seedRun(t, db, "p1", "r2", 2000, "success", []string{"n1"})
+	db.Exec(`UPDATE backup_run_items SET extra_s3_keys = '["' || s3_key || '.1"]'`)
+	del := &fakeDeleter{fail: map[string]string{"p1/n1/r1.1": "AccessDenied"}}
+	if _, err := pruneRetention(context.Background(), db, del, loadTestPlan(t, db, "p1"), "r2"); err == nil {
+		t.Fatal("expected error")
+	}
+	if !runExists(t, db, "r1") {
+		t.Error("row removed although one of its objects is still in the bucket")
+	}
+}
+
+// started_at comes from the leader clock; the autoincrement id does not jump
+// back when that clock does.
+func TestPruneRanksByIDNotClock(t *testing.T) {
+	db := retentionDB(t)
+	seedRetentionPlan(t, db, "p1", 1)
+	seedRun(t, db, "p1", "r1", 5000, "success", []string{"n1"}) // clock was ahead
+	seedRun(t, db, "p1", "r2", 1000, "success", []string{"n1"})
+	del := &fakeDeleter{}
+	if _, err := pruneRetention(context.Background(), db, del, loadTestPlan(t, db, "p1"), "r2"); err != nil {
+		t.Fatal(err)
+	}
+	if got := del.deleted(); len(got) != 1 || !got["p1/n1/r1"] {
+		t.Errorf("deleted %v, want the older run r1", got)
+	}
+}
+
+// A key referenced by a plan in another bucket names a different object.
+func TestPruneReferenceProtectionIsPerBucket(t *testing.T) {
+	db := retentionDB(t)
+	seedRetentionPlan(t, db, "p1", 1)
+	seedRetentionPlan(t, db, "other", 0)
+	seedRetentionPlan(t, db, "same", 0)
+	db.Exec(`UPDATE backup_plans SET s3_bucket = 'elsewhere' WHERE id = 'other'`)
+	seedRun(t, db, "p1", "r1", 1000, "success", []string{"n1"})
+	seedRun(t, db, "p1", "r2", 2000, "success", []string{"n1"})
+	seedRun(t, db, "other", "o1", 1000, "success", []string{"n1"})
+	db.Exec(`UPDATE backup_run_items SET s3_key = 'p1/n1/r1' WHERE run_id = 'o1'`)
+	del := &fakeDeleter{}
+	if _, err := pruneRetention(context.Background(), db, del, loadTestPlan(t, db, "p1"), "r2"); err != nil {
+		t.Fatal(err)
+	}
+	if !del.deleted()["p1/n1/r1"] {
+		t.Error("object kept because a plan in another bucket uses the same key")
+	}
+
+	// Same bucket: the reference is real and protects the object.
+	seedRun(t, db, "p1", "r3", 3000, "success", []string{"n1"})
+	seedRun(t, db, "same", "s1", 1000, "success", []string{"n1"})
+	db.Exec(`UPDATE backup_run_items SET s3_key = 'p1/n1/r2' WHERE run_id = 's1'`)
+	del = &fakeDeleter{}
+	if _, err := pruneRetention(context.Background(), db, del, loadTestPlan(t, db, "p1"), "r3"); err != nil {
+		t.Fatal(err)
+	}
+	if del.deleted()["p1/n1/r2"] {
+		t.Error("deleted an object another plan in the same bucket references")
+	}
+}
+
+// The prune's own context is what times out; recording that must not use it.
+func TestRetentionErrorIsNotedOnExpiredContext(t *testing.T) {
+	db := retentionDB(t)
+	seedRetentionPlan(t, db, "p1", 1)
+	seedRun(t, db, "p1", "r1", 1000, "success", []string{"n1"})
+	r := &Runner{db: db, events: notify.New(db, nil)}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r.noteRetentionError(ctx, loadTestPlan(t, db, "p1"), "r1", context.DeadlineExceeded)
+	var summary string
+	_ = db.QueryRow(`SELECT error_summary FROM backup_runs WHERE id='r1'`).Scan(&summary)
+	if !strings.Contains(summary, "retention") {
+		t.Errorf("summary = %q", summary)
+	}
+	if count(t, db, `SELECT COUNT(*) FROM notifications`) != 1 {
+		t.Error("no retention notification on an expired context")
 	}
 }

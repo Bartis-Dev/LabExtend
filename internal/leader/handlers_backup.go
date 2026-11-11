@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/robfig/cron/v3"
 
 	"github.com/Bartis-Dev/LabExtend/internal/backup"
 )
@@ -40,8 +42,8 @@ type BackupPlan struct {
 	CompressionLevel int      `json:"compression_level"`
 	WebhookID        string   `json:"webhook_id,omitempty"`
 	WebhookMode      string   `json:"webhook_mode"`
-	Engine           string   `json:"engine"`            // tar (default) | pgdump
-	VerifyRestore    bool     `json:"verify_restore"`    // pgdump only
+	Engine           string   `json:"engine"`         // tar (default) | pgdump
+	VerifyRestore    bool     `json:"verify_restore"` // pgdump only
 	Enabled          bool     `json:"enabled"`
 	CreatedAt        int64    `json:"created_at"`
 	UpdatedAt        int64    `json:"updated_at"`
@@ -95,7 +97,7 @@ type planReq struct {
 	S3Bucket         string   `json:"s3_bucket"`
 	KeyTemplate      string   `json:"key_template"`
 	Schedule         string   `json:"schedule"`
-	RetentionKeep    int      `json:"retention_keep"`
+	RetentionKeep    *int     `json:"retention_keep"` // nil = default; 0 = keep everything
 	Compression      string   `json:"compression"`
 	CompressionLevel int      `json:"compression_level"`
 	WebhookID        string   `json:"webhook_id"`
@@ -135,6 +137,26 @@ func validateKeyTemplate(scopeType, scopeValue, tmpl string) error {
 		"otherwise every node overwrites the same object")
 }
 
+// planSchedule parses schedules exactly like backup.NewScheduler, whose cron is
+// built with cron.WithSeconds(). A spec it cannot parse used to be stored
+// anyway and then silently never ran.
+var planSchedule = cron.NewParser(
+	cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+)
+
+// validatePlanFields checks what the handlers would otherwise store blindly.
+// It runs after defaults are applied, so RetentionKeep is set.
+func validatePlanFields(req planReq) error {
+	if _, err := planSchedule.Parse(req.Schedule); err != nil {
+		return fmt.Errorf("invalid schedule %q: %v (expected 6 fields with seconds, e.g. \"0 0 3 * * *\" for 03:00 daily)",
+			req.Schedule, err)
+	}
+	if req.RetentionKeep == nil || *req.RetentionKeep < 0 {
+		return errors.New("retention_keep must be 0 (keep everything) or more")
+	}
+	return nil
+}
+
 func (d *BackupDeps) CreatePlan(w http.ResponseWriter, r *http.Request) {
 	var req planReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -153,8 +175,9 @@ func (d *BackupDeps) CreatePlan(w http.ResponseWriter, r *http.Request) {
 	if req.Compression == "" {
 		req.Compression = "gzip"
 	}
-	if req.RetentionKeep == 0 {
-		req.RetentionKeep = 7
+	if req.RetentionKeep == nil {
+		keep := 7
+		req.RetentionKeep = &keep
 	}
 	if req.WebhookMode == "" {
 		req.WebhookMode = "on-error"
@@ -170,6 +193,10 @@ func (d *BackupDeps) CreatePlan(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := validateKeyTemplate(req.ScopeType, req.ScopeValue, req.KeyTemplate); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := validatePlanFields(req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
@@ -195,7 +222,7 @@ func (d *BackupDeps) CreatePlan(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, id, req.Name, string(sourcesJSON), req.ScopeType, scopeArg,
 		req.S3EndpointID, req.S3Bucket, req.KeyTemplate, req.Schedule,
-		req.RetentionKeep, req.Compression, req.CompressionLevel,
+		*req.RetentionKeep, req.Compression, req.CompressionLevel,
 		widArg, req.WebhookMode, req.Engine, boolI(req.VerifyRestore),
 		boolI(req.Enabled), now, now); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -231,6 +258,10 @@ func (d *BackupDeps) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	if err := validatePlanFields(req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
 	res, err := d.DB.ExecContext(r.Context(), `
 		UPDATE backup_plans SET
 			name = ?, sources_json = ?, scope_type = ?, scope_value = ?,
@@ -241,7 +272,7 @@ func (d *BackupDeps) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 		WHERE id = ?
 	`, req.Name, string(sourcesJSON), req.ScopeType, scopeArg,
 		req.S3EndpointID, req.S3Bucket, req.KeyTemplate, req.Schedule,
-		req.RetentionKeep, req.Compression, req.CompressionLevel,
+		*req.RetentionKeep, req.Compression, req.CompressionLevel,
 		widArg, req.WebhookMode, req.Engine, boolI(req.VerifyRestore),
 		boolI(req.Enabled), time.Now().Unix(), id)
 	if err != nil {
@@ -295,14 +326,14 @@ func (d *BackupDeps) TriggerPlan(w http.ResponseWriter, r *http.Request) {
 
 // BackupRun is the JSON shape for /api/backups/runs.
 type BackupRun struct {
-	ID           string             `json:"id"`
-	PlanID       string             `json:"plan_id"`
-	PlanName     string             `json:"plan_name"`
-	TriggeredBy  string             `json:"triggered_by"`
-	StartedAt    int64              `json:"started_at"`
-	FinishedAt   int64              `json:"finished_at,omitempty"`
-	Status       string             `json:"status"`
-	ErrorSummary string             `json:"error_summary,omitempty"`
+	ID           string              `json:"id"`
+	PlanID       string              `json:"plan_id"`
+	PlanName     string              `json:"plan_name"`
+	TriggeredBy  string              `json:"triggered_by"`
+	StartedAt    int64               `json:"started_at"`
+	FinishedAt   int64               `json:"finished_at,omitempty"`
+	Status       string              `json:"status"`
+	ErrorSummary string              `json:"error_summary,omitempty"`
 	Items        []backup.NodeResult `json:"items,omitempty"`
 }
 

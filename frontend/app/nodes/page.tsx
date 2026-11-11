@@ -7,7 +7,7 @@ import { api, errText } from '@/lib/api';
 import { useSSE } from '@/lib/sse';
 import type { NodeView, MetricsSample } from '@/lib/types';
 import { fmtBytes, fmtBps, fmtPct, fmtRelative, fmtUptime } from '@/lib/format';
-import { AuthShell } from '@/components/auth-shell';
+import { AuthShell, useMe } from '@/components/auth-shell';
 import { Modal } from '@/components/modal';
 import { LabelChips } from '@/components/label-chips';
 import { Server, Trash2 } from 'lucide-react';
@@ -23,6 +23,7 @@ export default function NodesPage() {
 }
 
 function Nodes() {
+  const me = useMe();
   const [nodes, setNodes] = useState<NodeView[]>([]);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -80,7 +81,7 @@ function Nodes() {
           <h1 className="page-title">Nodes</h1>
           <p className="page-sub">{nodes.length - offline} online · {offline} offline · live updates</p>
         </div>
-        {offline > 0 && (
+        {offline > 0 && me.is_admin && (
           <button onClick={() => setCleanupOpen(true)} className="btn-ghost-danger">
             <Trash2 className="h-4 w-4" /> Clean up offline nodes
           </button>
@@ -229,13 +230,13 @@ function MiniBar({ value, detail }: { value: number; detail: string }) {
 
 type Preset = 'all' | 'h1' | 'h6' | 'h24' | 'd7' | 'd30' | 'custom';
 
-const PRESETS: { v: Preset; label: string; hours: number }[] = [
-  { v: 'all',    label: 'alle offline (jetzt)',      hours: 0 },
-  { v: 'h1',     label: 'offline seit ≥ 1 Stunde',   hours: 1 },
-  { v: 'h6',     label: 'offline seit ≥ 6 Stunden',  hours: 6 },
-  { v: 'h24',    label: 'offline seit ≥ 24 Stunden', hours: 24 },
-  { v: 'd7',     label: 'offline seit ≥ 7 Tagen',    hours: 24 * 7 },
-  { v: 'd30',    label: 'offline seit ≥ 30 Tagen',   hours: 24 * 30 },
+const PRESETS: { v: Exclude<Preset, 'custom'>; label: string; hours: number }[] = [
+  { v: 'all',    label: 'All offline nodes (now)',     hours: 0 },
+  { v: 'h1',     label: 'Offline for at least 1 hour',   hours: 1 },
+  { v: 'h6',     label: 'Offline for at least 6 hours',  hours: 6 },
+  { v: 'h24',    label: 'Offline for at least 24 hours', hours: 24 },
+  { v: 'd7',     label: 'Offline for at least 7 days',   hours: 24 * 7 },
+  { v: 'd30',    label: 'Offline for at least 30 days',  hours: 24 * 30 },
 ];
 
 function CleanupModal({ offlineCount, onClose, onDone }: {
@@ -244,24 +245,27 @@ function CleanupModal({ offlineCount, onClose, onDone }: {
   onDone: () => void;
 }) {
   const [preset, setPreset] = useState<Preset>('h24');
-  const [customHours, setCustomHours] = useState<number>(48);
+  // Kept as the raw text: a number input reports '' and 0 alike, and both
+  // used to fall through to "delete every offline node".
+  const [customHours, setCustomHours] = useState('48');
   const [busy, setBusy] = useState(false);
   const [confirmText, setConfirmText] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<{ deleted: number; ids: string[] } | null>(null);
 
-  const hours = preset === 'custom' ? customHours : (PRESETS.find((p) => p.v === preset)?.hours ?? 0);
   const dangerous = preset === 'all';
-  const confirmOK = !dangerous || confirmText === 'DELETE';
+  const customValid = /^\d+$/.test(customHours.trim()) && Number(customHours) >= 1;
+  const hours = preset === 'custom' ? Number(customHours) : (PRESETS.find((p) => p.v === preset)?.hours ?? 0);
+  const inputOK = dangerous ? confirmText === 'DELETE' : preset !== 'custom' || customValid;
 
   const submit = async () => {
-    if (!confirmOK) return;
+    if (!inputOK) return;
     setBusy(true);
     setErr(null);
     try {
       const r = await api<{ deleted: number; ids: string[] }>('/api/nodes/cleanup', {
         method: 'POST',
-        body: { older_than_hours: hours },
+        body: dangerous ? { all: true } : { older_than_hours: hours },
       });
       setResult(r);
     } catch (e: unknown) {
@@ -274,8 +278,8 @@ function CleanupModal({ offlineCount, onClose, onDone }: {
   if (result) {
     return (
       <Modal title="Cleanup done" onClose={onDone} footer={<button onClick={onDone} className="btn-primary">Close</button>}>
-        <p className="text-sm">{result.deleted} Node(s) gelöscht.</p>
-        {result.ids.length > 0 && (
+        <p className="text-sm">{result.deleted === 1 ? '1 node deleted.' : `${result.deleted} nodes deleted.`}</p>
+        {(result.ids ?? []).length > 0 && (
           <ul className="mt-3 max-h-48 space-y-1 overflow-y-auto rounded-md bg-zinc-50 p-2 font-mono text-2xs text-zinc-600 dark:bg-zinc-900/50 dark:text-zinc-400">
             {result.ids.map((id) => <li key={id}>{id}</li>)}
           </ul>
@@ -286,15 +290,15 @@ function CleanupModal({ offlineCount, onClose, onDone }: {
 
   return (
     <Modal
-      title="Offline-Nodes löschen"
-      subtitle={`${offlineCount} Node(s) sind aktuell offline. Online-Nodes werden NIE gelöscht.`}
+      title="Delete offline nodes"
+      subtitle={`${offlineCount} ${offlineCount === 1 ? 'node is' : 'nodes are'} offline right now. Online nodes are never deleted.`}
       onClose={onClose}
       dismissable={!busy}
       footer={
         <>
           <button onClick={onClose} disabled={busy} className="btn-ghost">Cancel</button>
-          <button onClick={submit} disabled={busy || !confirmOK} className={dangerous ? 'btn-danger' : 'btn-primary'}>
-            {busy ? 'Lösche…' : 'Cleanup'}
+          <button onClick={submit} disabled={busy || !inputOK} className={dangerous ? 'btn-danger' : 'btn-primary'}>
+            {busy ? 'Deleting…' : 'Delete nodes'}
           </button>
         </>
       }
@@ -308,22 +312,31 @@ function CleanupModal({ offlineCount, onClose, onDone }: {
         ))}
         <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800/60">
           <input type="radio" name="preset" checked={preset === 'custom'} onChange={() => setPreset('custom')} />
-          <span>offline seit ≥</span>
+          <span>Offline for at least</span>
           <input
             type="number"
             min={1}
+            step={1}
+            inputMode="numeric"
             className="input h-8 w-20 text-xs" aria-label="Hours offline"
+            aria-invalid={preset === 'custom' && !customValid}
+            aria-describedby="cleanup-hours-error"
             value={customHours}
-            onChange={(e) => { setCustomHours(+e.target.value); setPreset('custom'); }}
+            onChange={(e) => { setCustomHours(e.target.value); setPreset('custom'); }}
           />
-          <span>Stunden</span>
+          <span>hours</span>
         </label>
+        {preset === 'custom' && !customValid && (
+          <p id="cleanup-hours-error" role="alert" className="px-2 text-xs text-red-600 dark:text-red-400">
+            Enter a whole number of hours, 1 or more. To delete every offline node, pick &quot;All offline nodes&quot;.
+          </p>
+        )}
       </div>
 
       {dangerous && (
         <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
-          <strong>Achtung:</strong> „alle offline" löscht JEDEN Node der gerade nicht verbunden ist.
-          Tippe <code className="font-mono">DELETE</code> zum Bestätigen.
+          <strong>Warning:</strong> &quot;All offline nodes&quot; deletes EVERY node that is not connected right now.
+          Type <code className="font-mono">DELETE</code> to confirm.
           <input
             className="input mt-2 h-8 font-mono text-xs" aria-label="Type DELETE to confirm"
             value={confirmText}

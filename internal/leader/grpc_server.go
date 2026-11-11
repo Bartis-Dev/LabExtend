@@ -41,6 +41,16 @@ type AgentConn struct {
 	// pending request_id → channel waiting for the matching CommandResult.
 	pendingMu sync.Mutex
 	pending   map[string]chan *pb.AgentMessage
+
+	// gone is closed when the stream ends, releasing every pending Request:
+	// their results can no longer arrive.
+	gone     chan struct{}
+	goneOnce sync.Once
+}
+
+// markGone releases every Request waiting on this connection.
+func (c *AgentConn) markGone() {
+	c.goneOnce.Do(func() { close(c.gone) })
 }
 
 // Send pushes a LeaderMessage to the agent.
@@ -180,7 +190,9 @@ func (s *ManagerAgentServer) Channel(stream pb.ManagerAgent_ChannelServer) error
 		ConnectedAt: time.Now(),
 		stream:      stream,
 		pending:     make(map[string]chan *pb.AgentMessage),
+		gone:        make(chan struct{}),
 	}
+	defer conn.markGone()
 
 	if prev := s.registry.Register(conn); prev != nil {
 		slog.Warn("agent reconnected — superseded previous session",

@@ -69,6 +69,13 @@ export async function api<T = unknown>(path: string, opts: RequestOpts = {}): Pr
   const data: unknown = ct.includes('application/json') ? await res.json() : await res.text();
 
   if (!res.ok) {
+    // An expired session surfaces as 401 on whatever call happens next; send
+    // the user back to login. /api/auth/* 401s are the login flow's own business.
+    if (res.status === 401 && !path.startsWith('/api/auth/') && typeof window !== 'undefined'
+        && window.location.pathname !== '/login') {
+      setCSRFToken(null);
+      window.location.replace('/login');
+    }
     const err = new Error(`API ${m} ${path} → ${res.status}`) as ApiError;
     err.status = res.status;
     err.body = data;

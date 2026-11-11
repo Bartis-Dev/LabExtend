@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { api, errText } from '@/lib/api';
@@ -81,6 +81,8 @@ const VIRTUAL_ROOT: NodePath = {
 function Files() {
   const params = useSearchParams();
   const nodeID = params.get('node') ?? '';
+  const nodeIDRef = useRef(nodeID);
+  nodeIDRef.current = nodeID;
   const root = params.get('root') || '/';   // implicit virtual root when empty
   const sub = params.get('sub') ?? '';
 
@@ -107,29 +109,39 @@ function Files() {
   useEffect(() => { loadNodes(); }, [loadNodes]);
 
   useEffect(() => {
+    // The previous node's shortcuts must not linger (or win a race) here.
+    setPaths([]);
     if (!nodeID) return;
+    let alive = true;
     (async () => {
       try {
         const r = await api<{ paths: NodePath[] }>(`/api/nodes/${encodeURIComponent(nodeID)}/paths`);
-        setPaths(r.paths ?? []);
+        if (alive) setPaths(r.paths ?? []);
       } catch { /* */ }
     })();
+    return () => { alive = false; };
   }, [nodeID]);
 
+  // Only the newest listing may write: switching node or folder while a slow
+  // listing runs must not show the old directory.
+  const entriesSeq = useRef(0);
   const loadEntries = useCallback(async () => {
-    if (!nodeID || !root) { setEntries([]); return; }
+    const my = ++entriesSeq.current;
+    if (!nodeID || !root) { setEntries([]); setBusy(false); return; }
     setBusy(true);
     setErr(null);
     try {
       const r = await api<{ entries: FileEntry[] }>(
         `/api/nodes/${encodeURIComponent(nodeID)}/files?root=${encodeURIComponent(root)}&sub=${encodeURIComponent(sub)}&show_hidden=${showHidden}`
       );
+      if (my !== entriesSeq.current) return;
       setEntries(r.entries ?? []);
     } catch (e: unknown) {
+      if (my !== entriesSeq.current) return;
       setErr(errText(e, 'Could not read this directory.'));
       setEntries([]);
     } finally {
-      setBusy(false);
+      if (my === entriesSeq.current) setBusy(false);
     }
   }, [nodeID, root, sub, showHidden]);
 
@@ -215,9 +227,10 @@ function Files() {
                 ))}
               </ul>
               <AddRootForm nodeID={nodeID} onAdded={async () => {
+                const forNode = nodeID;
                 try {
-                  const r = await api<{ paths: NodePath[] }>(`/api/nodes/${encodeURIComponent(nodeID)}/paths`);
-                  setPaths(r.paths ?? []);
+                  const r = await api<{ paths: NodePath[] }>(`/api/nodes/${encodeURIComponent(forNode)}/paths`);
+                  if (forNode === nodeIDRef.current) setPaths(r.paths ?? []);
                 } catch { /* the new root shows after the next reload */ }
               }} />
             </div>

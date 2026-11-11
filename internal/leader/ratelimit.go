@@ -28,8 +28,18 @@ func newAttemptLimiter(max int, window time.Duration) *attemptLimiter {
 	return &attemptLimiter{max: max, window: window, seen: make(map[string]*attemptWindow)}
 }
 
-// allow reports whether another attempt may be made for key, and counts it.
-func (l *attemptLimiter) allow(key string) bool {
+// blocked reports whether key has used up its failures in the current window.
+// It does not count anything: only failures do, so a shared IP (an office
+// NAT) is not locked out by people who merely start signing in.
+func (l *attemptLimiter) blocked(key string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	w, ok := l.seen[key]
+	return ok && time.Since(w.start) <= l.window && w.n >= l.max
+}
+
+// fail counts one failed attempt for key.
+func (l *attemptLimiter) fail(key string) {
 	now := time.Now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -47,10 +57,9 @@ func (l *attemptLimiter) allow(key string) bool {
 	w, ok := l.seen[key]
 	if !ok || now.Sub(w.start) > l.window {
 		l.seen[key] = &attemptWindow{start: now, n: 1}
-		return true
+		return
 	}
 	w.n++
-	return w.n <= l.max
 }
 
 // reset clears the counter for key. Called after a successful authentication so

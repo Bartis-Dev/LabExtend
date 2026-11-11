@@ -6,11 +6,14 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	pb "github.com/Bartis-Dev/LabExtend/internal/grpc/pb"
 )
 
 // Archiving a live tree means files change size between the walk's stat and
@@ -253,5 +256,65 @@ func TestValidSecretName(t *testing.T) {
 		if !validSecretName(s) {
 			t.Errorf("validSecretName(%q) = false, want true", s)
 		}
+	}
+}
+
+// A unix socket inside a volume (Postgres, Docker plugins) made
+// tar.FileInfoHeader fail and abandoned the whole node's archive.
+func TestTarOneRootSkipsSockets(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("alpha"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", filepath.Join(root, "s.sock"))
+	if err != nil {
+		t.Skipf("unix socket not available: %v", err)
+	}
+	defer ln.Close()
+	if info, err := os.Lstat(filepath.Join(root, "s.sock")); err != nil || info.Mode().IsRegular() {
+		t.Skipf("socket not visible as a special file here: %v", err)
+	}
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	var bytesProcessed, filesDone atomic.Uint64
+	if err := tarOneRoot(context.Background(), tw, root, &bytesProcessed, &filesDone, nil, "test-run"); err != nil {
+		t.Fatalf("tarOneRoot: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	tr := tar.NewReader(&buf)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		names[filepath.Base(hdr.Name)] = true
+	}
+	if !names["a.txt"] || names["s.sock"] {
+		t.Errorf("archive entries = %v, want a.txt without the socket", names)
+	}
+}
+
+// The leader never runs one plan twice at once, but after a leader restart
+// the old run can still be going on the agent when the next one arrives.
+func TestRunBackupRefusesSecondRunOfSamePlan(t *testing.T) {
+	backupMu.Lock()
+	backupRuns["old-run"] = &backupSession{cancel: func() {}, planID: "p1"}
+	backupMu.Unlock()
+	t.Cleanup(func() {
+		backupMu.Lock()
+		delete(backupRuns, "old-run")
+		backupMu.Unlock()
+	})
+	h := &Handler{monitor: &monitor{}}
+	_, err := h.RunBackup(context.Background(), &pb.RunBackupReq{PlanId: "p1", RunId: "new-run", Sources: []string{"/x"}, Engine: "bogus"})
+	if err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("err = %v, want refusal", err)
 	}
 }

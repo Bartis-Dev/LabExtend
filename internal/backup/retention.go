@@ -40,8 +40,17 @@ type retentionItem struct {
 	RunID  string
 	NodeID string
 	Key    string
+	Extra  []string // further objects of the item (multi-DSN pgdump)
 	Bytes  int64
 	Delete bool
+}
+
+// keys lists every object the item owns.
+func (it retentionItem) keys() []string {
+	if it.Key == "" {
+		return it.Extra
+	}
+	return append([]string{it.Key}, it.Extra...)
 }
 
 // PruneResult summarizes one retention pass.
@@ -57,8 +66,10 @@ type PruneResult struct {
 // runs are never flagged.
 func retentionItems(ctx context.Context, q queryer, p plan, currentRunID string) ([]retentionItem, error) {
 	rows, err := q.QueryContext(ctx, `
-		SELECT i.id, i.run_id, i.node_id, COALESCE(i.s3_key, ''), COALESCE(i.bytes_uploaded, 0), r.status,
-		       ROW_NUMBER() OVER (PARTITION BY i.node_id ORDER BY i.started_at DESC, i.id DESC) AS rn
+		SELECT i.id, i.run_id, i.node_id, COALESCE(i.s3_key, ''), COALESCE(i.extra_s3_keys, '[]'),
+		       COALESCE(i.bytes_uploaded, 0), r.status,
+		       -- id, not started_at: the id never runs backwards when the clock does.
+		       ROW_NUMBER() OVER (PARTITION BY i.node_id ORDER BY i.id DESC) AS rn
 		  FROM backup_run_items i JOIN backup_runs r ON r.id = i.run_id
 		 WHERE r.plan_id = ? AND i.status = 'success'
 		 ORDER BY i.node_id, rn`, p.ID)
@@ -69,10 +80,13 @@ func retentionItems(ctx context.Context, q queryer, p plan, currentRunID string)
 	var out []retentionItem
 	for rows.Next() {
 		var it retentionItem
-		var runStatus string
+		var runStatus, extra string
 		var rn int
-		if err := rows.Scan(&it.ID, &it.RunID, &it.NodeID, &it.Key, &it.Bytes, &runStatus, &rn); err != nil {
+		if err := rows.Scan(&it.ID, &it.RunID, &it.NodeID, &it.Key, &extra, &it.Bytes, &runStatus, &rn); err != nil {
 			return nil, fmt.Errorf("scan retention item: %w", err)
+		}
+		if err := json.Unmarshal([]byte(extra), &it.Extra); err != nil {
+			return nil, fmt.Errorf("item %d extra_s3_keys: %w", it.ID, err)
 		}
 		it.Delete = p.RetentionKeep > 0 && rn > p.RetentionKeep && it.RunID != currentRunID &&
 			runStatus != "pending" && runStatus != "running"
@@ -81,16 +95,27 @@ func retentionItems(ctx context.Context, q queryer, p plan, currentRunID string)
 	return out, rows.Err()
 }
 
-// objectsToDelete picks one item per distinct key among doomed whose object
-// no surviving row references. With a {date} template two runs on the same
-// day share a key, and the newer one's archive is the object that survived.
-func objectsToDelete(ctx context.Context, q queryer, doomed []retentionItem) ([]retentionItem, error) {
+// objectsToDelete returns one entry per distinct object among doomed that no
+// surviving row in the same bucket references; Key is that object, and the
+// item's bytes count on its first object only. With a {date} template two
+// runs on the same day share a key, and the newer one's archive is the object
+// that survived.
+//
+// References are scoped by bucket name only, not by endpoint: two endpoint
+// rows can point at the same account, so a same-named bucket elsewhere keeps
+// its protection (worst case an object stays, never one deleted under a row).
+func objectsToDelete(ctx context.Context, q queryer, p plan, doomed []retentionItem) ([]retentionItem, error) {
 	doomedIDs := make(map[int64]bool, len(doomed))
 	for _, it := range doomed {
 		doomedIDs[it.ID] = true
 	}
-	// ponytail: loads every item key, fine for thousands of rows; filter by key if it grows.
-	rows, err := q.QueryContext(ctx, `SELECT id, COALESCE(s3_key, '') FROM backup_run_items`)
+	// ponytail: loads every item key of the bucket, fine for thousands of rows; filter by key if it grows.
+	rows, err := q.QueryContext(ctx, `
+		SELECT i.id, COALESCE(i.s3_key, ''), COALESCE(i.extra_s3_keys, '[]')
+		  FROM backup_run_items i
+		  JOIN backup_runs r ON r.id = i.run_id
+		  JOIN backup_plans bp ON bp.id = r.plan_id
+		 WHERE bp.s3_bucket = ?`, p.S3Bucket)
 	if err != nil {
 		return nil, fmt.Errorf("query item keys: %w", err)
 	}
@@ -98,12 +123,20 @@ func objectsToDelete(ctx context.Context, q queryer, doomed []retentionItem) ([]
 	referenced := map[string]bool{}
 	for rows.Next() {
 		var id int64
-		var key string
-		if err := rows.Scan(&id, &key); err != nil {
+		var key, extra string
+		if err := rows.Scan(&id, &key, &extra); err != nil {
 			return nil, fmt.Errorf("scan item key: %w", err)
 		}
-		if !doomedIDs[id] {
-			referenced[key] = true
+		if doomedIDs[id] {
+			continue
+		}
+		referenced[key] = true
+		var more []string
+		if err := json.Unmarshal([]byte(extra), &more); err != nil {
+			return nil, fmt.Errorf("item %d extra_s3_keys: %w", id, err)
+		}
+		for _, k := range more {
+			referenced[k] = true
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -112,11 +145,18 @@ func objectsToDelete(ctx context.Context, q queryer, doomed []retentionItem) ([]
 	seen := map[string]bool{}
 	var out []retentionItem
 	for _, it := range doomed {
-		if it.Key == "" || referenced[it.Key] || seen[it.Key] {
-			continue
+		for i, k := range it.keys() {
+			if k == "" || referenced[k] || seen[k] {
+				continue
+			}
+			seen[k] = true
+			obj := it
+			obj.Key, obj.Extra = k, nil
+			if i > 0 {
+				obj.Bytes = 0
+			}
+			out = append(out, obj)
 		}
-		seen[it.Key] = true
-		out = append(out, it)
 	}
 	return out, nil
 }
@@ -142,7 +182,7 @@ func pruneRetention(ctx context.Context, db *sql.DB, del keyDeleter, p plan, cur
 	if len(doomed) == 0 {
 		return res, nil
 	}
-	objs, err := objectsToDelete(ctx, db, doomed)
+	objs, err := objectsToDelete(ctx, db, p, doomed)
 	if err != nil {
 		return res, err
 	}
@@ -186,9 +226,13 @@ func pruneRetention(ctx context.Context, db *sql.DB, del keyDeleter, p plan, cur
 	}
 	defer tx.Rollback()
 	touched := map[string]bool{}
+doomedLoop:
 	for _, it := range doomed {
-		if failed[it.Key] {
-			continue
+		// One object still in the bucket keeps the row, so the next prune retries it.
+		for _, k := range it.keys() {
+			if failed[k] {
+				continue doomedLoop
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM backup_run_items WHERE id = ?`, it.ID); err != nil {
 			return res, fmt.Errorf("delete item %d: %w", it.ID, err)
@@ -351,7 +395,11 @@ func (r *Runner) retainWith(ctx context.Context, p plan, runID string, del keyDe
 
 // noteRetentionError puts a prune failure on the run without changing its
 // status: the backup itself succeeded.
-func (r *Runner) noteRetentionError(ctx context.Context, p plan, runID string, err error) {
+func (r *Runner) noteRetentionError(_ context.Context, p plan, runID string, err error) {
+	// Most prune failures are the prune context running out; recording that
+	// on the same context silently dropped both the note and the event.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	slog.Warn("backup: retention prune failed", "plan", p.ID, "run", runID, "err", err)
 	if _, uerr := r.db.ExecContext(ctx, `
 		UPDATE backup_runs
@@ -416,7 +464,7 @@ func RetentionReport(ctx context.Context, w io.Writer, db *sql.DB, secretsKey st
 				doomed = append(doomed, it)
 			}
 		}
-		objs, err := objectsToDelete(ctx, db, doomed)
+		objs, err := objectsToDelete(ctx, db, p, doomed)
 		if err != nil {
 			return err
 		}
@@ -512,15 +560,20 @@ func (r *Runner) reportBucket(ctx context.Context, w io.Writer, p plan, items []
 	}
 	// Every row of every plan counts as a reference, so a shared prefix does
 	// not turn another plan's archives into orphans.
-	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT s3_key FROM backup_run_items WHERE COALESCE(s3_key, '') <> ''`)
+	rows, err := r.db.QueryContext(ctx, `SELECT COALESCE(s3_key, ''), COALESCE(extra_s3_keys, '[]') FROM backup_run_items`)
 	if err != nil {
 		return err
 	}
 	referenced := map[string]bool{}
 	for rows.Next() {
-		var k string
-		if rows.Scan(&k) == nil {
+		var k, extra string
+		if rows.Scan(&k, &extra) == nil {
 			referenced[k] = true
+			var more []string
+			_ = json.Unmarshal([]byte(extra), &more)
+			for _, m := range more {
+				referenced[m] = true
+			}
 		}
 	}
 	rows.Close()

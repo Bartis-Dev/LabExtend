@@ -2,6 +2,7 @@ package leader
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -133,16 +134,21 @@ func requireAdmin(db *sql.DB) func(http.Handler) http.Handler {
 				writeErr(w, http.StatusUnauthorized, nil)
 				return
 			}
-			var isAdmin int
-			if err := db.QueryRowContext(r.Context(),
-				`SELECT is_admin FROM users WHERE id = ?`, sess.UserID,
-			).Scan(&isAdmin); err != nil || isAdmin != 1 {
+			if !isAdminUser(r.Context(), db, sess.UserID) {
 				writeErr(w, http.StatusForbidden, errors.New("admin required"))
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// isAdminUser reads the role from the users row; a lookup error counts as
+// not admin.
+func isAdminUser(ctx context.Context, db *sql.DB, userID int64) bool {
+	var isAdmin int
+	err := db.QueryRowContext(ctx, `SELECT is_admin FROM users WHERE id = ?`, userID).Scan(&isAdmin)
+	return err == nil && isAdmin == 1
 }
 
 // csrfMiddleware enforces X-CSRF-Token header on state-changing methods
@@ -164,7 +170,7 @@ func csrfMiddleware(next http.Handler) http.Handler {
 		}
 
 		got := r.Header.Get("X-CSRF-Token")
-		if got == "" || got != sess.CSRFToken {
+		if got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(sess.CSRFToken)) != 1 {
 			writeErr(w, http.StatusForbidden, errors.New("invalid or missing CSRF token"))
 			return
 		}

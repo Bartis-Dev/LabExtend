@@ -10,16 +10,21 @@ interface Props {
   containerID: string;
 }
 
+const MAX_LINES = 5000;
+
 /**
  * LogViewer — connects to /api/containers/{node}/{id}/logs/stream (SSE).
- * Shows persisted tail first, then live lines. Pause toggles new render.
+ * Shows persisted tail first, then live lines. Pause holds new lines in a
+ * buffer (capped at MAX_LINES) without touching the connection.
  */
 export function LogViewer({ nodeID, containerID }: Props) {
   const [lines, setLines] = useState<LogEntry[]>([]);
   const [paused, setPaused] = useState(false);
+  const [buffered, setBuffered] = useState(0);
   const [search, setSearch] = useState('');
   const [connected, setConnected] = useState(false);
   const bufferRef = useRef<LogEntry[]>([]);
+  const pausedRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const followRef = useRef(true);
 
@@ -27,27 +32,39 @@ export function LogViewer({ nodeID, containerID }: Props) {
     if (!nodeID || !containerID) return;
     const url = `/api/containers/${encodeURIComponent(nodeID)}/${encodeURIComponent(containerID)}/logs/stream`;
     const es = new EventSource(url, { withCredentials: true });
+    // Every (re)connect replays the 500-line tail; row ids grow monotonically,
+    // so anything at or below the last seen id is a replay.
+    let lastId = 0;
 
     es.addEventListener('ready', () => setConnected(true));
     es.addEventListener('log', (ev: MessageEvent) => {
-      try {
-        const e = JSON.parse(ev.data) as LogEntry;
-        bufferRef.current.push(e);
-        if (!paused) {
-          setLines((prev) => {
-            const next = prev.concat(bufferRef.current);
-            bufferRef.current = [];
-            return next.length > 5000 ? next.slice(-5000) : next;
-          });
-        }
-      } catch {/* */}
+      let e: LogEntry;
+      try { e = JSON.parse(ev.data) as LogEntry; } catch { return; }
+      if (e.id > 0) {
+        if (e.id <= lastId) return;
+        lastId = e.id;
+      }
+      if (pausedRef.current) {
+        const b = bufferRef.current;
+        b.push(e);
+        if (b.length > MAX_LINES) b.splice(0, b.length - MAX_LINES);
+        setBuffered(b.length);
+        return;
+      }
+      setLines((prev) => {
+        const next = prev.concat(e);
+        return next.length > MAX_LINES ? next.slice(-MAX_LINES) : next;
+      });
     });
     es.onerror = () => setConnected(false);
 
     return () => {
       es.close();
+      bufferRef.current = [];
+      setBuffered(0);
+      setLines([]);
     };
-  }, [nodeID, containerID, paused]);
+  }, [nodeID, containerID]);
 
   // Auto-scroll while in "follow" mode (user hasn't scrolled away).
   useEffect(() => {
@@ -60,6 +77,17 @@ export function LogViewer({ nodeID, containerID }: Props) {
     const el = containerRef.current;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     followRef.current = atBottom;
+  };
+
+  const togglePause = () => {
+    if (pausedRef.current) {
+      const held = bufferRef.current;
+      bufferRef.current = [];
+      setBuffered(0);
+      if (held.length > 0) setLines((prev) => prev.concat(held).slice(-MAX_LINES));
+    }
+    pausedRef.current = !pausedRef.current;
+    setPaused(pausedRef.current);
   };
 
   const filtered = search
@@ -77,19 +105,11 @@ export function LogViewer({ nodeID, containerID }: Props) {
           className="input w-56"
         />
         <button
-          onClick={() => {
-            setPaused((p) => {
-              if (p && bufferRef.current.length > 0) {
-                setLines((prev) => prev.concat(bufferRef.current).slice(-5000));
-                bufferRef.current = [];
-              }
-              return !p;
-            });
-          }}
+          onClick={togglePause}
           className={paused ? 'btn-primary' : 'btn-ghost'}
         >
           {paused
-            ? <><Play className="h-4 w-4" /> Resume ({bufferRef.current.length})</>
+            ? <><Play className="h-4 w-4" /> Resume ({buffered})</>
             : <><Pause className="h-4 w-4" /> Pause</>}
         </button>
         <button
@@ -99,10 +119,13 @@ export function LogViewer({ nodeID, containerID }: Props) {
         <button
           onClick={() => {
             const blob = new Blob(filtered.map((l) => l.line + '\n'), { type: 'text/plain' });
+            const href = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
+            a.href = href;
             a.download = `${containerID.slice(0, 12)}.log`;
             a.click();
+            // Revoke after a delay; revoking synchronously can cancel the download in some browsers.
+            setTimeout(() => URL.revokeObjectURL(href), 10_000);
           }}
           className="btn-ghost"
         ><Download className="h-4 w-4" /> Download</button>
@@ -116,8 +139,8 @@ export function LogViewer({ nodeID, containerID }: Props) {
         onScroll={onScroll}
         className="flex-1 overflow-auto rounded-md border border-zinc-200 bg-zinc-950 p-3 font-mono text-xs leading-snug text-zinc-200 dark:border-zinc-800"
       >
-        {filtered.map((l) => (
-          <div key={l.id || `${l.ts_ms}-${Math.random()}`} className={clsx('whitespace-pre-wrap', l.stream === 'stderr' && 'text-red-400')}>
+        {filtered.map((l, i) => (
+          <div key={l.id || `i${i}`} className={clsx('whitespace-pre-wrap', l.stream === 'stderr' && 'text-red-400')}>
             <span className="mr-2 select-none text-zinc-600">{new Date(l.ts_ms).toLocaleTimeString()}</span>
             {l.line}
           </div>

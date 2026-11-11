@@ -27,6 +27,7 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -56,7 +57,8 @@ export function NotificationBell() {
     'notification.read': () => load(),
   });
 
-  // Close on outside click and Escape.
+  // Close on outside click (focus follows the click, so it is not moved back),
+  // and on Escape while focus sits outside the bell (onKeyDown covers inside).
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -70,6 +72,15 @@ export function NotificationBell() {
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
+
+  // Escape closes only the popover (not the mobile drawer around it) and puts
+  // focus back on the bell.
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Escape' || !open) return;
+    e.stopPropagation();
+    setOpen(false);
+    button.current?.focus();
+  };
 
   const markRead = async (n: Notification) => {
     if (n.read_at) return;
@@ -93,8 +104,9 @@ export function NotificationBell() {
   const hasCritical = items.some((n) => !n.read_at && n.severity === 'critical');
 
   return (
-    <div ref={root} className="relative">
+    <div ref={root} className="relative" onKeyDown={onKeyDown}>
       <button
+        ref={button}
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label={unread ? `Notifications, ${unread} unread` : 'Notifications'}
@@ -173,7 +185,7 @@ export function NotificationBell() {
                       {n.link && (
                         <Link
                           href={n.link}
-                          onClick={() => { markRead(n); setOpen(false); }}
+                          onClick={() => { markRead(n); setOpen(false); button.current?.focus(); }}
                           className="inline-flex items-center gap-0.5 rounded font-medium text-accent hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                         >
                           Open <ArrowUpRight className="h-3 w-3" />

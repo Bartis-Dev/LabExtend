@@ -3,12 +3,32 @@
 import { useEffect, useId, useRef } from 'react';
 import { X } from 'lucide-react';
 
-const FOCUSABLE =
+export const FOCUSABLE =
   'input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 
 // Open dialogs, innermost last. Only the top one answers Escape, so a confirm
 // opened over an edit dialog does not close both.
 const stack: symbol[] = [];
+
+/** trapTab keeps Tab and Shift+Tab cycling inside `root`. */
+export function trapTab(e: React.KeyboardEvent, root: HTMLElement) {
+  if (e.key !== 'Tab') return;
+  const focusable = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE))
+    .filter((el) => el.offsetParent !== null);
+  if (focusable.length === 0) {
+    e.preventDefault();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (e.shiftKey && (document.activeElement === first || document.activeElement === root)) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
 
 /**
  * Modal is the shared dialog shell: backdrop, focus trap, Escape to close,
@@ -83,22 +103,7 @@ export function Modal({
 
   // Keep Tab inside the dialog: without this, tabbing walks the page behind it.
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key !== 'Tab' || !panel.current) return;
-    const focusable = Array.from(panel.current.querySelectorAll<HTMLElement>(FOCUSABLE))
-      .filter((el) => el.offsetParent !== null);
-    if (focusable.length === 0) {
-      e.preventDefault();
-      return;
-    }
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (e.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
+    if (panel.current) trapTab(e, panel.current);
   };
 
   return (

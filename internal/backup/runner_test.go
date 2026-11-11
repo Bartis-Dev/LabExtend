@@ -2,7 +2,11 @@ package backup
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -68,7 +72,9 @@ func newTestDB(t *testing.T) *sql.DB {
 			finished_at INT, status TEXT, error_summary TEXT, log_excerpt TEXT);
 		CREATE TABLE backup_run_items (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT, node_id TEXT,
-			started_at INT, finished_at INT, status TEXT, error TEXT, bytes_uploaded INT, s3_key TEXT);
+			started_at INT, finished_at INT, status TEXT, error TEXT, bytes_uploaded INT, s3_key TEXT,
+			file_count INT, sha256 TEXT, extra_s3_keys TEXT NOT NULL DEFAULT '[]');
+		CREATE TABLE nodes (id TEXT PRIMARY KEY, hostname TEXT, labels_json TEXT NOT NULL DEFAULT '{}');
 		CREATE TABLE s3_endpoints (
 			id TEXT PRIMARY KEY, endpoint TEXT, region TEXT, access_key TEXT,
 			secret_key TEXT, path_style INT);
@@ -328,5 +334,124 @@ func TestReconcileStaleRunsEmitsFailure(t *testing.T) {
 	n := onlyNotification(t, db)
 	if n.typ != notify.BackupFailed || !strings.Contains(n.title, "Nightly") || !strings.Contains(n.body, "leader restarted") {
 		t.Errorf("notification = %+v", n)
+	}
+}
+
+// replyAgents answers every RunBackup with a fixed response.
+type replyAgents struct {
+	list  []AgentInfo
+	reply *pb.RunBackupResp
+}
+
+func (f replyAgents) ListAgents() []AgentInfo { return f.list }
+func (f replyAgents) Request(context.Context, string, *pb.Command) (*pb.CommandResult, error) {
+	return &pb.CommandResult{Ok: true, Payload: &pb.CommandResult_RunBackup{RunBackup: f.reply}}, nil
+}
+
+const testSecretsKey = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+
+// encryptForTest mirrors the handlers_s3 format decryptAESGCM reads.
+func encryptForTest(t *testing.T, plain string) string {
+	t.Helper()
+	key, _ := hex.DecodeString(testSecretsKey)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	return base64.StdEncoding.EncodeToString(gcm.Seal(nonce, nonce, []byte(plain), nil))
+}
+
+// A pgdump plan with several DSNs uploads one object per source and none at
+// the rendered key. Recording only the rendered key made retention delete a
+// key that never existed and drop the row, so the real dumps leaked forever.
+func TestRunRecordsEveryUploadedKey(t *testing.T) {
+	db := newTestDB(t)
+	_, url := startCapture(t)
+	seedPlan(t, db, url, "on-error", encryptForTest(t, "sk"))
+	db.Exec(`INSERT INTO nodes (id, hostname) VALUES ('n1', 'node-1')`)
+	r := NewRunner(db, replyAgents{
+		list:  []AgentInfo{{ID: "n1", Hostname: "node-1"}},
+		reply: &pb.RunBackupResp{S3Key: "k.0.a.dump", S3Keys: []string{"k.0.a.dump", "k.1.b.dump"}, BytesUploaded: 10},
+	}, nil, testSecretsKey, notify.New(db, nil))
+	r.run("p1", "Nightly", "run-1", "schedule")
+
+	var key, extra string
+	if err := db.QueryRow(`SELECT s3_key, extra_s3_keys FROM backup_run_items WHERE run_id = 'run-1'`).Scan(&key, &extra); err != nil {
+		t.Fatal(err)
+	}
+	if key != "k.0.a.dump" || extra != `["k.1.b.dump"]` {
+		t.Errorf("s3_key=%q extra=%q", key, extra)
+	}
+}
+
+// A known node that is not connected used to be skipped silently, and the run
+// reported success without its backup.
+func TestRunFailsDisconnectedNodesInScope(t *testing.T) {
+	db := newTestDB(t)
+	_, url := startCapture(t)
+	seedPlan(t, db, url, "on-error", encryptForTest(t, "sk"))
+	db.Exec(`INSERT INTO nodes (id, hostname) VALUES ('n1', 'node-1'), ('n2', 'node-2')`)
+	r := NewRunner(db, replyAgents{
+		list:  []AgentInfo{{ID: "n1", Hostname: "node-1"}},
+		reply: &pb.RunBackupResp{S3Key: "k"},
+	}, nil, testSecretsKey, notify.New(db, nil))
+	r.run("p1", "Nightly", "run-1", "schedule")
+
+	var status string
+	_ = db.QueryRow(`SELECT status FROM backup_runs WHERE id = 'run-1'`).Scan(&status)
+	if status != "partial" {
+		t.Errorf("run status = %q, want partial", status)
+	}
+	var itemStatus, itemErr string
+	if err := db.QueryRow(`SELECT status, error FROM backup_run_items WHERE run_id = 'run-1' AND node_id = 'n2'`).Scan(&itemStatus, &itemErr); err != nil {
+		t.Fatalf("no item for the disconnected node: %v", err)
+	}
+	if itemStatus != "failed" || !strings.Contains(itemErr, "not connected") {
+		t.Errorf("item = %q %q", itemStatus, itemErr)
+	}
+	n := onlyNotification(t, db)
+	if n.typ != notify.BackupFailed || !strings.Contains(n.body, "n2") {
+		t.Errorf("notification = %+v", n)
+	}
+}
+
+func TestResolveScopeLabelMissingNodes(t *testing.T) {
+	db := newTestDB(t)
+	db.Exec(`INSERT INTO nodes (id, hostname, labels_json) VALUES
+		('n1', 'a', '{"role":"db"}'), ('n2', 'b', '{"role":"db"}'), ('n3', 'c', '{"role":"web"}')`)
+	r := NewRunner(db, fakeAgents{list: []AgentInfo{{ID: "n1", Labels: map[string]string{"role": "db"}}}}, nil, "", nil)
+	targets, missing := r.resolveScope(context.Background(), plan{ScopeType: "label", ScopeValue: "role=db"})
+	if len(targets) != 1 || len(missing) != 1 || missing[0].ID != "n2" {
+		t.Errorf("targets=%v missing=%v", targets, missing)
+	}
+	_, missing = r.resolveScope(context.Background(), plan{ScopeType: "node", ScopeValue: "c"})
+	if len(missing) != 1 || missing[0].ID != "n3" {
+		t.Errorf("node scope missing=%v", missing)
+	}
+}
+
+// Only the runs a restarting leader found in flight may be failed: a run
+// started after the listing belongs to this leader.
+func TestReconcileStaleRunsOnlyTouchesListedRuns(t *testing.T) {
+	db := newTestDB(t)
+	_, url := startCapture(t)
+	seedPlan(t, db, url, "on-error", "x")
+	db.Exec(`INSERT INTO backup_runs (id, plan_id, triggered_by, started_at, status) VALUES
+		('old', 'p1', 's', 1, 'running'), ('new', 'p1', 's', ?, 'running')`, time.Now().Add(time.Hour).Unix())
+	r := NewRunner(db, fakeAgents{}, nil, "", notify.New(db, nil))
+	r.ReconcileStaleRuns(context.Background())
+	var st string
+	_ = db.QueryRow(`SELECT status FROM backup_runs WHERE id = 'new'`).Scan(&st)
+	if st != "running" {
+		t.Errorf("run started after boot was failed: %q", st)
+	}
+	_ = db.QueryRow(`SELECT status FROM backup_runs WHERE id = 'old'`).Scan(&st)
+	if st != "failed" {
+		t.Errorf("stale run status = %q", st)
 	}
 }

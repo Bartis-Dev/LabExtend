@@ -6,10 +6,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -57,6 +60,12 @@ func NewClient(url string) *Client {
 		url: url,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
+			// A redirect would carry the payload to wherever the response
+			// points, so a URL that passed validation could still forward
+			// messages to an arbitrary host.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
 	}
 }
@@ -73,7 +82,7 @@ func (c *Client) Post(ctx context.Context, p Payload) error {
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			return fmt.Errorf("post: %w", err)
+			return fmt.Errorf("post: %w", stripURL(err))
 		}
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			_, _ = io.Copy(io.Discard, resp.Body)
@@ -96,6 +105,39 @@ func (c *Client) Post(ctx context.Context, p Payload) error {
 		return fmt.Errorf("discord %d: %s", resp.StatusCode, string(buf))
 	}
 	return fmt.Errorf("discord: still rate-limited after retries")
+}
+
+// stripURL drops the request URL from a transport error. *url.Error prints it
+// in full, and a Discord webhook URL carries its token, while these errors end
+// up in notifications.delivery_error, API responses and the log.
+func stripURL(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return ue.Err
+	}
+	return err
+}
+
+// ValidWebhookURL accepts only https Discord webhook URLs. Anything else
+// would let the leader post (with retries) to an arbitrary host of the
+// caller's choosing.
+func ValidWebhookURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return errors.New("webhook url is not a valid URL")
+	}
+	if u.Scheme != "https" {
+		return errors.New("webhook url must use https")
+	}
+	switch u.Host {
+	case "discord.com", "discordapp.com", "ptb.discord.com", "canary.discord.com":
+	default:
+		return errors.New("webhook url must point to discord.com (or discordapp.com, ptb./canary.discord.com)")
+	}
+	if u.User != nil || !strings.HasPrefix(u.Path, "/api/webhooks/") {
+		return errors.New("webhook url must be a Discord webhook (https://discord.com/api/webhooks/...)")
+	}
+	return nil
 }
 
 func parseRetryAfter(s string) time.Duration {

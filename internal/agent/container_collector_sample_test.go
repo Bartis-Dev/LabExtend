@@ -67,3 +67,38 @@ func TestSampleReportsEveryContainerWhenStatsAreSlow(t *testing.T) {
 		}
 	}
 }
+
+// An inspect that fails or runs past its 3 s budget dropped the container
+// from the report; the leader then deleted it from container_state and the
+// orphan prune deleted the logs of a running container.
+func TestSampleReportsContainerWhoseInspectFails(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "d.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Skipf("unix socket not available: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/containers/json", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[{"Id":"c1","Names":["/web"],"Image":"nginx","State":"running","Labels":{"a":"b"}}]`))
+	})
+	mux.HandleFunc("/containers/", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "busy", http.StatusInternalServerError)
+	})
+	srv := &http.Server{Handler: mux}
+	go srv.Serve(ln)
+	t.Cleanup(func() { srv.Close() })
+
+	c := newContainerCollector(newDockerClient(sock), 5*time.Second)
+	var got *pb.ContainerReport
+	c.sampleOnce(context.Background(), func(m *pb.AgentMessage) error {
+		got = m.GetEvent().GetContainerReport()
+		return nil
+	}, nil)
+	if got == nil || len(got.Containers) != 1 {
+		t.Fatalf("report = %v, want the container from its list summary", got)
+	}
+	s := got.Containers[0]
+	if s.ContainerId != "c1" || s.Name != "web" || s.Image != "nginx" || s.State != "running" || s.Labels["a"] != "b" {
+		t.Errorf("snapshot = %+v", s)
+	}
+}

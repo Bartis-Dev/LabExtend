@@ -225,3 +225,56 @@ func TestCrashloopKnownAtStartIsNotReannounced(t *testing.T) {
 		t.Fatalf("restart re-announced crash loop: %v", got)
 	}
 }
+
+// The notification prune can drop the offline event of a node that is still
+// down; a leader restart then announced the same outage again.
+func TestNodeStateSurvivesNotificationPrune(t *testing.T) {
+	d := watcherDB(t)
+	c := &clock{t: time.Now()}
+	addNode(t, d, "n1", c.t.Add(-10*time.Minute))
+	w := newTestWatcher(d, NewAgentRegistry(), nil, c)
+	w.tick(context.Background())
+	if got := eventTypes(t, d); len(got) != 1 {
+		t.Fatalf("first leader: %v", got)
+	}
+	if _, err := d.Exec(`DELETE FROM notifications`); err != nil {
+		t.Fatal(err)
+	}
+
+	w2 := newTestWatcher(d, NewAgentRegistry(), nil, c)
+	w2.started = c.t
+	c.advance(2 * offlineAfter)
+	w2.tick(context.Background())
+	if got := eventTypes(t, d); len(got) != 0 {
+		t.Fatalf("restarted leader re-announced a pruned outage: %v", got)
+	}
+}
+
+// Swarm replaces a crash-looping task with a new container every few seconds;
+// each would otherwise be announced as a crash loop of its own.
+func TestSwarmCrashloopAnnouncedOncePerService(t *testing.T) {
+	d := watcherDB(t)
+	c := &clock{t: time.Now()}
+	reg := NewAgentRegistry()
+	reg.Register(&AgentConn{ID: "n1"})
+	addNode(t, d, "n1", c.t)
+	cnts := newContainerStore(d)
+	w := newTestWatcher(d, reg, cnts, c)
+	ctx := context.Background()
+	svc := map[string]string{"com.docker.swarm.service.id": "svc1"}
+
+	w.tick(ctx)
+	for i, id := range []string{"t1", "t2", "t3"} {
+		snaps := []*pb.ContainerSnapshot{}
+		for j, prev := range []string{"t1", "t2", "t3"}[:i] {
+			_ = j
+			snaps = append(snaps, &pb.ContainerSnapshot{ContainerId: prev, Name: "api.1." + prev, State: "exited", Labels: svc})
+		}
+		snaps = append(snaps, &pb.ContainerSnapshot{ContainerId: id, Name: "api.1." + id, State: "running", CrashedLoop: true, RecentRestarts: 3, Labels: svc})
+		cnts.Apply(ctx, "n1", &pb.ContainerReport{Containers: snaps})
+		w.tick(ctx)
+	}
+	if got := eventTypes(t, d); len(got) != 1 || got[0] != notify.ContainerCrashloop {
+		t.Fatalf("one crash-looping service: %v", got)
+	}
+}

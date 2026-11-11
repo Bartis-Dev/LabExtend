@@ -301,6 +301,37 @@ func (s *logStore) pruneOrphans(ctx context.Context, now time.Time) {
 	if n, _ := res.RowsAffected(); n > 0 {
 		slog.Info("log orphan prune", "deleted_lines", n)
 	}
+	s.forgetPruneCounters(ctx)
+}
+
+// forgetPruneCounters drops the prune counters of containers that left
+// container_state; the map otherwise holds every container a node ever ran.
+// A counter dropped for a container that is merely new costs at most one
+// late prune.
+func (s *logStore) forgetPruneCounters(ctx context.Context) {
+	rows, err := s.db.QueryContext(ctx, `SELECT node_id, container_id FROM container_state`)
+	if err != nil {
+		slog.Warn("log orphan prune: listing containers failed", "err", err)
+		return
+	}
+	live := map[string]bool{}
+	for rows.Next() {
+		var n, c string
+		if rows.Scan(&n, &c) == nil {
+			live[subKey(n, c)] = true
+		}
+	}
+	rows.Close()
+	if rows.Err() != nil {
+		return
+	}
+	s.mu.Lock()
+	for k := range s.pendingPrn {
+		if !live[k] {
+			delete(s.pendingPrn, k)
+		}
+	}
+	s.mu.Unlock()
 }
 
 func subKey(nodeID, containerID string) string { return nodeID + "::" + containerID }

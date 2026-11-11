@@ -40,6 +40,7 @@ type Config struct {
 	// Session
 	SessionCookieName   string
 	SessionTTLHours     int
+	SessionIdleHours    int // 0 = no idle timeout
 	SessionSecureCookie bool
 
 	// Shared secret between leader and agents (gRPC metadata auth).
@@ -111,6 +112,8 @@ func Load() (*Config, error) {
 		}
 	}
 
+	secureCookie := boolEnv("SESSION_SECURE_COOKIE", true)
+
 	oidcSecret, err := fileEnv("BPM_OIDC_CLIENT_SECRET")
 	if err != nil {
 		return nil, err
@@ -123,9 +126,10 @@ func Load() (*Config, error) {
 		GRPCAddr:            stringEnv("GRPC_ADDR", ":9090"),
 		ExternalURL:         os.Getenv("EXTERNAL_URL"),
 		DataDir:             dataDir,
-		SessionCookieName:   stringEnv("SESSION_COOKIE_NAME", "bpm_session"),
-		SessionTTLHours:     intEnv("SESSION_TTL_HOURS", 168),
-		SessionSecureCookie: boolEnv("SESSION_SECURE_COOKIE", true),
+		SessionCookieName:   stringEnv("SESSION_COOKIE_NAME", defaultSessionCookieName(secureCookie)),
+		SessionTTLHours:     intEnv("SESSION_TTL_HOURS", 12),
+		SessionIdleHours:    intEnv("SESSION_IDLE_HOURS", 2),
+		SessionSecureCookie: secureCookie,
 		AgentToken:          os.Getenv("BPM_AGENT_TOKEN"),
 		GRPCTLSCert:         os.Getenv("BPM_GRPC_TLS_CERT"),
 		GRPCTLSKey:          os.Getenv("BPM_GRPC_TLS_KEY"),
@@ -160,6 +164,17 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+// defaultSessionCookieName uses the __Host- prefix whenever the cookie is
+// Secure: browsers then refuse it unless it is Secure, Path=/ and has no
+// Domain, so a sibling subdomain cannot plant or overwrite it. Plain-HTTP
+// local development cannot set such a cookie at all.
+func defaultSessionCookieName(secure bool) string {
+	if secure {
+		return "__Host-bpm_session"
+	}
+	return "bpm_session"
 }
 
 // OIDCEnabled reports whether OIDC login is fully configured.

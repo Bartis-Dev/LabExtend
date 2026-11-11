@@ -1,6 +1,115 @@
 # Changelog
 
+User-facing changes, newest first. Sections are headed by the date they
+were deployed to production.
+
 ## Unreleased
+
+### Fixed (dashboard)
+
+- **Node cleanup can no longer delete every offline node by accident.** An
+  empty, zero, negative or decimal hour count used to mean "all". The custom
+  value now has to be a whole number of 1 or more, and "All offline nodes"
+  needs DELETE typed and is sent as an explicit request. The dialog is in
+  English now, and the cleanup button only shows for admins.
+- **Container logs no longer duplicate lines.** Pausing and resuming kept
+  reconnecting and replaying the last 500 lines, and so did every automatic
+  reconnect. The stream now stays open, replayed lines are dropped, the pause
+  buffer holds at most 5000 lines and shows its live count.
+- **Schedules are no longer rewritten by opening the editor.** Opening a
+  backup plan or cron job used to save the simple builder's version (for
+  example `30 0 3 * * *` became `0 0 3 * * *`). Expressions the builder cannot
+  show exactly open as a cron expression, and unusual minutes or days 29 to
+  31 stay selectable. Builder labels are in English.
+- **Expired sessions return to the sign-in page** instead of leaving every page
+  with errors.
+- **Non-admins no longer see admin pages** (Webhooks, Files, Cron, S3,
+  Backups, Audit, Settings) or the Restart Portainer button.
+- **Lists show the answer to the latest request.** Switching S3 endpoint or
+  folder, node files, node chart range, analytics range, cron node filter or
+  typing in the audit filter no longer lets a slow older answer overwrite the
+  newer one. The audit filter waits for a pause in typing.
+- **S3 browser loads past 1000 objects** with Load more, and folders no longer
+  show "Invalid Date".
+- **Backups:** the notification Open link highlights the run also when Backups
+  is already open, Back up now cannot be started twice by a double click, and
+  an empty state is no longer shown next to a load error (also on Cron).
+- **One notification bell on phones.** The mobile menu mounted a second bell,
+  which doubled toasts and event connections. The menu is now a proper dialog
+  (focus moves in and stays in, Escape closes, focus returns), and closing the
+  bell popover returns focus to the bell.
+- **Webhook URLs are checked in the form**, also when an existing webhook gets
+  a new URL: only https Discord webhook URLs are accepted, with an inline
+  error.
+
+### Security
+
+- **Everyone is signed out once after this update.** The session cookie is now
+  `__Host-bpm_session` (when `SESSION_SECURE_COOKIE` is on), so a sibling
+  subdomain can no longer set or overwrite it. Sessions now last 12 hours
+  instead of 7 days and end after 2 hours without use (`SESSION_IDLE_HOURS`),
+  so removing someone from the Pocket ID groups takes effect within hours.
+- **Webhooks are admin-only to change.** Creating, editing, deleting and
+  testing a webhook needs an admin and is audited (`webhook.create`, `.update`,
+  `.delete`, `.test`). The leader only accepts https Discord webhook URLs and
+  no longer follows redirects when posting.
+- **Webhook tokens no longer leak through errors.** A failed post put the full
+  webhook URL, token included, into the notification's delivery error, the
+  API answer and the log.
+- **Node cleanup is admin-only and audited** (`node.cleanup`). A broken or
+  empty request is refused instead of deleting every offline node.
+- **Backup events on the live stream go to admins only**, like the backup
+  pages they belong to.
+- **Notifications are read per user.** Marking all as read no longer hides
+  them from everyone else (migration 0014; what was read stays read).
+- **Sign-in rate limit counts failed sign-ins only.** Starting a sign-in no
+  longer counts, so people behind one shared IP cannot lock each other out.
+- **Security headers on every response**: a Content-Security-Policy (inline
+  scripts allowed by hash per page), frame blocking, nosniff, a referrer
+  policy and HSTS on HTTPS. Request bodies are capped at 1 MiB, and `/readyz`
+  answers with its status code only.
+- **Backup plans:** retention 0 now really keeps everything (it was saved as
+  7), and an invalid schedule is refused with an explanation instead of being
+  saved and never running.
+- **Dependencies:** Go 1.27.4, grpc 1.83.1 and x/net 0.60.0 for the published
+  vulnerabilities in them.
+- **Stack template:** the leader's port 8080 is no longer published (Traefik
+  reaches it over the overlay), and the agent network is encrypted.
+
+### Fixed (backups and agents)
+
+- **Offline nodes now fail the backup run.** With scope "all" or a label, a
+  known node whose agent was not connected was skipped and the run still said
+  success. It now gets a failed item, the run turns partial and backup.failed
+  fires. A node that was removed for good has to be deleted under node cleanup,
+  or every run reports it.
+- **pgdump plans with several databases are pruned completely.** The run
+  recorded a key that never existed instead of the per-database dumps, so
+  retention deleted nothing and the dumps stayed in the bucket. Every uploaded
+  key is recorded now and retention deletes all of them.
+- **Retention:** keeps the newest archives by insert order instead of the
+  leader clock, only treats a key as still in use when a plan in the same
+  bucket references it, and records a prune that timed out on the run.
+- **A volume with a unix socket, device or fifo no longer fails the node's
+  archive**, and neither does a file deleted while it is being archived. Such
+  entries are skipped and counted in the agent log.
+- **A dropped agent connection ends the node's backup immediately** instead of
+  leaving the run on "running" for up to four hours.
+- **A running backup no longer blocks the node.** Folder listings, cron
+  changes, service updates and Cancel went unanswered until the backup ended.
+- **Swarm services that crash-loop raise container.crashloop**, once per
+  service instead of once per replacement container.
+- **Containers stay visible when Docker answers slowly.** A container whose
+  inspect took over 3 s was dropped from the report, and the log cleanup then
+  deleted the logs of a running container.
+- **Container logs restart after a failed Docker inspect** instead of stopping
+  for good.
+- **A node that is still offline is not announced again after a leader
+  restart**, even once its offline notification has been pruned.
+- **Node network traffic and root disk usage come from the host**, not from
+  the agent's own container.
+
+## 2026-11-11
 
 ### Changed
 
@@ -12,6 +121,7 @@
   settings and account stay at a readable width. Grids add columns on 1536px
   and 1920px screens. Below 1024px the sidebar becomes a drawer behind a menu
   button.
+
 - **One dialog and message system.** Every `alert()` and `confirm()` is gone.
   Confirmations use a shared dialog built on the app's modal (focus trap,
   Escape, focus returns to the opener, only the top dialog reacts when two are
@@ -21,10 +131,12 @@
   validate on submit with inline field errors instead of browser bubbles, and
   server errors stay in the dialog instead of being lost. Saving a backup plan
   or S3 endpoint no longer fails silently.
+
 - **No browser defaults left.** Checkboxes, radios, selects, file inputs,
   scrollbars, focus rings, placeholders, selection and disabled states follow
   the design tokens. Icon buttons and status dots get real tooltips. The
   accent is now `#2563EB` so white text on it passes WCAG AA.
+
 - **Loading, empty and error states on every data page.** Nothing shows for the
   first 400ms, then a skeleton; empty lists explain what to do next; load
   errors show the server's reason with a Retry button.
@@ -45,11 +157,13 @@
   `alert_history`, adds `notifications` and `webhook_configs.event_types`, and
   subscribes every existing webhook to all five types, so the webhook that got
   backup errors and alerts before keeps getting them.
+
 - **Backup failures no longer depend on the plan's webhook setting.** Failed and
   partial runs always raise `backup.failed`, also for plans with
   `webhook_mode=off` or no webhook. The plan's webhook only receives the summary
   of successful runs, and only with `webhook_mode=always`. A run cut off by a
   leader restart is now announced as failed too.
+
 - **Pocket ID is the only login.** Passwords, password change, TOTP 2FA and
   recovery codes, the first-boot setup wizard, the Users page and the
   Connect/Disconnect Pocket ID flow are removed. Access and role come from
@@ -68,14 +182,64 @@
   `BPM_TOTP_ISSUER` and `BPM_PASSWORD_LOGIN` are no longer read (a still
   mounted value is ignored). Break-glass: a Pocket ID one-time login link, see
   README.
+
 - **Audit log mode on a new Settings page** (admin only): `auto` (default) keeps
   the full log with two or more users and only the newest 100 entries with a
   single user, `on` keeps everything, `off` records nothing and hides the Audit
   page. A single-user instance trims its existing log to 100 rows at the first
   start. Replaces `BPM_DISABLE_AUDIT`, which is no longer read.
+
 - **The file browser is off unless `BPM_FILEBROWSER=true`** on the leader. All
   file routes answer 403 otherwise, and the Files page explains how to enable
   it.
+
+### Added
+
+- **Backup retention is enforced.** After every run that uploaded at least one
+  archive, each plan keeps the newest `retention_keep` successful archives per
+  node and deletes the older objects from the bucket (batched `DeleteObjects`,
+  1000 keys per call), then their item rows, and a run row once it has no items
+  left. A row is only removed when the provider confirmed the delete (an
+  already missing key counts as deleted), the current run is never touched, an
+  object another row still references (same-day re-runs under a `{date}`
+  template) is kept, and `retention_keep` 0 keeps everything. Prune errors are
+  logged and noted in the run's error summary without failing the backup.
+  Failed runs and items, which hold no object, are removed after 30 days.
+
+- **`bpm retention-dry-run`** prints per plan and node what the prune would
+  delete and keep (items, objects, bytes) against the real DB, without the HTTP
+  server and without deleting anything. `-list-bucket` also lists each plan's
+  key prefix and reports unreferenced objects (never deleted) and rows whose
+  object is missing; it needs `BPM_SECRETS_KEY`. `-db` overrides
+  `$DATA_DIR/labextend.db`.
+
+## 2026-11-10
+
+### Changed
+
+- **Container logs stay bounded.** Lines are pruned per container in batches
+  of 1000 above the `BPM_LOG_MAX_LINES` cap (5000), so the table holds at most
+  cap + 1000 rows per container. Containers that have been stopped (exited or
+  dead) for more than 48 hours are dropped from the container list, and a loop
+  every 15 minutes deletes the log lines of containers that no longer exist
+  (lines younger than one hour are kept, because a new container's first log
+  batch can arrive before its first report). Those orphaned lines were never
+  cleaned up before and made up about 93% of the production database.
+
+### Removed
+
+- **Browser terminal.** The Terminal page, its `/api/nodes/{id}/terminal`
+  route and the agent's PTY commands are gone.
+
+- **File writes.** The file browser only lists directories. Stat, read, write,
+  mkdir, rename, delete, chown (with its dialog), owner suggestion and user
+  lookup are removed from the API, the agent and the proto, as are the
+  never-implemented `DownloadFile`/`UploadFile` RPCs. Migration 0008 drops the
+  owner and read-only columns of `node_paths`, which only ever applied to
+  writes.
+
+- **S3 object delete route** (`POST
+  /api/s3/endpoints/{id}/buckets/{bucket}/delete`), which had no UI.
 
 ### Security
 
@@ -83,6 +247,30 @@
   step of skew either side, so a used code stayed valid for up to 90 seconds.
   The leader now remembers the last accepted step per user and only accepts
   later ones (migration 0009).
+
+### Added
+
+- **Sign in with Pocket ID (OIDC).** Optional login through any OIDC provider:
+  authorization code flow with PKCE, state and nonce. Accounts are connected
+  explicitly under Account (password required), never matched by email; an
+  unknown identity is refused. An OIDC login skips the TOTP step. Configure
+  with `BPM_OIDC_ISSUER`, `BPM_OIDC_CLIENT_ID`, `BPM_OIDC_CLIENT_SECRET` (or
+  `_FILE`) and `EXTERNAL_URL`. `BPM_PASSWORD_LOGIN=false` turns the password
+  form off, but only while OIDC is enabled.
+
+- **Recovery codes: count, regenerate, copy, download.** The account page shows
+  how many recovery codes are left (warning at two or fewer), can replace them
+  with a fresh set (password required, old codes stop working), and offers Copy
+  and Download .txt next to the codes. Its browser alert and confirm dialogs
+  became inline messages and the shared modal.
+
+## 2026-09-04 to 2026-11-06
+
+Everything that was collected under Unreleased before dated sections were
+introduced (commits ff52aa6 to 67f05ac). Individual deploy dates were not
+recorded.
+
+### Security
 
 - **grpc-go 1.66 → 1.82.1** for GO-2026-6061 and GO-2026-4762, both reachable
   through the leader's gRPC server (`govulncheck` traced them from
@@ -182,36 +370,6 @@
   used to answer `200` while leaving the password unchanged.
 
 ### Added
-
-- **Backup retention is enforced.** After every run that uploaded at least one
-  archive, each plan keeps the newest `retention_keep` successful archives per
-  node and deletes the older objects from the bucket (batched `DeleteObjects`,
-  1000 keys per call), then their item rows, and a run row once it has no items
-  left. A row is only removed when the provider confirmed the delete (an
-  already missing key counts as deleted), the current run is never touched, an
-  object another row still references (same-day re-runs under a `{date}`
-  template) is kept, and `retention_keep` 0 keeps everything. Prune errors are
-  logged and noted in the run's error summary without failing the backup.
-  Failed runs and items, which hold no object, are removed after 30 days.
-- **`bpm retention-dry-run`** prints per plan and node what the prune would
-  delete and keep (items, objects, bytes) against the real DB, without the HTTP
-  server and without deleting anything. `-list-bucket` also lists each plan's
-  key prefix and reports unreferenced objects (never deleted) and rows whose
-  object is missing; it needs `BPM_SECRETS_KEY`. `-db` overrides
-  `$DATA_DIR/labextend.db`.
-
-- **Sign in with Pocket ID (OIDC).** Optional login through any OIDC provider:
-  authorization code flow with PKCE, state and nonce. Accounts are connected
-  explicitly under Account (password required), never matched by email; an
-  unknown identity is refused. An OIDC login skips the TOTP step. Configure
-  with `BPM_OIDC_ISSUER`, `BPM_OIDC_CLIENT_ID`, `BPM_OIDC_CLIENT_SECRET` (or
-  `_FILE`) and `EXTERNAL_URL`. `BPM_PASSWORD_LOGIN=false` turns the password
-  form off, but only while OIDC is enabled.
-- **Recovery codes: count, regenerate, copy, download.** The account page shows
-  how many recovery codes are left (warning at two or fewer), can replace them
-  with a fresh set (password required, old codes stop working), and offers Copy
-  and Download .txt next to the codes. Its browser alert and confirm dialogs
-  became inline messages and the shared modal.
 
 - **Web Analytics: page views for every site behind Traefik, without a script
   on the sites.** The leader reads the JSON access log of every container whose
@@ -418,8 +576,6 @@
   truncated instead, leaving the document valid, and a parse failure is logged
   rather than discarded.
 
-### Known gaps
-
 - A file that changes size while it is being archived no longer aborts the
   whole node's backup. The tar header takes its size from the directory walk's
   stat, but the copy was unbounded, so a file that grew in between produced
@@ -437,6 +593,19 @@
   nowhere, because the webhook only fired at the bottom of the run function,
   past those early returns. Six consecutive nightly runs were lost that way in
   August 2026 under a plan explicitly set to `webhook_mode=on-error`.
+
 - Failure notifications now carry the reason. Early failures have no per-node
   results to derive one from, so the embed previously said "failed" and gave the
   reader nothing to act on; it now includes an `Error` field.
+
+### Known gaps
+
+- **`retention_keep` does not delete anything and never has.** `pruneRetention`
+  was a stub returning nil, and the caller only logs on error, so a successful
+  no-op looked exactly like a successful prune while the bucket grew without
+  bound. It now returns an explicit error so the skip is visible in the log, and
+  the plan editor says so. Implementing it means deleting objects from an
+  operator's bucket based on a key template the plan author chose, which needs
+  its own design pass rather than a list-and-delete loop. Fixed on 2026-11-11, see
+  "Backup retention is enforced".
+

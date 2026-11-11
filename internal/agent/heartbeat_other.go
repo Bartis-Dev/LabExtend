@@ -13,7 +13,7 @@ import (
 // cross-compile is possible.
 type hostCollector struct{}
 
-func newHostCollector() *hostCollector { return &hostCollector{} }
+func newHostCollector(string) *hostCollector { return &hostCollector{} }
 
 func (c *hostCollector) Sample() *pb.Heartbeat {
 	return &pb.Heartbeat{CpuCores: uint32(runtime.NumCPU())}

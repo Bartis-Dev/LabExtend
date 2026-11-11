@@ -83,20 +83,25 @@ services:
       BPM_OIDC_USER_GROUP: "${BPM_OIDC_USER_GROUP:-labextend}"
       BPM_OIDC_ADMIN_GROUP: "${BPM_OIDC_ADMIN_GROUP:-labextend-admins}"
       BPM_FILEBROWSER: "${BPM_FILEBROWSER:-false}"
+      # Traefik's address(es) as seen from the leader, i.e. its IPs on the
+      # overlay network it shares with the leader (a CIDR is fine). Only these
+      # peers may set X-Forwarded-For / X-Forwarded-Proto; empty trusts nobody,
+      # so the audit log and the login rate limit see Traefik's IP for every
+      # client. Never include a range clients can reach directly: they could
+      # then forge their IP and reset their own rate limit.
+      BPM_TRUSTED_PROXIES: "${BPM_TRUSTED_PROXIES:-}"
     # Uncomment together with the top-level secrets block once the secret exists:
     #   printf %s "<secret>" | docker secret create labextend_oidc_client_secret -
     # secrets:
     #   - labextend_oidc_client_secret
-    ports:
-      - target: 8080
-        published: 8080
-        protocol: tcp
-        mode: ingress
-      # gRPC :9090 is deliberately NOT published. Agents reach the leader over
-      # labextend-net (LEADER_ADDR: labextend-leader:9090); publishing it on
-      # the ingress mesh put the agent channel on every node's public
-      # interface, guarded by nothing but the shared token. Publish it only
-      # for agents outside the swarm, and then behind mTLS.
+    # No published ports. The UI (:8080) is reached by Traefik over an overlay
+    # network both share: attach the leader to Traefik's network (add it below
+    # and as an external network at the end) and route to port 8080 via
+    # labels. Publishing 8080 on the ingress mesh exposed the panel on every
+    # node's public interface, bypassing Traefik's TLS.
+    # gRPC :9090 is not published either. Agents reach the leader over
+    # labextend-net (LEADER_ADDR: labextend-leader:9090); publish it only for
+    # agents outside the swarm, and then behind mTLS.
     volumes:
       - /:/host:rslave
       - /var/run/docker.sock:/host/var/run/docker.sock:ro
@@ -109,6 +114,12 @@ networks:
   labextend-net:
     driver: overlay
     attachable: true
+    # The agent channel (token, decrypted S3 credentials, logs) crosses this
+    # network between nodes. Encryption wraps that VXLAN traffic in IPsec ESP:
+    # the nodes must allow IP protocol 50 (ESP) between each other, besides
+    # the usual 7946/tcp+udp and 4789/udp, or the overlay silently drops it.
+    driver_opts:
+      encrypted: "true"
 
 # secrets:
 #   labextend_oidc_client_secret:

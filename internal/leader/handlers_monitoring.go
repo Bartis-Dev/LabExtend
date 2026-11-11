@@ -26,6 +26,7 @@ type MonitoringDeps struct {
 	Containers *containerStore
 	Logs       *logStore
 	Swarm      *swarmTopology
+	Audit      *AuditLogger
 }
 
 // ─── nodes ──────────────────────────────────────────────────────────────────
@@ -81,8 +82,8 @@ func (d *MonitoringDeps) GetNode(w http.ResponseWriter, r *http.Request) {
 }
 
 // CleanupNodes deletes node rows that are currently offline (no live agent
-// in the registry) AND whose last_seen is older than `olderThanHours`. With
-// olderThanHours=0 every offline node is removed. Cascading FKs handle the
+// in the registry) AND whose last_seen is older than `olderThanHours`. Removing
+// every offline node needs an explicit {"all": true}. Cascading FKs handle the
 // linked tables (node_metrics, node_metric_buckets, node_metric_samples,
 // node_paths, cronjobs, container_state); container_log_lines and
 // backup_run_items reference the node WITHOUT ON DELETE CASCADE, so we wipe
@@ -92,12 +93,27 @@ func (d *MonitoringDeps) GetNode(w http.ResponseWriter, r *http.Request) {
 //
 // Body: {"older_than_hours": 24}  →  delete offline nodes idle ≥24h
 //
-//	{"older_than_hours": 0}   →  delete ALL offline nodes
+//	{"all": true}             →  delete ALL offline nodes
+//
+// A missing, broken or zero body used to mean "delete all", so any malformed
+// request wiped every offline node's history.
 func (d *MonitoringDeps) CleanupNodes(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		OlderThanHours int `json:"older_than_hours"`
+		OlderThanHours int  `json:"older_than_hours"`
+		All            bool `json:"all"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req) // empty body OK → treated as 0
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if !req.All && req.OlderThanHours < 1 {
+		writeErr(w, http.StatusBadRequest,
+			errors.New(`older_than_hours must be at least 1; send {"all": true} to remove every offline node`))
+		return
+	}
+	if req.All {
+		req.OlderThanHours = 0
+	}
 
 	// Build the set of node_ids that are CURRENTLY OFFLINE (= not in registry)
 	// and match the age cutoff. We do this in Go (not pure SQL) because the
@@ -137,6 +153,8 @@ func (d *MonitoringDeps) CleanupNodes(w http.ResponseWriter, r *http.Request) {
 	rows.Close()
 
 	if len(victims) == 0 {
+		d.Audit.Log(r.Context(), r, "node.cleanup", "node", "",
+			map[string]any{"count": 0, "older_than_hours": req.OlderThanHours, "all": req.All})
 		writeJSON(w, http.StatusOK, map[string]any{"deleted": 0, "ids": []string{}})
 		return
 	}
@@ -184,8 +202,8 @@ func (d *MonitoringDeps) CleanupNodes(w http.ResponseWriter, r *http.Request) {
 		d.Containers.MarkNodeOffline(v.id)
 	}
 
-	// No audit entry: the action is non-destructive for live nodes (only
-	// offline-and-stale rows go).
+	d.Audit.Log(r.Context(), r, "node.cleanup", "node", "",
+		map[string]any{"count": len(ids), "ids": ids, "older_than_hours": req.OlderThanHours, "all": req.All})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"deleted":          len(ids),
 		"ids":              ids,
@@ -481,6 +499,10 @@ func (d *MonitoringDeps) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 	if req.Kind == "" {
 		req.Kind = "discord"
 	}
+	if err := discord.ValidWebhookURL(req.URL); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
 	types, err := eventTypesJSON(req.EventTypes)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -496,6 +518,8 @@ func (d *MonitoringDeps) CreateWebhook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	d.Audit.Log(r.Context(), r, "webhook.create", "webhook", id,
+		map[string]any{"name": req.Name, "url": maskURL(req.URL), "event_types": req.EventTypes})
 	writeJSON(w, http.StatusOK, map[string]any{"id": id})
 }
 
@@ -506,6 +530,13 @@ func (d *MonitoringDeps) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	keepURL := req.URL == "" || isMaskedURL(req.URL)
+	if !keepURL {
+		if err := discord.ValidWebhookURL(req.URL); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+	}
 	types, err := eventTypesJSON(req.EventTypes)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -513,7 +544,7 @@ func (d *MonitoringDeps) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	// If URL is empty or masked-shape, keep the existing one.
 	var res sql.Result
-	if req.URL == "" || isMaskedURL(req.URL) {
+	if keepURL {
 		res, err = d.DB.ExecContext(r.Context(), `
 			UPDATE webhook_configs SET name = ?, kind = ?, enabled = ?, event_types = ?, updated_at = ?
 			WHERE id = ?
@@ -533,6 +564,8 @@ func (d *MonitoringDeps) UpdateWebhook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, errors.New("webhook not found"))
 		return
 	}
+	d.Audit.Log(r.Context(), r, "webhook.update", "webhook", id,
+		map[string]any{"name": req.Name, "url_changed": !keepURL, "enabled": req.Enabled, "event_types": req.EventTypes})
 	writeJSON(w, http.StatusOK, map[string]any{"updated": n})
 }
 
@@ -548,6 +581,7 @@ func (d *MonitoringDeps) DeleteWebhook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, errors.New("webhook not found"))
 		return
 	}
+	d.Audit.Log(r.Context(), r, "webhook.delete", "webhook", id, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": n})
 }
 
@@ -572,7 +606,9 @@ func (d *MonitoringDeps) TestWebhook(w http.ResponseWriter, r *http.Request) {
 			Footer:    &discord.Footer{Text: "LabExtend"},
 		}},
 	}
-	if err := discord.NewClient(url).Post(ctx, p); err != nil {
+	err := discord.NewClient(url).Post(ctx, p)
+	d.Audit.Log(r.Context(), r, "webhook.test", "webhook", id, map[string]any{"ok": err == nil})
+	if err != nil {
 		slog.Warn("webhook test failed", "id", id, "err", err)
 		writeErr(w, http.StatusBadGateway, err)
 		return

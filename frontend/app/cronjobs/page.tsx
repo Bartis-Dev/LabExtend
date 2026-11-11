@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Clock } from 'lucide-react';
 import { api, errText } from '@/lib/api';
 import { AuthShell } from '@/components/auth-shell';
@@ -46,18 +46,25 @@ function Cron() {
   const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
+  // Only the newest load may write: switching the node filter while a slow
+  // list runs must not show the previous node's jobs.
+  const seq = useRef(0);
   const load = async () => {
+    const my = ++seq.current;
     try {
       const n = await api<{ nodes: NodeView[] }>('/api/nodes');
+      if (my !== seq.current) return;
       setNodes(n.nodes ?? []);
       const url = filterNode ? `/api/nodes/${encodeURIComponent(filterNode)}/cronjobs` : '/api/cronjobs';
       const j = await api<{ jobs: CronJob[] }>(url);
+      if (my !== seq.current) return;
       setJobs(j.jobs ?? []);
       setLoadErr(null);
     } catch (e) {
+      if (my !== seq.current) return;
       setLoadErr(errText(e, 'Could not load cron jobs.'));
     } finally {
-      setLoaded(true);
+      if (my === seq.current) setLoaded(true);
     }
   };
   useEffect(() => { load(); }, [filterNode]);
@@ -130,7 +137,7 @@ function Cron() {
     }
   };
 
-  const newJob = () => openEditor({ enabled: true, run_as: 'root' });
+  const newJob = () => openEditor({ enabled: true, run_as: 'root', schedule: '0 3 * * *' });
 
   return (
     <div className="page">
@@ -180,7 +187,7 @@ function Cron() {
                 </td>
               </tr>
             ))}
-            {jobs.length === 0 && (
+            {jobs.length === 0 && !loadErr && (
               <tr><td colSpan={6}>
                 <EmptyState
                   icon={<Clock className="h-6 w-6" />}

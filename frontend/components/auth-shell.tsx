@@ -1,12 +1,13 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Menu } from 'lucide-react';
 import { api, setCSRFToken } from '@/lib/api';
 import type { UserInfo } from '@/lib/types';
 import { Sidebar } from './sidebar';
 import { DelayedSpinner } from './feedback';
+import { FOCUSABLE, trapTab } from './modal';
 
 interface Props {
   children: React.ReactNode;
@@ -27,11 +28,15 @@ export function useMe(): UserInfo {
  * Resolution:
  *   • GET /api/me succeeds → mount shell + page
  *   • 401 / 403            → redirect to /login (real auth failure)
- *   • any other error      → keep retrying every 2s, show "Reconnecting…"
- *                            banner. Does NOT redirect — protects against
- *                            brief leader restarts kicking the user out.
+ *   • any other error      → keep retrying every 2s and show "Reconnecting…"
+ *                            instead of the spinner. Does NOT redirect:
+ *                            protects against brief leader restarts.
+ * Once mounted, a later expired session is caught by api() itself (401 on
+ * any call redirects to /login).
  *
- * Below lg the sidebar becomes a drawer behind a top bar menu button.
+ * Below lg the sidebar becomes a drawer behind a top bar menu button. Only
+ * one Sidebar is mounted at a time, so there is a single NotificationBell
+ * (one SSE connection, no duplicate toasts).
  */
 export function AuthShell({ children }: Props) {
   const [user, setUser] = useState<UserInfo | null>(null);
@@ -73,12 +78,13 @@ export function AuthShell({ children }: Props) {
 
   useEffect(() => { setNavOpen(false); }, [pathname]);
 
+  // Crossing into lg shows the desktop sidebar again, so drop the drawer.
   useEffect(() => {
-    if (!navOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setNavOpen(false); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [navOpen]);
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const onChange = () => { if (mq.matches) setNavOpen(false); };
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   if (!user) {
     return (
@@ -91,16 +97,11 @@ export function AuthShell({ children }: Props) {
   return (
     <MeContext.Provider value={user}>
     <div className="flex h-screen">
-      <div className="hidden lg:flex">
-        <Sidebar user={user} />
-      </div>
-
-      {navOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="fade-in absolute inset-0 bg-zinc-950/40" onClick={() => setNavOpen(false)} aria-hidden />
-          <div className="modal-panel absolute inset-y-0 left-0 flex shadow-xl">
-            <Sidebar user={user} />
-          </div>
+      {navOpen ? (
+        <NavDrawer user={user} onClose={() => setNavOpen(false)} />
+      ) : (
+        <div className="hidden lg:flex">
+          <Sidebar user={user} />
         </div>
       )}
 
@@ -117,14 +118,42 @@ export function AuthShell({ children }: Props) {
           </button>
           <span className="text-sm font-semibold tracking-tight">LabExtend</span>
         </div>
-        {reconnecting && (
-          <div role="status" className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs text-amber-900 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-200">
-            Reconnecting to leader…
-          </div>
-        )}
         {children}
       </main>
     </div>
     </MeContext.Provider>
+  );
+}
+
+// NavDrawer is the mobile sidebar: a modal dialog with focus moved in, Tab
+// trapped, Escape and backdrop to close, and focus back to the opener.
+function NavDrawer({ user, onClose }: { user: UserInfo; onClose: () => void }) {
+  const panel = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    panel.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    return () => { if (opener && document.contains(opener)) opener.focus(); };
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-40 lg:hidden">
+      <div className="fade-in absolute inset-0 bg-zinc-950/40" onClick={onClose} aria-hidden />
+      <div
+        ref={panel}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Navigation"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { e.stopPropagation(); close.current(); return; }
+          if (panel.current) trapTab(e, panel.current);
+        }}
+        className="modal-panel absolute inset-y-0 left-0 flex shadow-xl"
+      >
+        <Sidebar user={user} />
+      </div>
+    </div>
   );
 }

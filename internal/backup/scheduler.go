@@ -96,6 +96,11 @@ func (s *Scheduler) Refresh(ctx context.Context) error {
 		p.Enabled = en == 1
 		current[p.ID] = p
 	}
+	// A listing cut short by an error would look like deleted plans below and
+	// drop their cron entries.
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()

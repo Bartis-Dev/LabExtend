@@ -163,24 +163,37 @@ func TestPruneKeepsNewestAndDropsOld(t *testing.T) {
 
 func TestMarkReadAndUnreadCount(t *testing.T) {
 	db := testDB(t)
-	c := New(db, nil)
-	a := c.Emit(context.Background(), Event{Type: NodeOffline, Severity: SeverityCritical, Title: "a"})
-	c.Emit(context.Background(), Event{Type: NodeOffline, Severity: SeverityCritical, Title: "b"})
-
-	if err := c.MarkRead(context.Background(), a.ID); err != nil {
+	if _, err := db.Exec(`INSERT INTO users (id, email, created_at, updated_at) VALUES (1, 'a@x', 0, 0), (2, 'b@x', 0, 0)`); err != nil {
 		t.Fatal(err)
 	}
-	list, unread, err := c.List(context.Background(), 50)
+	ctx := context.Background()
+	c := New(db, nil)
+	a := c.Emit(ctx, Event{Type: NodeOffline, Severity: SeverityCritical, Title: "a"})
+	c.Emit(ctx, Event{Type: NodeOffline, Severity: SeverityCritical, Title: "b"})
+
+	if err := c.MarkRead(ctx, 1, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	list, unread, err := c.List(ctx, 1, 50)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(list) != 2 || unread != 1 || list[0].Title != "b" || list[1].ReadAt == nil {
 		t.Fatalf("list=%+v unread=%d", list, unread)
 	}
-	if err := c.MarkRead(context.Background(), 0); err != nil {
+	if err := c.MarkRead(ctx, 1, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, unread, _ = c.List(context.Background(), 50); unread != 0 {
+	if _, unread, _ = c.List(ctx, 1, 50); unread != 0 {
 		t.Fatalf("unread after mark all = %d", unread)
+	}
+	// Read state is per user: user 1 marking everything read must not hide
+	// the notifications from user 2.
+	list, unread, err = c.List(ctx, 2, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unread != 2 || list[0].ReadAt != nil || list[1].ReadAt != nil {
+		t.Fatalf("user 2 sees list=%+v unread=%d, want both unread", list, unread)
 	}
 }

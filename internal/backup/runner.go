@@ -138,8 +138,8 @@ func (r *Runner) run(planID, planName, runID, triggeredBy string) {
 	})
 
 	// Resolve scope.
-	targets := r.resolveScope(plan)
-	if len(targets) == 0 {
+	targets, missing := r.resolveScope(ctx, plan)
+	if len(targets) == 0 && len(missing) == 0 {
 		const e = "no agents matched the scope"
 		r.markFinished(ctx, runID, "failed", e, nil)
 		r.notify(ctx, plan, "failed", e, planName, runID, 0, time.Since(started), nil)
@@ -160,8 +160,14 @@ func (r *Runner) run(planID, planName, runID, triggeredBy string) {
 
 	// Fan-out: one goroutine per target, each calls RunBackup on its agent.
 	var wg sync.WaitGroup
-	results := make([]NodeResult, 0, len(targets))
+	results := make([]NodeResult, 0, len(targets)+len(missing))
 	resMu := sync.Mutex{}
+
+	// A known node that is not connected is a node without tonight's backup.
+	// Skipping it silently reported such a run as success.
+	for _, m := range missing {
+		results = append(results, r.failMissingNode(ctx, runID, m))
+	}
 
 	for _, t := range targets {
 		t := t
@@ -250,7 +256,7 @@ func (r *Runner) runOneNode(ctx context.Context, plan plan, target AgentInfo, ru
 	if err != nil {
 		res.Status = "failed"
 		res.Error = err.Error()
-		r.updateRunItem(ctx, itemID, "failed", finishedAt, 0, 0, "", res.Error, s3Key)
+		r.updateRunItem(ctx, itemID, "failed", finishedAt, 0, 0, "", res.Error, s3Key, nil)
 		r.publish("backup.node.finished", map[string]any{
 			"run_id": runID, "node_id": target.ID, "status": "failed", "error": res.Error,
 		})
@@ -258,16 +264,37 @@ func (r *Runner) runOneNode(ctx context.Context, plan plan, target AgentInfo, ru
 	}
 
 	rb := reply.GetRunBackup()
+	// Agents that predate s3_keys report the one object in s3_key.
+	keys := rb.GetS3Keys()
+	if len(keys) == 0 {
+		keys = []string{rb.GetS3Key()}
+	}
 	res.Status = "success"
-	res.S3Key = rb.S3Key
-	res.BytesUploaded = rb.BytesUploaded
-	res.FileCount = rb.FileCount
-	res.SHA256 = rb.Sha256
-	r.updateRunItem(ctx, itemID, "success", finishedAt, rb.BytesUploaded, rb.FileCount, rb.Sha256, "", rb.S3Key)
+	res.S3Key = keys[0]
+	if len(keys) > 1 {
+		res.S3Keys = keys
+	}
+	res.BytesUploaded = rb.GetBytesUploaded()
+	res.FileCount = rb.GetFileCount()
+	res.SHA256 = rb.GetSha256()
+	r.updateRunItem(ctx, itemID, "success", finishedAt, res.BytesUploaded, res.FileCount, res.SHA256, "", keys[0], keys[1:])
 
 	r.publish("backup.node.finished", map[string]any{
 		"run_id": runID, "node_id": target.ID, "status": "success",
-		"bytes": rb.BytesUploaded, "files": rb.FileCount, "key": rb.S3Key,
+		"bytes": res.BytesUploaded, "files": res.FileCount, "key": res.S3Key,
+	})
+	return res
+}
+
+// failMissingNode records a failed item for an in-scope node whose agent is
+// not connected.
+func (r *Runner) failMissingNode(ctx context.Context, runID string, n AgentInfo) NodeResult {
+	now := time.Now().Unix()
+	res := NodeResult{NodeID: n.ID, Status: "failed", Error: "agent not connected (node " + n.Hostname + " is offline)"}
+	itemID := r.insertRunItem(ctx, runID, n.ID, now)
+	r.updateRunItem(ctx, itemID, "failed", now, 0, 0, "", res.Error, "", nil)
+	r.publish("backup.node.finished", map[string]any{
+		"run_id": runID, "node_id": n.ID, "status": "failed", "error": res.Error,
 	})
 	return res
 }
@@ -348,8 +375,50 @@ func (r *Runner) loadS3Endpoint(ctx context.Context, id string) (s3EndpointCfg, 
 	return c, nil
 }
 
-func (r *Runner) resolveScope(p plan) []AgentInfo {
-	all := r.agents.ListAgents()
+// resolveScope returns the connected agents in the plan's scope, and the
+// nodes known from the nodes table that match the scope but are not connected.
+func (r *Runner) resolveScope(ctx context.Context, p plan) (targets, missing []AgentInfo) {
+	targets = matchScope(p, r.agents.ListAgents())
+	connected := make(map[string]bool, len(targets))
+	for _, a := range r.agents.ListAgents() {
+		connected[a.ID] = true
+	}
+	for _, n := range matchScope(p, r.knownNodes(ctx)) {
+		if !connected[n.ID] {
+			missing = append(missing, n)
+		}
+	}
+	return targets, missing
+}
+
+// knownNodes lists every node the leader has ever seen, connected or not.
+func (r *Runner) knownNodes(ctx context.Context) []AgentInfo {
+	rows, err := r.db.QueryContext(ctx, `SELECT id, hostname, COALESCE(labels_json, '{}') FROM nodes`)
+	if err != nil {
+		slog.Warn("backup: listing known nodes failed, offline nodes are not reported", "err", err)
+		return nil
+	}
+	defer rows.Close()
+	var out []AgentInfo
+	for rows.Next() {
+		var n AgentInfo
+		var host sql.NullString
+		var labels string
+		if err := rows.Scan(&n.ID, &host, &labels); err != nil {
+			slog.Warn("backup: scanning known node failed", "err", err)
+			continue
+		}
+		n.Hostname = host.String
+		_ = json.Unmarshal([]byte(labels), &n.Labels)
+		out = append(out, n)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("backup: listing known nodes failed", "err", err)
+	}
+	return out
+}
+
+func matchScope(p plan, all []AgentInfo) []AgentInfo {
 	switch p.ScopeType {
 	case "all":
 		return all
@@ -399,13 +468,17 @@ func (r *Runner) insertRunItem(ctx context.Context, runID, nodeID string, starte
 }
 
 func (r *Runner) updateRunItem(ctx context.Context, itemID int64, status string, finishedAt int64,
-	bytes uint64, files uint32, sha string, errMsg, s3Key string) {
+	bytes uint64, files uint32, sha string, errMsg, s3Key string, extraKeys []string) {
+	if extraKeys == nil {
+		extraKeys = []string{}
+	}
+	extra, _ := json.Marshal(extraKeys)
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE backup_run_items
 		   SET status = ?, finished_at = ?, bytes_uploaded = ?, file_count = ?,
-		       sha256 = ?, error = ?, s3_key = ?
+		       sha256 = ?, error = ?, s3_key = ?, extra_s3_keys = ?
 		 WHERE id = ?
-	`, status, finishedAt, bytes, files, sha, errMsg, s3Key, itemID)
+	`, status, finishedAt, bytes, files, sha, errMsg, s3Key, string(extra), itemID)
 	if err != nil {
 		slog.Warn("backup: update item failed", "err", err)
 	}
@@ -457,10 +530,12 @@ func (r *Runner) markFinished(ctx context.Context, runID, status, errSummary str
 func (r *Runner) ReconcileStaleRuns(ctx context.Context) {
 	type stale struct{ runID, planName string }
 	var runs []stale
+	// Only runs that started before this call: the scheduler may already have
+	// started one of this leader's own.
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT br.id, COALESCE(bp.name, br.plan_id)
 		  FROM backup_runs br LEFT JOIN backup_plans bp ON bp.id = br.plan_id
-		 WHERE br.status IN ('pending', 'running')`)
+		 WHERE br.status IN ('pending', 'running') AND br.started_at <= ?`, time.Now().Unix())
 	if err != nil {
 		slog.Warn("backup: listing stale runs failed", "err", err)
 		return
@@ -476,22 +551,27 @@ func (r *Runner) ReconcileStaleRuns(ctx context.Context) {
 		return
 	}
 
-	res, err := r.db.ExecContext(ctx, `
-		UPDATE backup_runs
-		   SET status = 'failed',
-		       finished_at = ?,
-		       error_summary = 'leader restarted while the run was in flight'
-		 WHERE status IN ('pending', 'running')
-	`, time.Now().Unix())
-	if err != nil {
-		slog.Warn("backup: reconciling stale runs failed", "err", err)
-		return
-	}
-	if n, _ := res.RowsAffected(); n > 0 {
-		slog.Warn("backup: marked stale in-flight runs as failed", "count", n)
-	}
+	var failed int
 	for _, s := range runs {
+		res, err := r.db.ExecContext(ctx, `
+			UPDATE backup_runs
+			   SET status = 'failed',
+			       finished_at = ?,
+			       error_summary = 'leader restarted while the run was in flight'
+			 WHERE id = ? AND status IN ('pending', 'running')
+		`, time.Now().Unix(), s.runID)
+		if err != nil {
+			slog.Warn("backup: reconciling stale run failed", "run", s.runID, "err", err)
+			continue
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			continue
+		}
+		failed++
 		r.emitFailed(ctx, s.planName, s.runID, "failed", "leader restarted while the run was in flight", nil)
+	}
+	if failed > 0 {
+		slog.Warn("backup: marked stale in-flight runs as failed", "count", failed)
 	}
 }
 
@@ -678,13 +758,14 @@ type RunResult struct {
 
 // NodeResult is one row of the per-node outcome for a run.
 type NodeResult struct {
-	NodeID        string `json:"node_id"`
-	Status        string `json:"status"`
-	S3Key         string `json:"s3_key,omitempty"`
-	BytesUploaded uint64 `json:"bytes_uploaded"`
-	FileCount     uint32 `json:"file_count"`
-	SHA256        string `json:"sha256,omitempty"`
-	Error         string `json:"error,omitempty"`
+	NodeID        string   `json:"node_id"`
+	Status        string   `json:"status"`
+	S3Key         string   `json:"s3_key,omitempty"`
+	S3Keys        []string `json:"s3_keys,omitempty"` // every object, when there are several
+	BytesUploaded uint64   `json:"bytes_uploaded"`
+	FileCount     uint32   `json:"file_count"`
+	SHA256        string   `json:"sha256,omitempty"`
+	Error         string   `json:"error,omitempty"`
 }
 
 // ─── AES-GCM decrypt (mirrors handlers_s3.encrypt format) ──────────────────

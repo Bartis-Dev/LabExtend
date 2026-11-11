@@ -3,6 +3,7 @@ package leader
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -36,10 +37,18 @@ type eventWatcher struct {
 	// announced although its agent reconnects seconds later.
 	started time.Time
 
-	seeded  bool
-	nodes   map[string]*nodePresence
-	crashed map[string]bool // container key -> crashed_loop at the last tick
+	// Each only after it succeeded: a failed first container listing used to
+	// count as seeded, and the next tick announced every existing crash loop.
+	nodesSeeded      bool
+	containersSeeded bool
+	nodes            map[string]*nodePresence
+	crashed          map[string]bool // crash key -> crashed_loop at the last tick
 }
+
+// downStateKey holds the nodes announced offline (id -> down since, unix) in
+// system_state. The notification prune may delete the offline event of a node
+// that is still down, so notifications alone cannot restore that state.
+const downStateKey = "events.down_nodes"
 
 type nodePresence struct {
 	down        bool
@@ -74,7 +83,6 @@ func (w *eventWatcher) tick(ctx context.Context) {
 		slog.Warn("events: checking nodes failed", "err", err)
 	}
 	w.checkContainers(ctx, hosts)
-	w.seeded = true
 }
 
 type knownNode struct {
@@ -98,14 +106,30 @@ func (w *eventWatcher) checkNodes(ctx context.Context) (map[string]string, error
 		nodes = append(nodes, n)
 	}
 	_ = rows.Close()
-
-	if !w.seeded {
-		w.seedNodes(ctx)
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("load nodes: %w", err)
 	}
-	now := w.now()
+
 	hosts := make(map[string]string, len(nodes))
 	for _, n := range nodes {
 		hosts[n.id] = n.hostname
+	}
+	if !w.nodesSeeded {
+		// Judging presence without the previous leader's state would repeat
+		// its offline events or swallow recoveries; retry on the next tick.
+		if err := w.seedNodes(ctx); err != nil {
+			return hosts, fmt.Errorf("restore node state: %w", err)
+		}
+		w.nodesSeeded = true
+	}
+	now := w.now()
+	changed := false
+	defer func() {
+		if changed {
+			w.saveDown(ctx)
+		}
+	}()
+	for _, n := range nodes {
 		st := w.nodes[n.id]
 		if st == nil {
 			st = &nodePresence{}
@@ -119,6 +143,7 @@ func (w *eventWatcher) checkNodes(ctx context.Context) (map[string]string, error
 			}
 			if st.down && now.Sub(st.onlineSince) >= onlineAfter {
 				st.down = false
+				changed = true
 				w.emitOnline(ctx, n, now.Sub(st.downSince))
 			}
 			continue
@@ -133,26 +158,44 @@ func (w *eventWatcher) checkNodes(ctx context.Context) (map[string]string, error
 		}
 		if gone := now.Sub(seen); gone >= offlineAfter {
 			st.down, st.downSince = true, seen
+			changed = true
 			w.emitOffline(ctx, n, gone)
 		}
 	}
 	for id := range w.nodes {
 		if _, ok := hosts[id]; !ok {
 			delete(w.nodes, id) // removed via node cleanup
+			changed = true
 		}
 	}
 	return hosts, nil
 }
 
 // seedNodes restores which nodes were last announced offline, so a leader
-// restart neither repeats an offline event nor swallows the recovery.
-func (w *eventWatcher) seedNodes(ctx context.Context) {
+// restart neither repeats an offline event nor swallows the recovery. The
+// notifications are only the fallback for a leader that never saved the
+// state (the first start after the upgrade).
+func (w *eventWatcher) seedNodes(ctx context.Context) error {
+	var raw string
+	err := w.db.QueryRowContext(ctx, `SELECT value FROM system_state WHERE key = ?`, downStateKey).Scan(&raw)
+	if err == nil {
+		var down map[string]int64
+		if err := json.Unmarshal([]byte(raw), &down); err != nil {
+			return fmt.Errorf("decode %s: %w", downStateKey, err)
+		}
+		for id, since := range down {
+			w.nodes[id] = &nodePresence{down: true, downSince: time.Unix(since, 0)}
+		}
+		return nil
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
 	rows, err := w.db.QueryContext(ctx, `
 		SELECT json_extract(details_json, '$.node_id'), type, ts FROM notifications
 		 WHERE type IN (?, ?) ORDER BY id`, notify.NodeOffline, notify.NodeOnline)
 	if err != nil {
-		slog.Warn("events: restoring node state failed", "err", err)
-		return
+		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -163,6 +206,23 @@ func (w *eventWatcher) seedNodes(ctx context.Context) {
 			continue
 		}
 		w.nodes[id.String] = &nodePresence{down: typ == notify.NodeOffline, downSince: time.Unix(ts, 0)}
+	}
+	return rows.Err()
+}
+
+// saveDown persists the nodes currently announced offline.
+func (w *eventWatcher) saveDown(ctx context.Context) {
+	down := map[string]int64{}
+	for id, st := range w.nodes {
+		if st.down {
+			down[id] = st.downSince.Unix()
+		}
+	}
+	b, _ := json.Marshal(down)
+	if _, err := w.db.ExecContext(ctx, `
+		INSERT INTO system_state (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, downStateKey, string(b)); err != nil {
+		slog.Warn("events: saving node state failed", "err", err)
 	}
 }
 
@@ -187,9 +247,20 @@ func (w *eventWatcher) emitOnline(ctx context.Context, n knownNode, down time.Du
 	})
 }
 
-// checkContainers emits once when a container's crashed_loop flips to true.
-// The first tick only records the current state: those loops were announced
-// by the leader that ran before this one.
+// crashKey groups the task containers of one Swarm service on one node:
+// Swarm replaces a crashing task with a new container every few seconds, and
+// each new id would otherwise be a crash loop of its own.
+func crashKey(v *ContainerView) string {
+	if svc := v.Labels["com.docker.swarm.service.id"]; svc != "" {
+		return key(v.NodeID, "service:"+svc)
+	}
+	return key(v.NodeID, v.ContainerID)
+}
+
+// checkContainers emits once when a container's (or Swarm service's)
+// crashed_loop flips to true. The first successful listing only records the
+// current state: those loops were announced by the leader that ran before
+// this one.
 func (w *eventWatcher) checkContainers(ctx context.Context, hosts map[string]string) {
 	if w.cnts == nil {
 		return
@@ -199,13 +270,22 @@ func (w *eventWatcher) checkContainers(ctx context.Context, hosts map[string]str
 		slog.Warn("events: loading containers failed", "err", err)
 		return
 	}
+	seeded := w.containersSeeded
+	w.containersSeeded = true
 	seen := make(map[string]bool, len(views))
+	crashedNow := map[string]*ContainerView{}
 	for _, v := range views {
-		k := key(v.NodeID, v.ContainerID)
+		k := crashKey(v)
 		seen[k] = true
+		if v.CrashedLoop && crashedNow[k] == nil {
+			crashedNow[k] = v
+		}
+	}
+	for k := range seen {
+		v := crashedNow[k]
 		was := w.crashed[k]
-		w.crashed[k] = v.CrashedLoop
-		if !v.CrashedLoop || was || !w.seeded {
+		w.crashed[k] = v != nil
+		if v == nil || was || !seeded {
 			continue
 		}
 		host := hosts[v.NodeID]
@@ -215,7 +295,7 @@ func (w *eventWatcher) checkContainers(ctx context.Context, hosts map[string]str
 		w.events.Emit(ctx, notify.Event{
 			Type: notify.ContainerCrashloop, Severity: notify.SeverityCritical,
 			Title: "Container crash-looping · " + v.Name,
-			Body: fmt.Sprintf("%s (%s) on %s restarted %d times in the last minute.",
+			Body: fmt.Sprintf("%s (%s) on %s restarted %d times in the last few minutes.",
 				v.Name, v.Image, host, v.RecentRestarts),
 			Link: "/container?node=" + url.QueryEscape(v.NodeID) + "&id=" + url.QueryEscape(v.ContainerID),
 			Details: map[string]any{

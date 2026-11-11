@@ -18,25 +18,26 @@ import { Tooltip } from './tooltip';
 const NAV_ITEM_IDLE =
   'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-zinc-700 transition hover:bg-zinc-100 hover:text-zinc-900 active:bg-zinc-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-zinc-100 dark:active:bg-zinc-800';
 
+// admin: page and its API are admin-only on the backend, so non-admins never see the link.
 const NAV = [
   { href: '/nodes',      label: 'Nodes',     icon: Server },
   { href: '/containers', label: 'Containers',icon: Boxes },
   { href: '/analytics',  label: 'Web Analytics', icon: ChartColumn },
-  { href: '/webhooks',   label: 'Webhooks',  icon: Webhook },
-  { href: '/files',      label: 'Files',     icon: FolderOpen },
-  { href: '/cronjobs',   label: 'Cron',      icon: Clock },
-  { href: '/s3',         label: 'S3',        icon: HardDrive },
-  { href: '/backups',    label: 'Backups',   icon: Database },
-  { href: '/audit',      label: 'Audit',     icon: ScrollText },
-  { href: '/settings',   label: 'Settings',  icon: Settings },
+  { href: '/webhooks',   label: 'Webhooks',  icon: Webhook,    admin: true },
+  { href: '/files',      label: 'Files',     icon: FolderOpen, admin: true },
+  { href: '/cronjobs',   label: 'Cron',      icon: Clock,      admin: true },
+  { href: '/s3',         label: 'S3',        icon: HardDrive,  admin: true },
+  { href: '/backups',    label: 'Backups',   icon: Database,   admin: true },
+  { href: '/audit',      label: 'Audit',     icon: ScrollText, admin: true },
+  { href: '/settings',   label: 'Settings',  icon: Settings,   admin: true },
   { href: '/account',    label: 'Account',   icon: UserCircle },
 ];
 
 export function Sidebar({ user }: { user: UserInfo }) {
   const pathname = usePathname();
   const nav = NAV.filter((item) =>
-    (item.href !== '/audit' || user.audit_enabled) &&
-    (item.href !== '/settings' || user.is_admin));
+    (!item.admin || user.is_admin) &&
+    (item.href !== '/audit' || user.audit_enabled));
   return (
     <aside className="flex h-screen w-64 flex-col overflow-y-auto border-r border-zinc-200 bg-white px-3 py-5 dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex items-start justify-between gap-2 px-2 pb-4">
@@ -68,7 +69,7 @@ export function Sidebar({ user }: { user: UserInfo }) {
         })}
       </nav>
 
-      <RestartPortainerButton />
+      {user.is_admin && <RestartPortainerButton />}
 
       <button
         type="button"

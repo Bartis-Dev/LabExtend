@@ -27,6 +27,7 @@ func realIP(trusted []string) func(http.Handler) http.Handler {
 			if !peerIsTrusted(r.RemoteAddr, prefixes) {
 				r.Header.Del("X-Forwarded-For")
 				r.Header.Del("X-Real-IP")
+				r.Header.Del("X-Forwarded-Proto")
 				next.ServeHTTP(w, r)
 				return
 			}

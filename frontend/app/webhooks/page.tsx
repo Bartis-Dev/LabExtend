@@ -28,6 +28,19 @@ const EVENTS: { type: EventType; label: string; hint: string }[] = [
 ];
 const ALL_EVENTS = EVENTS.map((e) => e.type);
 
+const DISCORD_HOSTS = ['discord.com', 'discordapp.com', 'ptb.discord.com', 'canary.discord.com'];
+
+// webhookURLError mirrors the leader's discord.ValidWebhookURL, so a bad URL
+// is caught in the form instead of as a 400 after Save.
+function webhookURLError(raw: string): string | null {
+  let u: URL;
+  try { u = new URL(raw.trim()); } catch { return 'This is not a valid URL.'; }
+  if (u.protocol !== 'https:') return 'The URL must start with https://.';
+  if (!DISCORD_HOSTS.includes(u.host)) return 'The URL must point to discord.com (or discordapp.com, ptb.discord.com, canary.discord.com).';
+  if (u.username || u.password || !u.pathname.startsWith('/api/webhooks/')) return 'Use a Discord webhook URL: https://discord.com/api/webhooks/...';
+  return null;
+}
+
 function Webhooks() {
   const [items, setItems] = useState<WebhookConfig[]>([]);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -37,6 +50,9 @@ function Webhooks() {
   const [testing, setTesting] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
+  // The masked URL the edited webhook came with; sending it back unchanged
+  // keeps the stored URL, anything else is a new URL and gets validated.
+  const [origURL, setOrigURL] = useState('');
 
   const load = async () => {
     try {
@@ -57,15 +73,20 @@ function Webhooks() {
   const save = async (w: Partial<WebhookConfig>) => {
     const errs: Record<string, string> = {};
     if (!w.name?.trim()) errs.name = 'Give the webhook a name.';
-    if (!w.id && !w.url?.trim()) errs.url = 'Paste the webhook URL.';
-    else if (w.url && !w.id && !/^https:\/\//.test(w.url.trim())) errs.url = 'The URL must start with https://.';
+    const url = w.url?.trim() ?? '';
+    const urlChanged = !w.id || (url !== '' && url !== origURL);
+    if (!w.id && !url) errs.url = 'Paste the webhook URL.';
+    else if (urlChanged) {
+      const ue = webhookURLError(url);
+      if (ue) errs.url = ue;
+    }
     setFieldErr(errs);
     if (Object.keys(errs).length) return;
 
     const payload = {
       name: w.name ?? '',
       kind: w.kind ?? 'discord',
-      url: w.url ?? '',
+      url: url,
       enabled: w.enabled ?? true,
       event_types: w.event_types ?? [],
     };
@@ -110,7 +131,7 @@ function Webhooks() {
     }
   };
 
-  const newWebhook = () => { setFieldErr({}); setSaveErr(null); setEditing({ enabled: true, kind: 'discord', event_types: ALL_EVENTS }); };
+  const newWebhook = () => { setFieldErr({}); setSaveErr(null); setOrigURL(''); setEditing({ enabled: true, kind: 'discord', event_types: ALL_EVENTS }); };
 
   const toggleEvent = (t: EventType) => {
     if (!editing) return;
@@ -157,7 +178,7 @@ function Webhooks() {
                 <td className="td"><span className={w.enabled ? 'badge-green' : 'badge-zinc'}>{w.enabled ? 'enabled' : 'disabled'}</span></td>
                 <td className="td whitespace-nowrap text-right">
                   <button onClick={() => test(w)} disabled={testing === w.id} className="btn-ghost btn-sm">{testing === w.id ? 'Sending…' : 'Send test'}</button>
-                  <button onClick={() => { setFieldErr({}); setSaveErr(null); setEditing(w); }} className="btn-ghost btn-sm">Edit</button>
+                  <button onClick={() => { setFieldErr({}); setSaveErr(null); setOrigURL(w.url ?? ''); setEditing(w); }} className="btn-ghost btn-sm">Edit</button>
                   <button onClick={() => remove(w)} className="btn-ghost-danger btn-sm">Delete</button>
                 </td>
               </tr>
@@ -200,7 +221,11 @@ function Webhooks() {
               </select>
             </Field>
             <Field label={<>URL {editing.id && '(leave masked to keep)'}</>} error={fieldErr.url}>
-              <input className={inputCls(fieldErr.url, 'font-mono text-xs')} placeholder="https://discord.com/api/webhooks/…/…" value={editing.url ?? ''} onChange={(e) => setEditing({ ...editing, url: e.target.value })} />
+              <input className={inputCls(fieldErr.url, 'font-mono text-xs')} placeholder="https://discord.com/api/webhooks/…/…" value={editing.url ?? ''} onChange={(e) => {
+                setEditing({ ...editing, url: e.target.value });
+                // Clear a stale error as soon as the URL is fixed.
+                if (fieldErr.url && !webhookURLError(e.target.value)) setFieldErr((f) => ({ ...f, url: '' }));
+              }} />
             </Field>
             <fieldset>
               <legend className="label">Events</legend>

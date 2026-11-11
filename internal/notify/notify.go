@@ -233,11 +233,15 @@ func (c *Center) prune(ctx context.Context, now time.Time) {
 	}
 }
 
-// List returns the newest notifications and the number of unread ones.
-func (c *Center) List(ctx context.Context, limit int) ([]Notification, int, error) {
+// List returns the newest notifications and the number of unread ones, with
+// read state as userID sees it.
+func (c *Center) List(ctx context.Context, userID int64, limit int) ([]Notification, int, error) {
 	rows, err := c.db.QueryContext(ctx, `
-		SELECT id, ts, type, severity, title, body, link, details_json, read_at, delivery_error
-		  FROM notifications ORDER BY id DESC LIMIT ?`, limit)
+		SELECT n.id, n.ts, n.type, n.severity, n.title, n.body, n.link, n.details_json,
+		       r.read_at, n.delivery_error
+		  FROM notifications n
+		  LEFT JOIN notification_reads r ON r.notification_id = n.id AND r.user_id = ?
+		 ORDER BY n.id DESC LIMIT ?`, userID, limit)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list notifications: %w", err)
 	}
@@ -262,24 +266,29 @@ func (c *Center) List(ctx context.Context, limit int) ([]Notification, int, erro
 		return nil, 0, fmt.Errorf("list notifications: %w", err)
 	}
 	var unread int
-	if err := c.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM notifications WHERE read_at IS NULL`).Scan(&unread); err != nil {
+	if err := c.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM notifications n
+		 WHERE NOT EXISTS (SELECT 1 FROM notification_reads r
+		                    WHERE r.notification_id = n.id AND r.user_id = ?)`, userID).Scan(&unread); err != nil {
 		return nil, 0, fmt.Errorf("count unread: %w", err)
 	}
 	return out, unread, nil
 }
 
-// MarkRead marks one notification read, or all of them when id is 0.
-func (c *Center) MarkRead(ctx context.Context, id int64) error {
-	q, args := `UPDATE notifications SET read_at = ? WHERE read_at IS NULL`, []any{time.Now().Unix()}
+// MarkRead marks one notification read for userID, or all of them when id
+// is 0. Other users keep their own read state.
+func (c *Center) MarkRead(ctx context.Context, userID, id int64) error {
+	q := `INSERT OR IGNORE INTO notification_reads (notification_id, user_id, read_at)
+	      SELECT id, ?, ? FROM notifications`
+	args := []any{userID, time.Now().Unix()}
 	if id != 0 {
-		q += ` AND id = ?`
+		q += ` WHERE id = ?`
 		args = append(args, id)
 	}
 	if _, err := c.db.ExecContext(ctx, q, args...); err != nil {
 		return fmt.Errorf("mark read: %w", err)
 	}
-	c.publish("notification.read", map[string]any{"id": id})
+	c.publish("notification.read", map[string]any{"id": id, "user_id": userID})
 	return nil
 }
 

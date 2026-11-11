@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api, errText } from '@/lib/api';
@@ -58,8 +58,12 @@ function NodeDetail() {
     } catch {/* */}
   }, [id]);
 
+  // Only the newest series request may write: a slow 7d answer must not
+  // land after the user switched back to 5m.
+  const seriesSeq = useRef(0);
   const loadSeries = useCallback(async (w: Window) => {
     if (!id) return;
+    const my = ++seriesSeq.current;
     const cfg = WINDOWS.find((x) => x.v === w)!;
     const now = Date.now();
     try {
@@ -68,16 +72,16 @@ function NodeDetail() {
         const r = await api<{ samples: MetricsBucket[] }>(
           `/api/nodes/${encodeURIComponent(id)}/samples?since_ms=${sinceMs}&until_ms=${now}`
         );
-        setBuckets(downsample(r.samples ?? [], cfg.stepSec));
+        if (my === seriesSeq.current) setBuckets(downsample(r.samples ?? [], cfg.stepSec));
       } else {
         const sinceSec = Math.floor(now / 1000) - cfg.spanSec;
         const untilSec = Math.floor(now / 1000);
         const r = await api<{ buckets: MetricsBucket[] }>(
           `/api/nodes/${encodeURIComponent(id)}/history?since=${sinceSec}&until=${untilSec}`
         );
-        setBuckets(downsample(r.buckets ?? [], cfg.stepSec));
+        if (my === seriesSeq.current) setBuckets(downsample(r.buckets ?? [], cfg.stepSec));
       }
-    } catch { setBuckets([]); }
+    } catch { if (my === seriesSeq.current) setBuckets([]); }
   }, [id]);
 
   useEffect(() => {

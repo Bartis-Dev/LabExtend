@@ -39,19 +39,27 @@ func (c *AgentConn) Request(ctx context.Context, cmd *pb.Command) (*pb.CommandRe
 		return nil, fmt.Errorf("send: %w", err)
 	}
 
+	var reply *pb.AgentMessage
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case reply := <-ch:
-		res := reply.GetResult()
-		if res == nil {
-			return nil, errors.New("agent reply was not a CommandResult")
+	case <-c.gone:
+		// The result may have landed just before the stream ended.
+		select {
+		case reply = <-ch:
+		default:
+			return nil, fmt.Errorf("agent %s disconnected before replying", c.ID)
 		}
-		if !res.Ok {
-			return res, fmt.Errorf("agent: %s", res.Error)
-		}
-		return res, nil
+	case reply = <-ch:
 	}
+	res := reply.GetResult()
+	if res == nil {
+		return nil, errors.New("agent reply was not a CommandResult")
+	}
+	if !res.Ok {
+		return res, fmt.Errorf("agent: %s", res.Error)
+	}
+	return res, nil
 }
 
 // RequestWithDefault is a convenience: 30s timeout if ctx has no deadline.

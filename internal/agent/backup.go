@@ -24,6 +24,7 @@ import (
 // backupSession tracks one in-flight RunBackup so CancelBackup can target it.
 type backupSession struct {
 	cancel context.CancelFunc
+	planID string
 }
 
 var (
@@ -49,7 +50,17 @@ func (h *Handler) RunBackup(ctx context.Context, req *pb.RunBackupReq) (*pb.RunB
 	// Per-run context so CancelBackup can cancel just this one.
 	runCtx, cancel := context.WithCancel(ctx)
 	backupMu.Lock()
-	backupRuns[req.RunId] = &backupSession{cancel: cancel}
+	// Commands run concurrently now. Two runs of one plan would stream two
+	// archives into the same key; the leader prevents that on its side, but a
+	// leader restart forgets the run that is still going here.
+	for id, s := range backupRuns {
+		if req.PlanId != "" && s.planID == req.PlanId {
+			backupMu.Unlock()
+			cancel()
+			return nil, fmt.Errorf("plan %s already running on this node (run %s)", req.PlanId, id)
+		}
+	}
+	backupRuns[req.RunId] = &backupSession{cancel: cancel, planID: req.PlanId}
 	backupMu.Unlock()
 	defer func() {
 		backupMu.Lock()
@@ -265,9 +276,29 @@ func tarOneRoot(
 	}
 	parent := filepath.Dir(root)
 
+	// Entries left out of the archive on purpose, logged once per root.
+	var skipped int
+	defer func() {
+		if skipped > 0 {
+			slog.Info("backup: skipped entries", "run_id", runID, "root", root, "skipped", skipped)
+		}
+	}()
+
 	return filepath.Walk(root, func(p string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
+			// Gone between readdir and lstat: Postgres temp and WAL files do
+			// that all the time, and it is no reason to abandon the node.
+			if os.IsNotExist(walkErr) {
+				skipped++
+				return nil
+			}
 			return walkErr
+		}
+		// Sockets have no tar representation (FileInfoHeader fails) and
+		// devices or fifos carry no data worth restoring from a volume.
+		if !info.Mode().IsRegular() && !info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+			skipped++
+			return nil
 		}
 		if err := ctx.Err(); err != nil {
 			return err

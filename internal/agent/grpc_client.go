@@ -213,13 +213,19 @@ func (c *Client) recvLoop(
 			})
 
 		case *pb.LeaderMessage_Command:
-			result := c.handler.HandleCommand(ctx, k.Command)
-			if err := send(&pb.AgentMessage{
-				RequestId: msg.RequestId,
-				Kind:      &pb.AgentMessage_Result{Result: result},
-			}); err != nil {
-				return fmt.Errorf("send result: %w", err)
-			}
+			// Each command in its own goroutine: run inline, an hour-long backup
+			// blocked every other command (listings, cron apply, its own cancel).
+			// send is serialized; a failed send means the stream is gone, which
+			// Recv reports on its own.
+			go func(id string, cmd *pb.Command) {
+				result := c.handler.HandleCommand(ctx, cmd)
+				if err := send(&pb.AgentMessage{
+					RequestId: id,
+					Kind:      &pb.AgentMessage_Result{Result: result},
+				}); err != nil {
+					slog.Warn("agent: send result failed", "request_id", id, "err", err)
+				}
+			}(msg.RequestId, k.Command)
 
 		case *pb.LeaderMessage_Welcome:
 			// Stray re-Welcome inside the stream — log + ignore.

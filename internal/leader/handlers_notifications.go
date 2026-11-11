@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Bartis-Dev/LabExtend/internal/auth"
 	"github.com/Bartis-Dev/LabExtend/internal/notify"
 )
 
@@ -20,7 +21,7 @@ func listNotifications(c *notify.Center) http.HandlerFunc {
 				limit = n
 			}
 		}
-		list, unread, err := c.List(r.Context(), limit)
+		list, unread, err := c.List(r.Context(), sessionUserID(r), limit)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
@@ -29,7 +30,8 @@ func listNotifications(c *notify.Center) http.HandlerFunc {
 	}
 }
 
-// markNotificationsRead marks {id} read, or all of them on /read-all.
+// markNotificationsRead marks {id} read, or all of them on /read-all, for the
+// calling user only.
 func markNotificationsRead(c *notify.Center) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var id int64
@@ -41,10 +43,19 @@ func markNotificationsRead(c *notify.Center) http.HandlerFunc {
 			}
 			id = n
 		}
-		if err := c.MarkRead(r.Context(), id); err != nil {
+		if err := c.MarkRead(r.Context(), sessionUserID(r), id); err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	}
+}
+
+// sessionUserID is the signed-in user; requireAuth guarantees a session.
+func sessionUserID(r *http.Request) int64 {
+	sess, _ := r.Context().Value(authCtxKey{}).(*auth.Session)
+	if sess == nil {
+		return 0
+	}
+	return sess.UserID
 }

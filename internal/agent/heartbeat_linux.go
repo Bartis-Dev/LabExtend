@@ -20,11 +20,17 @@ import (
 type hostCollector struct {
 	mu sync.Mutex
 
+	// prefix is where the host's / is mounted (hostPrefix). /proc/stat,
+	// meminfo and diskstats are host-wide in any namespace, but /proc/net/dev
+	// and statfs("/") answer for the agent container's own netns and overlay
+	// root, so those two are read through the host mount.
+	prefix string
+
 	prevCPU      cpuTotals
 	prevSampleAt time.Time
 }
 
-func newHostCollector() *hostCollector { return &hostCollector{} }
+func newHostCollector(prefix string) *hostCollector { return &hostCollector{prefix: prefix} }
 
 // Sample reads current values and computes deltas against the previous call.
 // On the very first call the rate fields will be 0 because there is no
@@ -66,7 +72,7 @@ func (c *hostCollector) Sample() *pb.Heartbeat {
 	}
 
 	var st syscall.Statfs_t
-	if err := syscall.Statfs("/", &st); err == nil {
+	if err := statfsFirst(&st, c.prefix+"/", "/"); err == nil {
 		hb.DiskTotalBytes = st.Blocks * uint64(st.Bsize)
 		hb.DiskUsedBytes = (st.Blocks - st.Bavail) * uint64(st.Bsize)
 	}
@@ -85,7 +91,9 @@ func (c *hostCollector) Sample() *pb.Heartbeat {
 		c.prevCPU = cur
 	}
 
-	if rx, tx, err := readNetBytes(); err == nil {
+	// /proc/1/net is the netns of the host's init: the host's interfaces
+	// rather than the agent container's overlay veths.
+	if rx, tx, err := readNetBytes(c.prefix+"/proc/1/net/dev", "/proc/net/dev"); err == nil {
 		hb.NetRxBytes = rx
 		hb.NetTxBytes = tx
 	}
@@ -186,12 +194,28 @@ func readCPUTotals() (cpuTotals, error) {
 	return t, nil
 }
 
-// readNetBytes sums rx/tx bytes across all non-loopback interfaces from
-// /proc/net/dev.
-func readNetBytes() (rx uint64, tx uint64, err error) {
-	f, ferr := os.Open("/proc/net/dev")
-	if ferr != nil {
-		return 0, 0, ferr
+// statfsFirst statfs()es the first path that answers.
+func statfsFirst(st *syscall.Statfs_t, paths ...string) error {
+	var err error
+	for _, p := range paths {
+		if err = syscall.Statfs(p, st); err == nil {
+			return nil
+		}
+	}
+	return err
+}
+
+// readNetBytes sums rx/tx bytes across all non-loopback interfaces from the
+// first readable of paths (net/dev format).
+func readNetBytes(paths ...string) (rx uint64, tx uint64, err error) {
+	var f *os.File
+	for _, p := range paths {
+		if f, err = os.Open(p); err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return 0, 0, err
 	}
 	defer f.Close()
 

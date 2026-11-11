@@ -14,14 +14,14 @@ import (
 // Session represents a persisted browser session row from the `sessions`
 // table. Cookie value is the .ID (opaque random hex).
 type Session struct {
-	ID           string
-	UserID       int64
-	CreatedAt    time.Time
-	ExpiresAt    time.Time
-	LastSeen     time.Time
-	IP           string
-	UserAgent    string
-	CSRFToken    string
+	ID        string
+	UserID    int64
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	LastSeen  time.Time
+	IP        string
+	UserAgent string
+	CSRFToken string
 }
 
 // SessionStore persists sessions in SQLite. Single backing table = simple
@@ -30,12 +30,16 @@ type SessionStore struct {
 	db         *sql.DB
 	cookieName string
 	ttl        time.Duration
+	idle       time.Duration // 0 = no idle timeout
 	secure     bool
 }
 
-// NewSessionStore wires a SessionStore to a SQL connection.
-func NewSessionStore(db *sql.DB, cookieName string, ttl time.Duration, secure bool) *SessionStore {
-	return &SessionStore{db: db, cookieName: cookieName, ttl: ttl, secure: secure}
+// NewSessionStore wires a SessionStore to a SQL connection. A session ends
+// after ttl, or earlier once it has not been used for idle. Group changes in
+// the identity provider only take effect at the next login, so both bound how
+// long a removed user keeps access.
+func NewSessionStore(db *sql.DB, cookieName string, ttl, idle time.Duration, secure bool) *SessionStore {
+	return &SessionStore{db: db, cookieName: cookieName, ttl: ttl, idle: idle, secure: secure}
 }
 
 // Create persists a new session for the given user, sets the cookie on w,
@@ -57,14 +61,14 @@ func (s *SessionStore) Create(
 
 	now := time.Now()
 	sess := &Session{
-		ID:           id,
-		UserID:       userID,
-		CreatedAt:    now,
-		ExpiresAt:    now.Add(s.ttl),
-		LastSeen:     now,
-		IP:           clientIP(r),
-		UserAgent:    truncate(r.Header.Get("User-Agent"), 255),
-		CSRFToken:    csrf,
+		ID:        id,
+		UserID:    userID,
+		CreatedAt: now,
+		ExpiresAt: now.Add(s.ttl),
+		LastSeen:  now,
+		IP:        clientIP(r),
+		UserAgent: truncate(r.Header.Get("User-Agent"), 255),
+		CSRFToken: csrf,
 	}
 
 	_, err = s.db.ExecContext(ctx, `
@@ -128,7 +132,7 @@ func (s *SessionStore) Get(ctx context.Context, r *http.Request) (*Session, erro
 	sess.ExpiresAt = time.Unix(expiresAt, 0)
 	sess.LastSeen = time.Unix(lastSeen, 0)
 
-	if time.Now().After(sess.ExpiresAt) {
+	if time.Now().After(sess.ExpiresAt) || s.idleExpired(sess.LastSeen, time.Now()) {
 		// Expired — clean up + report no-session.
 		_, _ = s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, sess.ID)
 		return nil, nil
@@ -161,11 +165,20 @@ func (s *SessionStore) Destroy(ctx context.Context, w http.ResponseWriter, r *ht
 	return nil
 }
 
-// PurgeExpired deletes rows past their expires_at. Call from a goroutine
-// every few minutes.
+func (s *SessionStore) idleExpired(lastSeen, now time.Time) bool {
+	return s.idle > 0 && now.Sub(lastSeen) > s.idle
+}
+
+// PurgeExpired deletes rows past their expires_at or idle timeout. Call from a
+// goroutine every few minutes.
 func (s *SessionStore) PurgeExpired(ctx context.Context) error {
+	now := time.Now()
+	idleCutoff := int64(0)
+	if s.idle > 0 {
+		idleCutoff = now.Add(-s.idle).Unix()
+	}
 	_, err := s.db.ExecContext(ctx,
-		`DELETE FROM sessions WHERE expires_at < ?`, time.Now().Unix())
+		`DELETE FROM sessions WHERE expires_at < ? OR last_seen < ?`, now.Unix(), idleCutoff)
 	return err
 }
 

@@ -68,3 +68,28 @@ func TestLogRetention(t *testing.T) {
 		t.Errorf("live after 7010 lines: %d, want 5000..6000", got)
 	}
 }
+
+// pendingPrn is keyed by container and grew by one entry per container the
+// node ever ran (Swarm alone makes a new one per task).
+func TestOrphanPruneForgetsPruneCounters(t *testing.T) {
+	ctx := context.Background()
+	d := analyticsDB(t)
+	if _, err := d.Exec(`INSERT INTO nodes (id, hostname, first_seen, last_seen) VALUES ('n1', 'n1', 0, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	newContainerStore(d).Apply(ctx, "n1", &pb.ContainerReport{Containers: []*pb.ContainerSnapshot{{ContainerId: "live", State: "running"}}})
+	ls := newLogStore(d, 5000)
+	addLogs(t, ls, "n1", "live", 3, time.Now())
+	addLogs(t, ls, "n1", "removed", 3, time.Now())
+
+	ls.pruneOrphans(ctx, time.Now())
+
+	ls.mu.RLock()
+	defer ls.mu.RUnlock()
+	if _, ok := ls.pendingPrn[subKey("n1", "removed")]; ok {
+		t.Error("counter of a removed container kept")
+	}
+	if ls.pendingPrn[subKey("n1", "live")] != 3 {
+		t.Errorf("counter of a live container = %d, want 3", ls.pendingPrn[subKey("n1", "live")])
+	}
+}

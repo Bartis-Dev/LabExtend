@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -19,10 +20,22 @@ type Event struct {
 
 // subscriber is one connected SSE client.
 type subscriber struct {
-	id     string
-	userID int64 // 0 == not-yet-authenticated (filtered out before sending)
+	id      string
+	userID  int64 // 0 == not-yet-authenticated (filtered out before sending)
 	isAdmin bool
-	ch     chan Event
+	ch      chan Event
+}
+
+// visible reports whether s may receive ev. The stream must not show anyone
+// more than the REST API would: backup plans and runs are admin-only there.
+func (s *subscriber) visible(ev Event) bool {
+	if s.userID == 0 {
+		return false
+	}
+	if strings.HasPrefix(ev.Topic, "backup.") {
+		return s.isAdmin
+	}
+	return true
 }
 
 // Hub fans events out to all subscribed SSE clients. One goroutine owns the
@@ -57,7 +70,6 @@ func (h *Hub) Publish(topic string, data any) {
 }
 
 // Run drives the hub until ctx is canceled.
-// TODO(phase 5): expand per-subscriber filtering (admin-only, own-actor-only).
 func (h *Hub) Run(ctx context.Context) {
 	subs := make(map[*subscriber]struct{})
 	heartbeat := time.NewTicker(20 * time.Second)
@@ -88,8 +100,9 @@ func (h *Hub) Run(ctx context.Context) {
 
 		case ev := <-h.broadcast:
 			for s := range subs {
-				// TODO(phase 5): apply per-subscriber filter (admin-only,
-				// user-scoped, node-scoped) before sending.
+				if !s.visible(ev) {
+					continue
+				}
 				select {
 				case s.ch <- ev:
 				default:
@@ -109,9 +122,10 @@ func (h *Hub) Run(ctx context.Context) {
 	}
 }
 
-// ServeHTTP upgrades the connection to an SSE stream.
-// TODO(phase 4): pull userID + isAdmin from authenticated session context.
-func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// serve upgrades the connection to an SSE stream for an authenticated user.
+// The role is taken once at connect; a demoted admin's open stream keeps it
+// until the browser reconnects.
+func (h *Hub) serve(w http.ResponseWriter, r *http.Request, userID int64, isAdmin bool) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -124,8 +138,10 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no") // disable nginx buffering
 
 	sub := &subscriber{
-		id: r.RemoteAddr,
-		ch: make(chan Event, 16),
+		id:      r.RemoteAddr,
+		userID:  userID,
+		isAdmin: isAdmin,
+		ch:      make(chan Event, 16),
 	}
 	h.register <- sub
 	defer func() { h.unregister <- sub }()

@@ -43,7 +43,7 @@ func NewHandler(cfg *config.Config) *Handler {
 	mon := newMonitor(cfg)
 	return &Handler{
 		cfg:       cfg,
-		host:      newHostCollector(),
+		host:      newHostCollector(hostPrefix(cfg)),
 		monitor:   mon,
 		cronctl:   newCronManager(hostPrefix(cfg)+"/etc/cron.d/bpm", cronShell(hostPrefix(cfg))),
 		userCache: make(map[uint32]userCacheEntry),

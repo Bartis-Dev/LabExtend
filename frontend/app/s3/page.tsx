@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, errText } from '@/lib/api';
 import { AuthShell } from '@/components/auth-shell';
 import { fmtBytes, fmtAbsTime } from '@/lib/format';
@@ -43,7 +43,11 @@ function S3() {
   const [prefix, setPrefix] = useState<string>('');
   const [objects, setObjects] = useState<S3Object[]>([]);
   const [objectsErr, setObjectsErr] = useState<string | null>(null);
+  const [next, setNext] = useState('');
   const [busy, setBusy] = useState(false);
+  // Bumped by every bucket/object request; a response whose number is no
+  // longer current belongs to an endpoint or folder the user already left.
+  const seq = useRef(0);
   const [testing, setTesting] = useState<string | null>(null);
   const slow = useDelayed(busy);
 
@@ -61,10 +65,13 @@ function S3() {
   useEffect(() => { load(); }, []);
 
   const loadBuckets = async (id: string, ep?: S3Endpoint) => {
-    setSelected(id); setBucket(''); setObjects([]); setPrefix(''); setBucketErr(null); setObjectsErr(null);
+    const my = ++seq.current;
+    setSelected(id); setBucket(''); setObjects([]); setNext(''); setPrefix(''); setBucketErr(null); setObjectsErr(null);
+    setBuckets([]);
     setBusy(true);
     try {
       const r = await api<{ buckets: string[] }>(`/api/s3/endpoints/${encodeURIComponent(id)}/buckets`);
+      if (my !== seq.current) return;
       const list = r.buckets ?? [];
       setBuckets(list);
       const target =
@@ -73,28 +80,37 @@ function S3() {
         : '';
       if (target) await loadObjects(target, '', id);
     } catch (e: unknown) {
+      if (my !== seq.current) return;
       setBuckets([]);
       setBucketErr(errText(e, 'The bucket list could not be loaded.'));
     } finally {
-      setBusy(false);
+      if (my === seq.current) setBusy(false);
     }
   };
 
-  const loadObjects = async (b: string, pref: string, sid?: string) => {
+  // loadObjects lists one folder; with `cont` it appends the next page.
+  const loadObjects = async (b: string, pref: string, sid?: string, cont?: string) => {
     const id = sid ?? selected;
     if (!id || !b) return;
+    const my = ++seq.current;
     setBucket(b); setPrefix(pref); setObjectsErr(null);
+    if (!cont) { setObjects([]); setNext(''); }
     setBusy(true);
     try {
-      const r = await api<{ objects: S3Object[] }>(
-        `/api/s3/endpoints/${encodeURIComponent(id)}/buckets/${encodeURIComponent(b)}/objects?prefix=${encodeURIComponent(pref)}`,
+      const r = await api<{ objects: S3Object[]; next?: string }>(
+        `/api/s3/endpoints/${encodeURIComponent(id)}/buckets/${encodeURIComponent(b)}/objects`,
+        { query: { prefix: pref, continuation: cont || undefined } },
       );
-      setObjects(r.objects ?? []);
+      if (my !== seq.current) return;
+      const page = r.objects ?? [];
+      setObjects((prev) => (cont ? prev.concat(page) : page));
+      setNext(r.next ?? '');
     } catch (e: unknown) {
-      setObjects([]);
-      setObjectsErr(errText(e, 'Could not list this bucket.'));
+      if (my !== seq.current) return;
+      if (!cont) setObjects([]);
+      setObjectsErr(errText(e, cont ? 'Could not load more objects.' : 'Could not list this bucket.'));
     } finally {
-      setBusy(false);
+      if (my === seq.current) setBusy(false);
     }
   };
 
@@ -140,7 +156,8 @@ function S3() {
     try {
       await api(`/api/s3/endpoints/${ep.id}`, { method: 'DELETE' });
       if (selected === ep.id) {
-        setSelected(''); setBuckets([]); setBucket(''); setObjects([]);
+        seq.current++;
+        setSelected(''); setBuckets([]); setBucket(''); setObjects([]); setNext(''); setBusy(false);
       }
       toast.success(`Endpoint ${ep.name} deleted.`);
       load();
@@ -313,7 +330,7 @@ function S3() {
                             )}
                           </td>
                           <td className="td font-mono text-2xs text-zinc-500">{o.is_folder ? '' : fmtBytes(o.size)}</td>
-                          <td className="td text-right text-2xs text-zinc-500">{o.last_modified ? fmtAbsTime(new Date(o.last_modified).getTime()) : ''}</td>
+                          <td className="td text-right text-2xs text-zinc-500">{!o.is_folder && o.last_modified && !o.last_modified.startsWith('0001-') ? fmtAbsTime(new Date(o.last_modified).getTime()) : ''}</td>
                         </tr>
                       );
                     })}
@@ -322,6 +339,13 @@ function S3() {
                     )}
                   </tbody>
                 </table>
+                {next && (
+                  <div className="flex justify-center border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
+                    <button onClick={() => loadObjects(bucket, prefix, undefined, next)} disabled={busy} className="btn-ghost btn-sm">
+                      {busy ? 'Loading…' : `Load more (${objects.length} shown)`}
+                    </button>
+                  </div>
+                )}
                 </div>
               ) : !bucketErr && (
                 <EmptyState className="min-h-[16rem] justify-center" title={busy ? 'Loading buckets' : 'Pick a bucket'}>

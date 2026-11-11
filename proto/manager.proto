@@ -293,6 +293,12 @@ message RunBackupResp {
   uint32 file_count     = 3;
   string sha256         = 4;
   int64  duration_ms    = 5;
+  // Every object the run uploaded. pgdump with several DSNs writes one
+  // object per source under a suffixed key, none of them at s3_key; s3_key
+  // then carries the first of them so a leader that predates this field
+  // still records an object that exists. Empty from older agents: the
+  // object is s3_key.
+  repeated string s3_keys = 6;
 }
 
 message CancelBackupReq  { string run_id = 1; }

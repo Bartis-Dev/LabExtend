@@ -55,6 +55,7 @@ func (h *Handler) runPgDump(
 	defer os.RemoveAll(tmpDir)
 
 	var totalBytes uint64
+	var keys []string
 	hasher := sha256.New()
 
 	uploader, err := s3.NewUploader(s3.UploaderConfig{
@@ -138,11 +139,16 @@ func (h *Handler) runPgDump(
 		}
 		_ = f.Close()
 		totalBytes += size
+		keys = append(keys, key)
 		slog.Info("pgdump: uploaded", "run_id", req.RunId, "key", key, "bytes", size)
 	}
 
+	// With several sources nothing lives at req.S3Key. Reporting it made
+	// retention delete a key that never existed, drop the row, and leave the
+	// real dumps in the bucket forever.
 	return &pb.RunBackupResp{
-		S3Key:         req.S3Key,
+		S3Key:         keys[0],
+		S3Keys:        keys,
 		BytesUploaded: totalBytes,
 		FileCount:     uint32(len(req.Sources)),
 		Sha256:        hex.EncodeToString(hasher.Sum(nil)),

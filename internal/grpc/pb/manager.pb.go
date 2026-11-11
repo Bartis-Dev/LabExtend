@@ -2634,6 +2634,12 @@ type RunBackupResp struct {
 	FileCount     uint32                 `protobuf:"varint,3,opt,name=file_count,json=fileCount,proto3" json:"file_count,omitempty"`
 	Sha256        string                 `protobuf:"bytes,4,opt,name=sha256,proto3" json:"sha256,omitempty"`
 	DurationMs    int64                  `protobuf:"varint,5,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	// Every object the run uploaded. pgdump with several DSNs writes one
+	// object per source under a suffixed key, none of them at s3_key; s3_key
+	// then carries the first of them so a leader that predates this field
+	// still records an object that exists. Empty from older agents: the
+	// object is s3_key.
+	S3Keys        []string `protobuf:"bytes,6,rep,name=s3_keys,json=s3Keys,proto3" json:"s3_keys,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2701,6 +2707,13 @@ func (x *RunBackupResp) GetDurationMs() int64 {
 		return x.DurationMs
 	}
 	return 0
+}
+
+func (x *RunBackupResp) GetS3Keys() []string {
+	if x != nil {
+		return x.S3Keys
+	}
+	return nil
 }
 
 type CancelBackupReq struct {
@@ -3223,7 +3236,7 @@ const file_manager_proto_rawDesc = "" +
 	"\vcompression\x18\v \x01(\tR\vcompression\x12\x14\n" +
 	"\x05level\x18\f \x01(\rR\x05level\x12\x16\n" +
 	"\x06engine\x18\r \x01(\tR\x06engine\x12%\n" +
-	"\x0everify_restore\x18\x0e \x01(\bR\rverifyRestore\"\xa5\x01\n" +
+	"\x0everify_restore\x18\x0e \x01(\bR\rverifyRestore\"\xbe\x01\n" +
 	"\rRunBackupResp\x12\x15\n" +
 	"\x06s3_key\x18\x01 \x01(\tR\x05s3Key\x12%\n" +
 	"\x0ebytes_uploaded\x18\x02 \x01(\x04R\rbytesUploaded\x12\x1d\n" +
@@ -3231,7 +3244,8 @@ const file_manager_proto_rawDesc = "" +
 	"file_count\x18\x03 \x01(\rR\tfileCount\x12\x16\n" +
 	"\x06sha256\x18\x04 \x01(\tR\x06sha256\x12\x1f\n" +
 	"\vduration_ms\x18\x05 \x01(\x03R\n" +
-	"durationMs\"(\n" +
+	"durationMs\x12\x17\n" +
+	"\as3_keys\x18\x06 \x03(\tR\x06s3Keys\"(\n" +
 	"\x0fCancelBackupReq\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\"\x12\n" +
 	"\x10CancelBackupResp\",\n" +

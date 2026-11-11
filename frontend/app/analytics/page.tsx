@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, errText } from '@/lib/api';
 import type { WebCount, WebHost, WebReport } from '@/lib/types';
 import { AuthShell } from '@/components/auth-shell';
@@ -67,17 +67,23 @@ function Analytics() {
     }
   }, []);
 
+  // Only the newest report request may write (or clear the spinner): a slow
+  // 365d answer must not land after the user switched to 24h.
+  const reportSeq = useRef(0);
   const loadReport = useCallback(async (h: string, r: Range) => {
     if (!h) return;
+    const my = ++reportSeq.current;
     setLoading(true);
     try {
       const rep = await api<WebReport>('/api/analytics/report', { query: { host: h, range: r } });
+      if (my !== reportSeq.current) return;
       setReport(rep);
       setError(null);
     } catch (e) {
+      if (my !== reportSeq.current) return;
       setError(errorText(e));
     } finally {
-      setLoading(false);
+      if (my === reportSeq.current) setLoading(false);
     }
   }, []);
 

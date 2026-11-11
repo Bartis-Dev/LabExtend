@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollText } from 'lucide-react';
 import { api, errText } from '@/lib/api';
 import { EmptyState, ErrorState, TableSkeleton } from '@/components/feedback';
@@ -25,19 +25,30 @@ function Audit() {
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const seq = useRef(0);
+
+  // Only the newest request may write: a slow answer for "nod" must not
+  // overwrite the one for "node_path".
   const load = async () => {
+    const my = ++seq.current;
     try {
       const q = new URLSearchParams({ limit: '200' });
       if (action) q.set('action', action);
-      setRows((await api<{ audit: AuditRow[] }>('/api/audit?' + q.toString())).audit ?? []);
+      const r = await api<{ audit: AuditRow[] }>('/api/audit?' + q.toString());
+      if (my !== seq.current) return;
+      setRows(r.audit ?? []);
       setErr(null);
     } catch (e) {
+      if (my !== seq.current) return;
       setErr(errText(e, 'Could not load the audit log.'));
     } finally {
-      setLoaded(true);
+      if (my === seq.current) setLoaded(true);
     }
   };
-  useEffect(() => { load(); }, [action]);
+  useEffect(() => {
+    const t = setTimeout(load, action ? 300 : 0);
+    return () => clearTimeout(t);
+  }, [action]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="page">

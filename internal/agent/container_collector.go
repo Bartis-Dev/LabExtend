@@ -89,6 +89,8 @@ func (c *containerCollector) sampleOnce(
 		}(i, s)
 	}
 	wg.Wait()
+	markSwarmLoops(summaries, built, time.Now())
+	c.forgetGone(summaryMap)
 	snaps := make([]*pb.ContainerSnapshot, 0, len(built))
 	for _, snap := range built {
 		if snap != nil {
@@ -118,22 +120,29 @@ func (c *containerCollector) sampleOnce(
 	c.pruneRestartLog()
 }
 
-// buildSnapshot inspects one container and grabs a stats snapshot. Returns
-// nil if the container disappeared between list and inspect (race).
+// buildSnapshot inspects one container and grabs a stats snapshot.
 // The inspect gets its own short deadline rather than the sample's, so a
 // container is never dropped only because the stats of others ate the budget.
 func (c *containerCollector) buildSnapshot(ctx, statsCtx context.Context, s containerSummary) *pb.ContainerSnapshot {
+	name := s.ID
+	if len(s.Names) > 0 {
+		name = strings.TrimPrefix(s.Names[0], "/")
+	}
+
 	ictx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	insp, err := c.docker.Inspect(ictx, s.ID)
 	if err != nil {
-		return nil
+		// Report what the list already told us. A container missing from the
+		// report is removed from container_state, and the orphan prune then
+		// deletes the logs of a container that is still running. One that
+		// really vanished is gone from the next list anyway.
+		slog.Debug("container collector: inspect failed, reporting list summary", "container", s.ID, "err", err)
+		return &pb.ContainerSnapshot{
+			ContainerId: s.ID, Name: name, Image: s.Image, State: s.State, Labels: s.Labels,
+		}
 	}
-
-	name := s.ID
-	if len(s.Names) > 0 {
-		name = strings.TrimPrefix(s.Names[0], "/")
-	} else if insp.Name != "" {
+	if len(s.Names) == 0 && insp.Name != "" {
 		name = strings.TrimPrefix(insp.Name, "/")
 	}
 
@@ -199,6 +208,75 @@ func (c *containerCollector) recordRestarts(id string, count int, now time.Time)
 	}
 	c.lastCount[id] = count
 	return countRecent(c.restartLog[id], now, 60*time.Second)
+}
+
+// forgetGone drops the restart history of containers no longer on the host.
+// Both maps are keyed by container id, and Swarm alone creates a new id for
+// every task, so they grew for the agent's whole life.
+func (c *containerCollector) forgetGone(present map[string]containerSummary) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for id := range c.lastCount {
+		if _, ok := present[id]; !ok {
+			delete(c.lastCount, id)
+		}
+	}
+	for id := range c.restartLog {
+		if _, ok := present[id]; !ok {
+			delete(c.restartLog, id)
+		}
+	}
+}
+
+const (
+	swarmServiceLabel = "com.docker.swarm.service.id"
+	// A Swarm crash loop shows up as task containers of one service that were
+	// created recently and are already dead. Swarm's default restart delay is
+	// 5s, so a real loop leaves many within the window.
+	swarmLoopWindow    = 5 * time.Minute
+	swarmLoopThreshold = 3
+)
+
+// markSwarmLoops flags the newest container of every Swarm service with at
+// least swarmLoopThreshold recently created task containers that have already
+// exited. Swarm replaces a failed task with a fresh container (RestartCount
+// 0), which the per-container counter never sees. snaps is index-aligned with
+// summaries and may hold nils.
+//
+// ponytail: counts exits regardless of exit code, so three redeploys of one
+// service within the window also trip it; check the task state via the
+// manager API if that turns out to be noisy.
+func markSwarmLoops(summaries []containerSummary, snaps []*pb.ContainerSnapshot, now time.Time) {
+	type group struct{ dead, newest int }
+	groups := map[string]*group{}
+	cutoff := now.Add(-swarmLoopWindow).Unix()
+	for i, s := range summaries {
+		svc := s.Labels[swarmServiceLabel]
+		if svc == "" {
+			continue
+		}
+		g := groups[svc]
+		if g == nil {
+			g = &group{newest: i}
+			groups[svc] = g
+		}
+		if (s.State == "exited" || s.State == "dead") && s.Created >= cutoff {
+			g.dead++
+		}
+		if s.Created > summaries[g.newest].Created {
+			g.newest = i
+		}
+	}
+	for _, g := range groups {
+		snap := snaps[g.newest]
+		if g.dead < swarmLoopThreshold || snap == nil {
+			continue
+		}
+		snap.CrashedLoop = true
+		if snap.RecentRestarts < uint32(g.dead) {
+			snap.RecentRestarts = uint32(g.dead)
+		}
+	}
 }
 
 // pruneRestartLog drops timestamps older than 5 min so the map doesn't grow

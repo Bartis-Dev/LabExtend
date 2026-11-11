@@ -219,8 +219,8 @@ func (d *OIDCDeps) Login(w http.ResponseWriter, r *http.Request) {
 		redirectWithError(w, r, "/login", oidcNotConfigured)
 		return
 	}
-	if d.Limiter != nil && !d.Limiter.allow(clientIPFromRequest(r)) {
-		redirectWithError(w, r, "/login", "Too many sign-in attempts. Try again in a few minutes.")
+	if d.Limiter != nil && d.Limiter.blocked(clientIPFromRequest(r)) {
+		redirectWithError(w, r, "/login", "Too many failed sign-in attempts. Try again in a few minutes.")
 		return
 	}
 	u, err := d.begin(r.Context(), w)
@@ -251,8 +251,12 @@ func (d *OIDCDeps) Callback(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true, Secure: d.SecureCookie, SameSite: http.SameSiteLaxMode,
 	})
 
+	limitKey := clientIPFromRequest(r)
 	fail := func(reason, msg string) {
-		slog.Warn("oidc: callback rejected", "reason", reason, "ip", clientIPFromRequest(r))
+		if d.Limiter != nil {
+			d.Limiter.fail(limitKey)
+		}
+		slog.Warn("oidc: callback rejected", "reason", reason, "ip", limitKey)
 		d.Audit.Log(r.Context(), r, "auth.oidc.failed", "oidc", d.Issuer, map[string]any{"reason": reason})
 		redirectWithError(w, r, "/login", msg)
 	}
@@ -261,9 +265,10 @@ func (d *OIDCDeps) Callback(w http.ResponseWriter, r *http.Request) {
 		fail("not configured", oidcNotConfigured)
 		return
 	}
-	limitKey := clientIPFromRequest(r)
-	if d.Limiter != nil && !d.Limiter.allow(limitKey) {
-		fail("rate limited", "Too many sign-in attempts. Try again in a few minutes.")
+	if d.Limiter != nil && d.Limiter.blocked(limitKey) {
+		slog.Warn("oidc: callback rejected", "reason", "rate limited", "ip", limitKey)
+		d.Audit.Log(r.Context(), r, "auth.oidc.failed", "oidc", d.Issuer, map[string]any{"reason": "rate limited"})
+		redirectWithError(w, r, "/login", "Too many failed sign-in attempts. Try again in a few minutes.")
 		return
 	}
 

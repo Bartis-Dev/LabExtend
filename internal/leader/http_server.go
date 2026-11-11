@@ -40,6 +40,7 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 		deps.DB,
 		cfg.SessionCookieName,
 		time.Duration(cfg.SessionTTLHours)*time.Hour,
+		time.Duration(cfg.SessionIdleHours)*time.Hour,
 		cfg.SessionSecureCookie,
 	)
 
@@ -58,6 +59,42 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 		}
 	}()
 
+	srv := &http.Server{
+		Addr:    cfg.HTTPAddr,
+		Handler: newRouter(ctx, cfg, deps, sessions),
+		// No WriteTimeout: it would cut the SSE streams (/api/events, log
+		// tails). ReadTimeout is safe for them: net/http lifts the read
+		// deadline once the request body is consumed.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	slog.Info("http: listening", "addr", cfg.HTTPAddr)
+
+	errs := make(chan error, 1)
+	go func() {
+		err := srv.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errs <- err
+		} else {
+			errs <- nil
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+		return nil
+	case err := <-errs:
+		return err
+	}
+}
+
+// newRouter wires every HTTP route. Split from startHTTPServer so tests can
+// check which group (public, authed, admin) a route ended up in.
+func newRouter(ctx context.Context, cfg *config.Config, deps *leaderDeps, sessions *auth.SessionStore) http.Handler {
 	authDeps := &AuthDeps{
 		DB: deps.DB, Sessions: sessions, Audit: deps.Audit,
 		ProviderName: cfg.OIDCName,
@@ -72,6 +109,7 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 		// Swarm labels come from the manager socket, which only the leader's
 		// own in-process agent can reach.
 		Swarm: newSwarmTopology(deps.Registry, cfg.AgentHostID),
+		Audit: deps.Audit,
 	}
 	filesDeps := &FilesDeps{DB: deps.DB, Registry: deps.Registry, Audit: deps.Audit}
 	cronDeps := &CronDeps{DB: deps.DB, Registry: deps.Registry, Audit: deps.Audit}
@@ -89,6 +127,8 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 
 	r := chi.NewRouter()
 	r.Use(realIP(cfg.TrustedProxies))
+	r.Use(securityHeaders(cfg.SessionSecureCookie))
+	r.Use(limitBody(maxBodyBytes))
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 	r.Use(timeoutExceptStreams(120 * time.Second))
@@ -97,12 +137,15 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
+	// Public, so it reports the status code only: no DB error text, no agent
+	// count.
 	r.Get("/readyz", func(w http.ResponseWriter, req *http.Request) {
 		if err := deps.DB.PingContext(req.Context()); err != nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "err": err.Error()})
+			slog.Warn("readyz: db ping failed", "err", err)
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "agents": len(deps.Registry.List())})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
 
 	r.Route("/api", func(api chi.Router) {
@@ -122,11 +165,13 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 			authed.Post("/auth/logout", authDeps.Logout)
 			authed.Get("/me", authDeps.Me)
 
-			authed.Get("/events", deps.Hub.ServeHTTP)
+			authed.Get("/events", func(w http.ResponseWriter, req *http.Request) {
+				sess, _ := req.Context().Value(authCtxKey{}).(*auth.Session)
+				deps.Hub.serve(w, req, sess.UserID, isAdminUser(req.Context(), deps.DB, sess.UserID))
+			})
 
 			// ── monitoring ────────────────────────────────────────────
 			authed.Get("/nodes", monDeps.ListNodes)
-			authed.Post("/nodes/cleanup", monDeps.CleanupNodes)
 			authed.Get("/nodes/{id}", monDeps.GetNode)
 			authed.Get("/nodes/{id}/history", monDeps.NodeHistory)
 			authed.Get("/nodes/{id}/samples", monDeps.NodeSamples)
@@ -145,11 +190,9 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 			authed.Post("/notifications/read-all", markNotificationsRead(deps.Events))
 			authed.Post("/notifications/{id}/read", markNotificationsRead(deps.Events))
 
+			// Listing stays open (URLs are masked); changing or firing a
+			// webhook decides where the leader sends data, so that is admin.
 			authed.Get("/webhooks", monDeps.ListWebhooks)
-			authed.Post("/webhooks", monDeps.CreateWebhook)
-			authed.Put("/webhooks/{id}", monDeps.UpdateWebhook)
-			authed.Delete("/webhooks/{id}", monDeps.DeleteWebhook)
-			authed.Post("/webhooks/{id}/test", monDeps.TestWebhook)
 
 			// ── admin only ────────────────────────────────────
 			// Files, cron, swarm services, S3 and backups all reach the host
@@ -159,6 +202,13 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 				admin.Use(requireAdmin(deps.DB))
 
 				admin.Get("/audit", auditDeps.List)
+
+				admin.Post("/nodes/cleanup", monDeps.CleanupNodes)
+
+				admin.Post("/webhooks", monDeps.CreateWebhook)
+				admin.Put("/webhooks/{id}", monDeps.UpdateWebhook)
+				admin.Delete("/webhooks/{id}", monDeps.DeleteWebhook)
+				admin.Post("/webhooks/{id}/test", monDeps.TestWebhook)
 				admin.Get("/settings", settingsDeps.Get)
 				admin.Put("/settings", settingsDeps.Update)
 
@@ -205,33 +255,7 @@ func startHTTPServer(ctx context.Context, cfg *config.Config, deps *leaderDeps) 
 	})
 
 	r.Handle("/*", frontend.Handler())
-
-	srv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           r,
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	slog.Info("http: listening", "addr", cfg.HTTPAddr)
-
-	errs := make(chan error, 1)
-	go func() {
-		err := srv.ListenAndServe()
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errs <- err
-		} else {
-			errs <- nil
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
-		return nil
-	case err := <-errs:
-		return err
-	}
+	return r
 }
 
 // timeoutExceptStreams puts a deadline on ordinary API calls but leaves the
@@ -255,6 +279,44 @@ func timeoutExceptStreams(d time.Duration) func(http.Handler) http.Handler {
 func isStreamingPath(p string) bool {
 	return p == "/api/events" ||
 		strings.HasSuffix(p, "/logs/stream")
+}
+
+// maxBodyBytes caps request bodies. Every API body is a small JSON document;
+// without a cap one request could make the leader buffer gigabytes.
+const maxBodyBytes = 1 << 20
+
+func limitBody(n int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, n)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// securityHeaders sets the headers every response carries. The CSP here is the
+// strict one for API and other non-page responses; the SPA handler replaces it
+// on HTML pages with one that allows their own inline scripts by hash.
+//
+// HSTS is sent when the request arrived over TLS, either directly or at a
+// trusted proxy (realIP drops X-Forwarded-Proto from anyone else), or when the
+// deployment declares itself HTTPS-only via SESSION_SECURE_COOKIE.
+func securityHeaders(httpsOnly bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := w.Header()
+			h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+			h.Set("X-Frame-Options", "DENY")
+			h.Set("X-Content-Type-Options", "nosniff")
+			h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			if httpsOnly || r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+				h.Set("Strict-Transport-Security", "max-age=31536000")
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
