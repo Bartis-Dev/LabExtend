@@ -76,6 +76,18 @@ were deployed to production.
 - **Stack template:** the leader's port 8080 is no longer published (Traefik
   reaches it over the overlay), and the agent network is encrypted.
 
+### Changed (web analytics)
+
+- **Scanners with browser User-Agents no longer count as visitors.** A page
+  view now also needs `Sec-Fetch-Mode: navigate`, an `Accept-Language` header
+  and `GET`; everything else that looked like a page is a bot hit. Traefik
+  must keep the `Sec-Fetch-Mode` and `Accept-Language` headers in its access
+  log, otherwise no page view is counted and the leader logs a warning once an
+  hour. `BPM_ANALYTICS_REQUIRE_BROWSER_HEADERS=false` restores the old rules.
+- **Visitors behind Cloudflare are told apart.** When Traefik logs a
+  comma-separated `X-Forwarded-For` list as the client, the first address is
+  used.
+
 ### Fixed (backups and agents)
 
 - **Offline nodes now fail the backup run.** With scope "all" or a label, a

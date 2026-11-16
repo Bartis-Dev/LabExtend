@@ -94,6 +94,10 @@ type Config struct {
 	// starts with AnalyticsImagePrefix are read as Traefik JSON access logs.
 	AnalyticsImagePrefix   string
 	AnalyticsRetentionDays int
+	// Count page views only for requests with Sec-Fetch-Mode: navigate and an
+	// Accept-Language header. Traefik must keep both headers, or every page
+	// view is dropped.
+	AnalyticsRequireBrowserHeaders bool
 }
 
 // Load reads env vars, returning a populated Config or an error.
@@ -153,6 +157,8 @@ func Load() (*Config, error) {
 
 		AnalyticsImagePrefix:   stringEnv("BPM_ANALYTICS_IMAGE_PREFIX", "traefik"),
 		AnalyticsRetentionDays: intEnv("BPM_ANALYTICS_RETENTION_DAYS", 400),
+
+		AnalyticsRequireBrowserHeaders: boolEnv("BPM_ANALYTICS_REQUIRE_BROWSER_HEADERS", true),
 	}
 
 	if c.AgentHostID == "" {

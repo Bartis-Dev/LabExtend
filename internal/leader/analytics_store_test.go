@@ -33,8 +33,11 @@ const (
 
 type hit struct {
 	ip, host, method, path, ua, ref, router string
-	status                                  int
-	at                                      time.Time
+	// mode and lang default to a real browser navigation; "-" omits the
+	// header, the way Traefik drops headers the client did not send.
+	mode, lang string
+	status     int
+	at         time.Time
 }
 
 func (h hit) line() string {
@@ -54,6 +57,18 @@ func (h hit) line() string {
 	if h.ref != "" {
 		ref = fmt.Sprintf(`,"request_Referer":%q`, h.ref)
 	}
+	if h.mode == "" {
+		h.mode = "navigate"
+	}
+	if h.mode != "-" {
+		ref += fmt.Sprintf(`,"request_Sec-Fetch-Mode":%q`, h.mode)
+	}
+	if h.lang == "" {
+		h.lang = "de-DE,de;q=0.9,en;q=0.8"
+	}
+	if h.lang != "-" {
+		ref += fmt.Sprintf(`,"request_Accept-Language":%q`, h.lang)
+	}
 	return fmt.Sprintf(`{"ClientHost":%q,"DownstreamStatus":%d,"RequestHost":%q,"RequestMethod":%q,"RequestPath":%q,"StartUTC":%q,"RouterName":%q,"request_User-Agent":%q%s}`,
 		h.ip, h.status, h.host, h.method, h.path, h.at.UTC().Format(time.RFC3339Nano), h.router, h.ua, ref)
 }
@@ -68,7 +83,7 @@ func testAnalytics(t *testing.T, d *sql.DB, now *time.Time) *webAnalytics {
 		}
 		return "nginx:1.27"
 	}
-	a := newWebAnalytics(d, images, "traefik", 400)
+	a := newWebAnalytics(d, images, "traefik", 400, true)
 	a.now = func() time.Time { return *now }
 	if err := a.Load(context.Background()); err != nil {
 		t.Fatal(err)
@@ -404,5 +419,87 @@ func TestWebAnalyticsConcurrentIngestAndFlush(t *testing.T) {
 	got := readDaily(t, d, "example.com", "2026-11-05")
 	if want := (dailyRow{requests: workers * perWorker, pageviews: workers * perWorker, visitors: 1}); got != want {
 		t.Fatalf("daily = %+v, want %+v", got, want)
+	}
+}
+
+// Scanners send browser User-Agents but no Sec-Fetch-Mode / Accept-Language;
+// they must land in bot hits, never in page views or visitors.
+func TestWebAnalyticsRequireBrowserHeaders(t *testing.T) {
+	now := time.Date(2026, 11, 5, 10, 30, 0, 0, time.UTC)
+	at := now.Add(-time.Minute)
+	lines := []string{
+		hit{ip: "203.0.113.7", host: "example.com", path: "/", ua: testUA, at: at}.line(),
+		hit{ip: "203.0.113.7", host: "example.com", path: "/b", ua: testUA, mode: "NAVIGATE", at: at}.line(),          // case-insensitive
+		hit{ip: "198.51.100.2", host: "example.com", path: "/admin", ua: testUA, mode: "-", lang: "-", at: at}.line(), // scanner
+		hit{ip: "198.51.100.3", host: "example.com", path: "/", ua: testUA, lang: "-", at: at}.line(),                 // no language
+		hit{ip: "198.51.100.4", host: "example.com", path: "/", ua: testUA, mode: "cors", at: at}.line(),              // fetch(), not a navigation
+		hit{ip: "198.51.100.5", host: "example.com", path: "/", ua: testUA, lang: "  ", at: at}.line(),                // blank counts as absent
+		hit{ip: "198.51.100.6", host: "example.com", method: "HEAD", path: "/", ua: testUA, at: at}.line(),            // browsers navigate with GET
+		hit{ip: "198.51.100.7", host: "example.com", path: "/a.js", ua: testUA, mode: "-", at: at}.line(),             // asset: not a candidate
+	}
+	tests := []struct {
+		name    string
+		require bool
+		want    dailyRow
+	}{
+		{"required", true, dailyRow{requests: 8, pageviews: 2, bots: 5, visitors: 1}},
+		{"off keeps old behaviour", false, dailyRow{requests: 8, pageviews: 7, bots: 0, visitors: 6}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := analyticsDB(t)
+			n := now
+			a := testAnalytics(t, d, &n)
+			a.requireBrowserHeaders = tt.require
+			ingest(a, "tr", lines...)
+			mustFlush(t, a)
+			if got := readDaily(t, d, "example.com", "2026-11-05"); got != tt.want {
+				t.Fatalf("daily = %+v, want %+v", got, tt.want)
+			}
+			if tt.require {
+				if c := dimCount(t, d, "example.com", "2026-11-05", "path", "/admin"); c != 0 {
+					t.Errorf("scanner path counted %d times", c)
+				}
+			}
+			// Accept-Language is only checked for presence, never kept.
+			assertNoIPStored(t, d, "de-DE")
+		})
+	}
+}
+
+func TestWebAnalyticsMissingHeaderWarning(t *testing.T) {
+	d := analyticsDB(t)
+	now := time.Date(2026, 11, 5, 10, 30, 0, 0, time.UTC)
+	a := testAnalytics(t, d, &now)
+	var lines []string
+	for i := 0; i < webHeaderWarnMin; i++ {
+		lines = append(lines, hit{ip: "203.0.113.7", host: "example.com", path: "/", ua: testUA, mode: "-", lang: "-", at: now}.line())
+	}
+
+	ingest(a, "tr", lines...)
+	mustFlush(t, a)
+	if a.lastHeaderWarn != now {
+		t.Fatalf("no warning after %d candidates without Sec-Fetch-Mode", webHeaderWarnMin)
+	}
+	// Rate-limited: the next window within the hour stays quiet.
+	now = now.Add(30 * time.Minute)
+	ingest(a, "tr", lines...)
+	mustFlush(t, a)
+	if a.lastHeaderWarn == now {
+		t.Fatal("warned again within the hour")
+	}
+	now = now.Add(31 * time.Minute)
+	ingest(a, "tr", lines...)
+	mustFlush(t, a)
+	if a.lastHeaderWarn != now {
+		t.Fatal("no warning after the hour passed")
+	}
+
+	// One request carrying the header proves Traefik keeps it: no warning.
+	b := testAnalytics(t, analyticsDB(t), &now)
+	ingest(b, "tr", append(lines, hit{ip: "203.0.113.8", host: "example.com", path: "/", ua: testUA, at: now}.line())...)
+	mustFlush(t, b)
+	if !b.lastHeaderWarn.IsZero() {
+		t.Fatal("warned although Sec-Fetch-Mode was present")
 	}
 }

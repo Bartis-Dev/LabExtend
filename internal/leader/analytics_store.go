@@ -33,6 +33,11 @@ type webAnalytics struct {
 	retentionDays int
 	now           func() time.Time
 
+	// requireBrowserHeaders counts a page view only for a browser navigation
+	// (see isBrowserNavigation); other page candidates become bot hits.
+	requireBrowserHeaders bool
+	lastHeaderWarn        time.Time // guarded by flushMu
+
 	parseErrors atomic.Uint64
 
 	// flushMu serialises Flush (ticker vs. shutdown) and guards maintainedDay.
@@ -66,6 +71,10 @@ type webPending struct {
 	hourly map[webHourKey]*webCounts
 	dims   map[webDimKey]int64
 	hashes map[webHashKey]int64 // → first hour seen
+
+	// Page candidates in this window, and how many carried Sec-Fetch-Mode;
+	// all candidates without it means Traefik does not keep the header.
+	candidates, withFetchMode int
 }
 
 func newWebPending() *webPending {
@@ -83,9 +92,11 @@ const (
 	webTodayDimCap   = 1000 // safety bound for the running day
 	webHourlyKeep    = 48 * time.Hour
 	webMaxPathLength = 512
+	webHeaderWarnMin = 20 // page candidates per flush before a missing header is suspicious
+	webHeaderWarnGap = time.Hour
 )
 
-func newWebAnalytics(db *sql.DB, imageOf func(nodeID, containerID string) string, imagePrefix string, retentionDays int) *webAnalytics {
+func newWebAnalytics(db *sql.DB, imageOf func(nodeID, containerID string) string, imagePrefix string, retentionDays int, requireBrowserHeaders bool) *webAnalytics {
 	if retentionDays <= 0 {
 		retentionDays = 400
 	}
@@ -96,6 +107,8 @@ func newWebAnalytics(db *sql.DB, imageOf func(nodeID, containerID string) string
 		retentionDays: retentionDays,
 		now:           time.Now,
 		pend:          newWebPending(),
+
+		requireBrowserHeaders: requireBrowserHeaders,
 	}
 }
 
@@ -184,6 +197,17 @@ func (a *webAnalytics) record(line string) {
 	}
 	if !isPageView(r.Method, r.Status, r.Path) {
 		return
+	}
+	if a.requireBrowserHeaders {
+		p.candidates++
+		if r.FetchMode != "" {
+			p.withFetchMode++
+		}
+		if !isBrowserNavigation(r) {
+			dc.bots++
+			hc.bots++
+			return
+		}
 	}
 	dc.pageviews++
 	hc.pageviews++
@@ -274,6 +298,11 @@ func (a *webAnalytics) Flush(ctx context.Context) error {
 	a.saltDirty = false
 	a.mu.Unlock()
 
+	if p.candidates >= webHeaderWarnMin && p.withFetchMode == 0 && now.Sub(a.lastHeaderWarn) >= webHeaderWarnGap {
+		a.lastHeaderWarn = now
+		slog.Warn("web analytics: no page request carries Sec-Fetch-Mode, so none counts as a page view; keep the Sec-Fetch-Mode and Accept-Language headers in Traefik's access log or set BPM_ANALYTICS_REQUIRE_BROWSER_HEADERS=false",
+			"candidates", p.candidates)
+	}
 	if err := a.writePending(ctx, p, today, saltDay, salt, saltDirty); err != nil {
 		return err
 	}

@@ -55,7 +55,7 @@ func Run(ctx context.Context, cfg *config.Config) error {
 	bucketRetention := intEnv("BPM_METRIC_RETENTION_HOURS", 24)
 	sampleRetention := intEnv("BPM_SAMPLE_RETENTION_HOURS", 2)
 	logs := newLogStore(database, maxLogLines)
-	analytics := newWebAnalytics(database, containers.imageOf, cfg.AnalyticsImagePrefix, cfg.AnalyticsRetentionDays)
+	analytics := newWebAnalytics(database, containers.imageOf, cfg.AnalyticsImagePrefix, cfg.AnalyticsRetentionDays, cfg.AnalyticsRequireBrowserHeaders)
 	if err := analytics.Load(ctx); err != nil {
 		return fmt.Errorf("web analytics: %w", err)
 	}

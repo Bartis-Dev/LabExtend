@@ -23,6 +23,8 @@ type accessRecord struct {
 	UA         string
 	Referer    string
 	Router     string
+	FetchMode  string    // Sec-Fetch-Mode, "" when the client did not send it
+	HasLang    bool      // Accept-Language sent; the value itself is never kept
 	Start      time.Time // zero when absent or unparseable
 }
 
@@ -36,6 +38,8 @@ type traefikAccessLine struct {
 	StartUTC         string `json:"StartUTC"`
 	UserAgent        string `json:"request_User-Agent"`
 	Referer          string `json:"request_Referer"`
+	FetchMode        string `json:"request_Sec-Fetch-Mode"`
+	AcceptLanguage   string `json:"request_Accept-Language"`
 }
 
 var errNotJSON = errors.New("not a json object")
@@ -60,15 +64,28 @@ func parseAccessLine(line string) (accessRecord, bool, error) {
 		Method:     strings.ToUpper(l.RequestMethod),
 		Path:       l.RequestPath,
 		Status:     l.DownstreamStatus,
-		ClientHost: l.ClientHost,
+		ClientHost: clientIP(l.ClientHost),
 		UA:         l.UserAgent,
 		Referer:    l.Referer,
 		Router:     l.RouterName,
+		FetchMode:  strings.TrimSpace(l.FetchMode),
+		HasLang:    strings.TrimSpace(l.AcceptLanguage) != "",
 	}
 	if t, err := time.Parse(time.RFC3339Nano, l.StartUTC); err == nil {
 		r.Start = t.UTC()
 	}
 	return r, true, nil
+}
+
+// clientIP takes the first entry when Traefik trusts a proxy (Cloudflare) and
+// logs the whole X-Forwarded-For list; anything unexpected is kept as is.
+func clientIP(h string) string {
+	first, _, _ := strings.Cut(h, ",")
+	first = strings.TrimSpace(first)
+	if net.ParseIP(first) != nil {
+		return first
+	}
+	return h
 }
 
 func normalizeHost(h string) string {
@@ -118,6 +135,13 @@ func isPageView(method string, status int, p string) bool {
 		return true
 	}
 	return false
+}
+
+// isBrowserNavigation: real browsers send Sec-Fetch-Mode: navigate and an
+// Accept-Language on every page load (GET); scanners faking a browser
+// User-Agent almost never do.
+func isBrowserNavigation(r accessRecord) bool {
+	return r.Method == "GET" && strings.EqualFold(r.FetchMode, "navigate") && r.HasLang
 }
 
 // botMarkers are lower-case substrings. "bot" alone already covers Googlebot,

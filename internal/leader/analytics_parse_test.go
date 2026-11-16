@@ -6,7 +6,7 @@ import (
 )
 
 func TestParseAccessLine(t *testing.T) {
-	full := `{"ClientHost":"203.0.113.7","DownstreamStatus":200,"RequestHost":"Example.COM:443","RequestMethod":"GET","RequestPath":"/blog/post","RequestProtocol":"HTTP/2.0","Duration":1234,"StartUTC":"2026-11-05T10:15:30.123456789Z","RouterName":"site@docker","ServiceName":"site@docker","entryPointName":"websecure","request_User-Agent":"Mozilla/5.0","request_Referer":"https://news.ycombinator.com/item?id=1"}`
+	full := `{"ClientHost":"203.0.113.7","DownstreamStatus":200,"RequestHost":"Example.COM:443","RequestMethod":"GET","RequestPath":"/blog/post","RequestProtocol":"HTTP/2.0","Duration":1234,"StartUTC":"2026-11-05T10:15:30.123456789Z","RouterName":"site@docker","ServiceName":"site@docker","entryPointName":"websecure","request_User-Agent":"Mozilla/5.0","request_Referer":"https://news.ycombinator.com/item?id=1","request_Sec-Fetch-Mode":"navigate","request_Accept-Language":"en-US,en;q=0.9"}`
 	tests := []struct {
 		name    string
 		line    string
@@ -28,6 +28,9 @@ func TestParseAccessLine(t *testing.T) {
 				}
 				if r.Referer != "https://news.ycombinator.com/item?id=1" {
 					t.Errorf("referer = %q", r.Referer)
+				}
+				if r.FetchMode != "navigate" || !r.HasLang {
+					t.Errorf("fetch mode/lang = %q %v, want navigate true", r.FetchMode, r.HasLang)
 				}
 				want := time.Date(2026, 11, 5, 10, 15, 30, 123456789, time.UTC)
 				if !r.Start.Equal(want) {
@@ -53,6 +56,9 @@ func TestParseAccessLine(t *testing.T) {
 				if r.Referer != "" {
 					t.Errorf("referer = %q, want empty", r.Referer)
 				}
+				if r.FetchMode != "" || r.HasLang {
+					t.Errorf("fetch mode/lang = %q %v, want absent", r.FetchMode, r.HasLang)
+				}
 			},
 		},
 	}
@@ -69,6 +75,25 @@ func TestParseAccessLine(t *testing.T) {
 				tt.check(t, r)
 			}
 		})
+	}
+}
+
+func TestClientIP(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"203.0.113.7", "203.0.113.7"},
+		{"203.0.113.7, 172.70.1.2", "203.0.113.7"},
+		{" 2001:db8::1 ,10.0.0.1", "2001:db8::1"},
+		{"unknown, 10.0.0.1", "unknown, 10.0.0.1"}, // first entry not an IP: keep as is
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := clientIP(tt.in); got != tt.want {
+			t.Errorf("clientIP(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+	r, _, _ := parseAccessLine(`{"ClientHost":"203.0.113.7, 172.70.1.2","RequestHost":"a.com"}`)
+	if r.ClientHost != "203.0.113.7" {
+		t.Errorf("parsed ClientHost = %q, want 203.0.113.7", r.ClientHost)
 	}
 }
 

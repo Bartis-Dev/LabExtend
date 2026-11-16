@@ -249,6 +249,7 @@ commented template for local development. Role: **L** = leader, **A** = agent
 | `BPM_PORTAINER_SERVICE` | L | `portainer_agent` | Swarm service the "Restart Portainer" button force-updates. |
 | `BPM_ANALYTICS_IMAGE_PREFIX` | L | `traefik` | Web Analytics reads the logs of containers whose image name (after the last `/`) starts with this. |
 | `BPM_ANALYTICS_RETENTION_DAYS` | L | `400` | Days of daily analytics totals and breakdowns to keep. |
+| `BPM_ANALYTICS_REQUIRE_BROWSER_HEADERS` | L | `true` | Count a page view only for a `GET` with `Sec-Fetch-Mode: navigate` and an `Accept-Language`. Traefik must keep both headers (see [Web Analytics](#web-analytics)), or every page view is dropped. |
 | `BPM_ALLOW_EXEC` | L+A | `false` | Read but currently without effect: the generic exec command is always refused. |
 
 **Retention**
@@ -340,8 +341,8 @@ JSON access log. Nothing is added to the websites.
 
 **Source.** Log lines from containers whose image name (after the last `/`)
 starts with `BPM_ANALYTICS_IMAGE_PREFIX` are parsed as access records. Traefik
-must log access as JSON to stdout and keep the `User-Agent` and `Referer`
-headers:
+must log access as JSON to stdout and keep the `User-Agent`, `Referer`,
+`Sec-Fetch-Mode` and `Accept-Language` headers:
 
 ```yaml
 command:
@@ -349,7 +350,17 @@ command:
   - --accesslog.format=json
   - --accesslog.fields.headers.names.User-Agent=keep
   - --accesslog.fields.headers.names.Referer=keep
+  - --accesslog.fields.headers.names.Sec-Fetch-Mode=keep
+  - --accesslog.fields.headers.names.Accept-Language=keep
 ```
+
+With `BPM_ANALYTICS_REQUIRE_BROWSER_HEADERS=true` (the default) a page view
+must also be a browser navigation: `GET`, `Sec-Fetch-Mode: navigate` and any
+`Accept-Language`. Scanners that fake a browser User-Agent rarely send these
+and are counted as bot hits instead. **If Traefik does not keep both headers,
+every page view is dropped.** The leader then logs a warning at most once an
+hour (20 or more page candidates in a 30 s window, none with
+`Sec-Fetch-Mode`). Set the variable to `false` for the old rules.
 
 Traefik's own log lines, non-JSON lines, requests no router matched and
 requests answered by an `@internal` router are skipped. Unparseable lines are
@@ -360,8 +371,8 @@ counted, not logged; the count is returned by `GET /api/analytics/hosts`.
 | Number | Meaning |
 |---|---|
 | Requests | every routed request, including assets and bots |
-| Page views | `GET`/`HEAD`, status 200-399, a path without a file extension (or `.html`), not under `/_next`, `/api`, `/static`, `/assets`, `/favicon`, `/robots.txt`, `/sitemap`, `/.well-known`, `/icon`, `/apple-icon`, `/opengraph-image` |
-| Bot hits | an empty User-Agent or one naming a crawler, monitor, preview fetcher or HTTP library; never in page views or visitors |
+| Page views | `GET`/`HEAD` (only `GET` with the browser-header rule), status 200-399, a path without a file extension (or `.html`), not under `/_next`, `/api`, `/static`, `/assets`, `/favicon`, `/robots.txt`, `/sitemap`, `/.well-known`, `/icon`, `/apple-icon`, `/opengraph-image` |
+| Bot hits | an empty User-Agent or one naming a crawler, monitor, preview fetcher or HTTP library, or (browser-header rule on) a page request that is not a browser navigation; never in page views or visitors |
 | Visitors | distinct visitors per UTC day; over several days the sum of the daily counts |
 
 Breakdowns per host and day: top pages, referrer domains (external only,
@@ -372,7 +383,8 @@ each capped at the top 50 once the day is over.
 `sha256(day_salt || ClientHost || 0x00 || User-Agent)` with 32 random bytes of
 salt per UTC day. On the first flush of a new day the previous day's salt and
 hashes are deleted and only the count stays, so a person cannot be recognised
-across days, not even with the database.
+across days, not even with the database. `Accept-Language` is only checked for
+presence; its value is never stored.
 
 **Storage.** Counts are aggregated in memory and written every 30 seconds.
 Daily data is kept `BPM_ANALYTICS_RETENTION_DAYS` days, hourly totals 48 hours.
@@ -380,7 +392,8 @@ Daily data is kept `BPM_ANALYTICS_RETENTION_DAYS` days, hourly totals 48 hours.
 **Limits.** An agent ships at most 200 log lines per second per container, so a
 busier Traefik is undercounted. `ClientHost` is the address Traefik sees;
 behind a CDN or another proxy, set Traefik's `forwardedHeaders.trustedIPs` or
-visitors are undercounted.
+visitors are undercounted. When `ClientHost` is a comma-separated
+`X-Forwarded-For` list, the first entry is used if it is a valid IP.
 
 ## Security notes
 
