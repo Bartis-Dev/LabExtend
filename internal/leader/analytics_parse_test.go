@@ -182,6 +182,7 @@ func TestIsBot(t *testing.T) {
 		{"Mozilla/5.0 (compatible; Discordbot/2.0)", true},
 		{"TelegramBot (like TwitterBot)", true},
 		{"WhatsApp/2.23", true},
+		{"MerchantSecurityScanner/1.0 (+https://stri.pe/go/merchant-security-scanner)", true},
 		{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36", false},
 		{"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1", false},
 	}

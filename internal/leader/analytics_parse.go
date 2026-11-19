@@ -151,6 +151,7 @@ var botMarkers = []string{
 	"java/", "okhttp", "headless", "lighthouse", "monitor", "uptime", "preview",
 	"facebookexternalhit", "telegram", "whatsapp", "scrapy", "httpclient",
 	"axios", "node-fetch", "libwww", "pingdom", "phantomjs", "feedfetcher",
+	"scanner",
 }
 
 func isBot(ua string) bool {

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/bits"
 	"sort"
 	"strings"
 	"sync"
@@ -38,6 +39,10 @@ type webAnalytics struct {
 	requireBrowserHeaders bool
 	lastHeaderWarn        time.Time // guarded by flushMu
 
+	// maxViews: more page views than this from one visitor on one UTC day
+	// make that visitor a bot for the day.
+	maxViews int
+
 	parseErrors atomic.Uint64
 
 	// flushMu serialises Flush (ticker vs. shutdown) and guards maintainedDay.
@@ -48,6 +53,7 @@ type webAnalytics struct {
 	salt      []byte
 	saltDirty bool
 	pend      *webPending
+	visitors  map[webHashKey]*webVisitor // today's, see webVisitor
 
 	// maintainedDay is the UTC day whose rollover work (deleting old salts and
 	// hashes, capping closed days, retention) has already run.
@@ -66,11 +72,73 @@ type webHashKey struct {
 }
 type webCounts struct{ requests, pageviews, bots int64 }
 
+// webVisitor is one visitor hash's state for the running UTC day. It holds
+// every page view the visitor was counted for, so a later bot verdict can take
+// them all back out of the totals, the hourly curve and the breakdowns.
+//
+// ponytail: at most webMaxTrackedVisitors visitors per day, each holding at
+// most maxViews+1 views of up to ~600 bytes (512-byte path), so ~300 MB in the
+// worst case at the default cap, a few KB per visitor in practice. Visitors
+// past the bound are counted as before but never checked; intern paths or
+// keep per-path counts if that ever matters.
+type webVisitor struct {
+	bot   bool
+	views []webView // nil once bot
+
+	last       int64  // unix seconds of the latest navigation
+	visitStart int64  // first navigation after a pause > webVisitGap
+	bursts     int    // page loads > webBurstGap apart in the current visit
+	visitHours uint32 // bit h: a visit started in UTC hour h
+}
+
+type webView struct {
+	at        int64
+	path, ref string // as counted in the path and referrer breakdowns
+}
+
+// observe records one counted page view and reports whether the visitor is
+// now a bot for the day:
+//   - more than maxViews page views on the day;
+//   - more than webMaxViewsPerHour page views within any 60 minutes;
+//   - one visit (no pause over webVisitGap) lasting webLongVisit with
+//     webLongVisitBursts or more separate page loads: a short-interval
+//     scheduler, however many instances interleave;
+//   - visits starting in webMaxVisitHours different hours of the day.
+//
+// People load 1 to 15 pages a day on these sites (client-side navigation is
+// no navigate request), in one or two short visits.
+func (v *webVisitor) observe(at int64, path, ref string, maxViews int) bool {
+	v.views = append(v.views, webView{at, path, ref})
+	switch {
+	case len(v.views) == 1 || at-v.last > webVisitGap:
+		v.visitStart, v.bursts = at, 1
+		v.visitHours |= 1 << time.Unix(at, 0).UTC().Hour()
+	case at-v.last > webBurstGap:
+		v.bursts++
+	}
+	if at > v.last {
+		v.last = at
+	}
+	if len(v.views) > maxViews ||
+		bits.OnesCount32(v.visitHours) >= webMaxVisitHours ||
+		(at-v.visitStart >= webLongVisit && v.bursts >= webLongVisitBursts) {
+		return true
+	}
+	n := 0
+	for i := len(v.views) - 1; i >= 0 && v.views[i].at > at-3600; i-- {
+		n++
+	}
+	return n > webMaxViewsPerHour
+}
+
 type webPending struct {
 	daily  map[webDayKey]*webCounts
 	hourly map[webHourKey]*webCounts
 	dims   map[webDimKey]int64
 	hashes map[webHashKey]int64 // → first hour seen
+	// Visitors found to be bots in this window → an hour to insert the hash
+	// with, should it not be stored yet.
+	botHashes map[webHashKey]int64
 
 	// Page candidates in this window, and how many carried Sec-Fetch-Mode;
 	// all candidates without it means Traefik does not keep the header.
@@ -83,7 +151,27 @@ func newWebPending() *webPending {
 		hourly: map[webHourKey]*webCounts{},
 		dims:   map[webDimKey]int64{},
 		hashes: map[webHashKey]int64{},
+
+		botHashes: map[webHashKey]int64{},
 	}
+}
+
+func (p *webPending) dayCounts(host, day string) *webCounts {
+	c := p.daily[webDayKey{host, day}]
+	if c == nil {
+		c = &webCounts{}
+		p.daily[webDayKey{host, day}] = c
+	}
+	return c
+}
+
+func (p *webPending) hourCounts(host string, hour int64) *webCounts {
+	c := p.hourly[webHourKey{host, hour}]
+	if c == nil {
+		c = &webCounts{}
+		p.hourly[webHourKey{host, hour}] = c
+	}
+	return c
 }
 
 const (
@@ -94,11 +182,25 @@ const (
 	webMaxPathLength = 512
 	webHeaderWarnMin = 20 // page candidates per flush before a missing header is suspicious
 	webHeaderWarnGap = time.Hour
+
+	webMaxTrackedVisitors = 5000 // per UTC day, all hosts
+
+	// Rhythm rules, see webVisitor.observe. Tuned against one address loading
+	// 4 pages every 2 to 7 minutes around the clock.
+	webBurstGap        = 60      // seconds; closer page loads are one burst
+	webVisitGap        = 15 * 60 // seconds; a longer pause starts a new visit
+	webLongVisit       = 90 * 60 // seconds
+	webLongVisitBursts = 12
+	webMaxViewsPerHour = 40
+	webMaxVisitHours   = 6
 )
 
-func newWebAnalytics(db *sql.DB, imageOf func(nodeID, containerID string) string, imagePrefix string, retentionDays int, requireBrowserHeaders bool) *webAnalytics {
+func newWebAnalytics(db *sql.DB, imageOf func(nodeID, containerID string) string, imagePrefix string, retentionDays int, requireBrowserHeaders bool, maxViews int) *webAnalytics {
 	if retentionDays <= 0 {
 		retentionDays = 400
+	}
+	if maxViews <= 0 {
+		maxViews = 100
 	}
 	return &webAnalytics{
 		db:            db,
@@ -107,6 +209,8 @@ func newWebAnalytics(db *sql.DB, imageOf func(nodeID, containerID string) string
 		retentionDays: retentionDays,
 		now:           time.Now,
 		pend:          newWebPending(),
+		visitors:      map[webHashKey]*webVisitor{},
+		maxViews:      maxViews,
 
 		requireBrowserHeaders: requireBrowserHeaders,
 	}
@@ -124,8 +228,28 @@ func (a *webAnalytics) Load(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("load analytics salt: %w", err)
 	}
+	// Today's bot verdicts, so a restart does not count those visitors again.
+	rows, err := a.db.QueryContext(ctx, `SELECT host, hash FROM web_visitor_hashes WHERE day = ? AND bot = 1`, day)
+	if err != nil {
+		return fmt.Errorf("load analytics bot visitors: %w", err)
+	}
+	defer rows.Close()
+	visitors := map[webHashKey]*webVisitor{}
+	for rows.Next() {
+		k := webHashKey{day: day}
+		var h []byte
+		if err := rows.Scan(&k.host, &h); err != nil {
+			return fmt.Errorf("load analytics bot visitors: %w", err)
+		}
+		copy(k.hash[:], h)
+		visitors[k] = &webVisitor{bot: true}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("load analytics bot visitors: %w", err)
+	}
 	a.mu.Lock()
 	a.saltDay, a.salt, a.saltDirty = day, salt, false
+	a.visitors = visitors
 	a.mu.Unlock()
 	return nil
 }
@@ -175,16 +299,7 @@ func (a *webAnalytics) record(line string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	p := a.pend
-	dc := p.daily[webDayKey{r.Host, day}]
-	if dc == nil {
-		dc = &webCounts{}
-		p.daily[webDayKey{r.Host, day}] = dc
-	}
-	hc := p.hourly[webHourKey{r.Host, hour}]
-	if hc == nil {
-		hc = &webCounts{}
-		p.hourly[webHourKey{r.Host, hour}] = hc
-	}
+	dc, hc := p.dayCounts(r.Host, day), p.hourCounts(r.Host, hour)
 	dc.requests++
 	hc.requests++
 	if sc := statusClass(r.Status); sc != "" {
@@ -209,6 +324,26 @@ func (a *webAnalytics) record(line string) {
 			return
 		}
 	}
+
+	// Visitors only for today: yesterday's salt may already be gone, and
+	// minting a fresh one for a past day would defeat the rotation.
+	a.ensureSaltLocked(now)
+	today := day == a.saltDay
+	var k webHashKey
+	var v *webVisitor
+	if today {
+		k = webHashKey{r.Host, day, a.visitorHashLocked(r)}
+		v = a.visitors[k]
+		if v != nil && v.bot {
+			dc.bots++
+			hc.bots++
+			return
+		}
+		if v == nil && len(a.visitors) < webMaxTrackedVisitors {
+			v = &webVisitor{}
+			a.visitors[k] = v
+		}
+	}
 	dc.pageviews++
 	hc.pageviews++
 
@@ -220,19 +355,26 @@ func (a *webAnalytics) record(line string) {
 		pth = pth[:webMaxPathLength]
 	}
 	p.dims[webDimKey{r.Host, day, "path", pth}]++
-	if ref := referrerDomain(r.Referer, r.Host); ref != "" {
+	ref := referrerDomain(r.Referer, r.Host)
+	if ref != "" {
 		p.dims[webDimKey{r.Host, day, "referrer", ref}]++
 	}
 	browser, os := parseUA(r.UA)
 	p.dims[webDimKey{r.Host, day, "browser", browser}]++
 	p.dims[webDimKey{r.Host, day, "os", os}]++
 
-	// Visitors only for today: yesterday's salt may already be gone, and
-	// minting a fresh one for a past day would defeat the rotation.
-	a.ensureSaltLocked(now)
-	if day != a.saltDay {
+	if !today {
 		return
 	}
+	if first, seen := p.hashes[k]; !seen || hour < first {
+		p.hashes[k] = hour
+	}
+	if v != nil && v.observe(t.Unix(), pth, ref, a.maxViews) {
+		a.demoteLocked(k, v, browser, os)
+	}
+}
+
+func (a *webAnalytics) visitorHashLocked(r accessRecord) [sha256.Size]byte {
 	h := sha256.New()
 	h.Write(a.salt)
 	h.Write([]byte(r.ClientHost))
@@ -240,10 +382,33 @@ func (a *webAnalytics) record(line string) {
 	h.Write([]byte(r.UA))
 	var sum [sha256.Size]byte
 	copy(sum[:], h.Sum(nil))
-	k := webHashKey{r.Host, day, sum}
-	if first, seen := p.hashes[k]; !seen || hour < first {
-		p.hashes[k] = hour
+	return sum
+}
+
+// demoteLocked makes v a bot for the rest of the day and moves every page
+// view it was counted for to bot hits. Earlier windows may already be in
+// SQLite, so this works as negative deltas in the pending window; writePending
+// never lets a stored count go below 0. browser and os are the same for all of
+// v's views: the User-Agent is part of the hash.
+func (a *webAnalytics) demoteLocked(k webHashKey, v *webVisitor, browser, os string) {
+	p := a.pend
+	n := int64(len(v.views))
+	dc := p.dayCounts(k.host, k.day)
+	dc.pageviews -= n
+	dc.bots += n
+	for _, w := range v.views {
+		hc := p.hourCounts(k.host, w.at-w.at%3600)
+		hc.pageviews--
+		hc.bots++
+		p.dims[webDimKey{k.host, k.day, "path", w.path}]--
+		if w.ref != "" {
+			p.dims[webDimKey{k.host, k.day, "referrer", w.ref}]--
+		}
 	}
+	p.dims[webDimKey{k.host, k.day, "browser", browser}] -= n
+	p.dims[webDimKey{k.host, k.day, "os", os}] -= n
+	p.botHashes[k] = v.views[0].at - v.views[0].at%3600
+	*v = webVisitor{bot: true}
 }
 
 func (a *webAnalytics) ensureSaltLocked(now time.Time) {
@@ -256,9 +421,11 @@ func (a *webAnalytics) ensureSaltLocked(now time.Time) {
 		// crypto/rand does not fail on supported platforms; refuse to hash
 		// with a predictable salt if it ever does.
 		a.saltDay, a.salt = "", nil
+		a.visitors = map[webHashKey]*webVisitor{}
 		return
 	}
 	a.saltDay, a.salt, a.saltDirty = day, salt, true
+	a.visitors = map[webHashKey]*webVisitor{}
 }
 
 // Run flushes every interval until ctx is done.
@@ -316,7 +483,7 @@ func (a *webAnalytics) Flush(ctx context.Context) error {
 }
 
 func (a *webAnalytics) writePending(ctx context.Context, p *webPending, today, saltDay string, salt []byte, saltDirty bool) error {
-	empty := len(p.daily) == 0 && len(p.hashes) == 0 && !saltDirty
+	empty := len(p.daily) == 0 && len(p.hashes) == 0 && len(p.botHashes) == 0 && !saltDirty
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("analytics begin: %w", err)
@@ -328,34 +495,50 @@ func (a *webAnalytics) writePending(ctx context.Context, p *webPending, today, s
 			return fmt.Errorf("analytics salt: %w", err)
 		}
 	}
+	// pageviews can be negative: a visitor found to be a bot takes back what
+	// earlier windows already wrote.
 	for k, c := range p.daily {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO web_daily (host, day, requests, pageviews, bot_hits) VALUES (?, ?, ?, ?, ?)
+			INSERT INTO web_daily (host, day, requests, pageviews, bot_hits) VALUES (?, ?, ?, MAX(?, 0), ?)
 			ON CONFLICT(host, day) DO UPDATE SET
 				requests  = requests  + excluded.requests,
-				pageviews = pageviews + excluded.pageviews,
+				pageviews = MAX(0, pageviews + ?),
 				bot_hits  = bot_hits  + excluded.bot_hits`,
-			k.host, k.day, c.requests, c.pageviews, c.bots); err != nil {
+			k.host, k.day, c.requests, c.pageviews, c.bots, c.pageviews); err != nil {
 			return fmt.Errorf("analytics daily: %w", err)
 		}
 	}
 	for k, c := range p.hourly {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO web_hourly (host, hour, requests, pageviews, bot_hits) VALUES (?, ?, ?, ?, ?)
+			INSERT INTO web_hourly (host, hour, requests, pageviews, bot_hits) VALUES (?, ?, ?, MAX(?, 0), ?)
 			ON CONFLICT(host, hour) DO UPDATE SET
 				requests  = requests  + excluded.requests,
-				pageviews = pageviews + excluded.pageviews,
+				pageviews = MAX(0, pageviews + ?),
 				bot_hits  = bot_hits  + excluded.bot_hits`,
-			k.host, k.hour, c.requests, c.pageviews, c.bots); err != nil {
+			k.host, k.hour, c.requests, c.pageviews, c.bots, c.pageviews); err != nil {
 			return fmt.Errorf("analytics hourly: %w", err)
 		}
 	}
 	for k, n := range p.dims {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO web_dims (host, day, dim, value, count) VALUES (?, ?, ?, ?, ?)
-			ON CONFLICT(host, day, dim, value) DO UPDATE SET count = count + excluded.count`,
-			k.host, k.day, k.dim, k.value, n); err != nil {
-			return fmt.Errorf("analytics dims: %w", err)
+		switch {
+		case n > 0:
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO web_dims (host, day, dim, value, count) VALUES (?, ?, ?, ?, ?)
+				ON CONFLICT(host, day, dim, value) DO UPDATE SET count = count + excluded.count`,
+				k.host, k.day, k.dim, k.value, n); err != nil {
+				return fmt.Errorf("analytics dims: %w", err)
+			}
+		case n < 0:
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE web_dims SET count = count + ? WHERE host = ? AND day = ? AND dim = ? AND value = ?`,
+				n, k.host, k.day, k.dim, k.value); err != nil {
+				return fmt.Errorf("analytics dims removal: %w", err)
+			}
+			if _, err := tx.ExecContext(ctx, `
+				DELETE FROM web_dims WHERE host = ? AND day = ? AND dim = ? AND value = ? AND count <= 0`,
+				k.host, k.day, k.dim, k.value); err != nil {
+				return fmt.Errorf("analytics dims removal: %w", err)
+			}
 		}
 	}
 	days := map[webDayKey]bool{}
@@ -369,16 +552,28 @@ func (a *webAnalytics) writePending(ctx context.Context, p *webPending, today, s
 		days[webDayKey{k.host, k.day}] = true
 		hours[webHourKey{k.host, hour}] = true
 	}
+	for k, hour := range p.botHashes {
+		var first int64 // the hour the stored row counts the visitor in
+		if err := tx.QueryRowContext(ctx, `
+			INSERT INTO web_visitor_hashes (host, day, hash, hour, bot) VALUES (?, ?, ?, ?, 1)
+			ON CONFLICT(host, day, hash) DO UPDATE SET bot = 1
+			RETURNING hour`,
+			k.host, k.day, k.hash[:], hour).Scan(&first); err != nil {
+			return fmt.Errorf("analytics bot hashes: %w", err)
+		}
+		days[webDayKey{k.host, k.day}] = true
+		hours[webHourKey{k.host, first}] = true
+	}
 	for k := range days {
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE web_daily SET visitors = (SELECT COUNT(*) FROM web_visitor_hashes WHERE host = ? AND day = ?)
+			UPDATE web_daily SET visitors = (SELECT COUNT(*) FROM web_visitor_hashes WHERE host = ? AND day = ? AND bot = 0)
 			WHERE host = ? AND day = ?`, k.host, k.day, k.host, k.day); err != nil {
 			return fmt.Errorf("analytics daily visitors: %w", err)
 		}
 	}
 	for k := range hours {
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE web_hourly SET visitors = (SELECT COUNT(*) FROM web_visitor_hashes WHERE host = ? AND hour = ?)
+			UPDATE web_hourly SET visitors = (SELECT COUNT(*) FROM web_visitor_hashes WHERE host = ? AND hour = ? AND bot = 0)
 			WHERE host = ? AND hour = ?`, k.host, k.hour, k.host, k.hour); err != nil {
 			return fmt.Errorf("analytics hourly visitors: %w", err)
 		}

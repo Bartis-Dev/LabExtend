@@ -98,6 +98,9 @@ type Config struct {
 	// Accept-Language header. Traefik must keep both headers, or every page
 	// view is dropped.
 	AnalyticsRequireBrowserHeaders bool
+	// A visitor with more page views than this on one UTC day is a bot for
+	// that day.
+	AnalyticsMaxViewsPerVisitorDay int
 }
 
 // Load reads env vars, returning a populated Config or an error.
@@ -159,6 +162,7 @@ func Load() (*Config, error) {
 		AnalyticsRetentionDays: intEnv("BPM_ANALYTICS_RETENTION_DAYS", 400),
 
 		AnalyticsRequireBrowserHeaders: boolEnv("BPM_ANALYTICS_REQUIRE_BROWSER_HEADERS", true),
+		AnalyticsMaxViewsPerVisitorDay: intEnv("BPM_ANALYTICS_MAX_PAGEVIEWS_PER_VISITOR_DAY", 100),
 	}
 
 	if c.AgentHostID == "" {

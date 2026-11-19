@@ -83,7 +83,7 @@ func testAnalytics(t *testing.T, d *sql.DB, now *time.Time) *webAnalytics {
 		}
 		return "nginx:1.27"
 	}
-	a := newWebAnalytics(d, images, "traefik", 400, true)
+	a := newWebAnalytics(d, images, "traefik", 400, true, 100)
 	a.now = func() time.Time { return *now }
 	if err := a.Load(context.Background()); err != nil {
 		t.Fatal(err)
@@ -221,14 +221,16 @@ func TestWebAnalyticsDailySaltRotation(t *testing.T) {
 		hit{ip: "203.0.113.7", host: "example.com", path: "/", ua: testUA, at: now}.line(),
 		hit{ip: "198.51.100.2", host: "example.com", path: "/", ua: testUA, at: now}.line(),
 	}
-	for i := 0; i < 60; i++ { // more distinct paths than the closed-day cap
-		lines = append(lines, hit{ip: "203.0.113.7", host: "example.com", path: fmt.Sprintf("/p%d", i), ua: testUA, at: now}.line())
+	// More distinct paths than the closed-day cap, one visitor each: 60 views
+	// from one visitor within a minute would be a bot (> webMaxViewsPerHour).
+	for i := 0; i < 60; i++ {
+		lines = append(lines, hit{ip: fmt.Sprintf("192.0.2.%d", i+10), host: "example.com", path: fmt.Sprintf("/p%d", i), ua: testUA, at: now}.line())
 	}
 	ingest(a, "tr", lines...)
 	mustFlush(t, a)
 
-	if n := countRows(t, d, `SELECT COUNT(*) FROM web_visitor_hashes WHERE day=?`, day1); n != 2 {
-		t.Fatalf("day1 hashes = %d, want 2", n)
+	if n := countRows(t, d, `SELECT COUNT(*) FROM web_visitor_hashes WHERE day=?`, day1); n != 62 {
+		t.Fatalf("day1 hashes = %d, want 62", n)
 	}
 	var salt1 []byte
 	if err := d.QueryRow(`SELECT salt FROM web_visitor_salts WHERE day=?`, day1).Scan(&salt1); err != nil {
@@ -244,8 +246,8 @@ func TestWebAnalyticsDailySaltRotation(t *testing.T) {
 	b := testAnalytics(t, d, &now)
 	ingest(b, "tr", hit{ip: "203.0.113.7", host: "example.com", path: "/", ua: testUA, at: now}.line())
 	mustFlush(t, b)
-	if got := readDaily(t, d, "example.com", day1).visitors; got != 2 {
-		t.Fatalf("visitors after restart = %d, want 2", got)
+	if got := readDaily(t, d, "example.com", day1).visitors; got != 62 {
+		t.Fatalf("visitors after restart = %d, want 62", got)
 	}
 
 	// Next UTC day: the same visitor comes back.
@@ -259,8 +261,8 @@ func TestWebAnalyticsDailySaltRotation(t *testing.T) {
 	if n := countRows(t, d, `SELECT COUNT(*) FROM web_visitor_salts WHERE day<>?`, day2); n != 0 {
 		t.Errorf("salts other than today's = %d, want 0", n)
 	}
-	if got := readDaily(t, d, "example.com", day1).visitors; got != 2 {
-		t.Errorf("day1 visitor count must survive the hash deletion: got %d, want 2", got)
+	if got := readDaily(t, d, "example.com", day1).visitors; got != 62 {
+		t.Errorf("day1 visitor count must survive the hash deletion: got %d, want 62", got)
 	}
 	if got := readDaily(t, d, "example.com", day2).visitors; got != 1 {
 		t.Errorf("day2 visitors = %d, want 1", got)
@@ -395,14 +397,13 @@ func TestWebAnalyticsConcurrentIngestAndFlush(t *testing.T) {
 	d := analyticsDB(t)
 	now := time.Date(2026, 11, 5, 10, 30, 0, 0, time.UTC)
 	a := testAnalytics(t, d, &now)
-	line := hit{ip: "203.0.113.7", host: "example.com", path: "/", ua: testUA, at: now}.line()
-
+	// One visitor per hit: a single visitor with 1000 views would be a bot.
 	const workers, perWorker = 4, 250
 	done := make(chan struct{})
 	for w := 0; w < workers; w++ {
 		go func() {
 			for i := 0; i < perWorker; i++ {
-				ingest(a, "tr", line)
+				ingest(a, "tr", hit{ip: fmt.Sprintf("10.0.%d.%d", w, i), host: "example.com", path: "/", ua: testUA, at: now}.line())
 			}
 			done <- struct{}{}
 		}()
@@ -417,7 +418,7 @@ func TestWebAnalyticsConcurrentIngestAndFlush(t *testing.T) {
 	}
 	mustFlush(t, a)
 	got := readDaily(t, d, "example.com", "2026-11-05")
-	if want := (dailyRow{requests: workers * perWorker, pageviews: workers * perWorker, visitors: 1}); got != want {
+	if want := (dailyRow{requests: workers * perWorker, pageviews: workers * perWorker, visitors: workers * perWorker}); got != want {
 		t.Fatalf("daily = %+v, want %+v", got, want)
 	}
 }

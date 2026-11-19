@@ -78,6 +78,14 @@ were deployed to production.
 
 ### Changed (web analytics)
 
+- **Bots with real browser headers no longer count as visitors.** A visitor
+  is a bot for the rest of the UTC day once it has more than 100 page views
+  that day (`BPM_ANALYTICS_MAX_PAGEVIEWS_PER_VISITOR_DAY`), more than 40 in
+  one hour, one visit of 90 minutes with page loads every few minutes, or
+  visits in 6 different hours. Everything it was already counted for that day
+  moves to bot hits, and the verdict survives a leader restart.
+- **User-Agents containing "scanner"** (for example Stripe's
+  MerchantSecurityScanner) are bot hits.
 - **Scanners with browser User-Agents no longer count as visitors.** A page
   view now also needs `Sec-Fetch-Mode: navigate`, an `Accept-Language` header
   and `GET`; everything else that looked like a page is a bot hit. Traefik

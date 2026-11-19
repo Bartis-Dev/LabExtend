@@ -250,6 +250,7 @@ commented template for local development. Role: **L** = leader, **A** = agent
 | `BPM_ANALYTICS_IMAGE_PREFIX` | L | `traefik` | Web Analytics reads the logs of containers whose image name (after the last `/`) starts with this. |
 | `BPM_ANALYTICS_RETENTION_DAYS` | L | `400` | Days of daily analytics totals and breakdowns to keep. |
 | `BPM_ANALYTICS_REQUIRE_BROWSER_HEADERS` | L | `true` | Count a page view only for a `GET` with `Sec-Fetch-Mode: navigate` and an `Accept-Language`. Traefik must keep both headers (see [Web Analytics](#web-analytics)), or every page view is dropped. |
+| `BPM_ANALYTICS_MAX_PAGEVIEWS_PER_VISITOR_DAY` | L | `100` | A visitor with more page views than this on one UTC day is a bot for that day (see [Bot visitors](#web-analytics)). |
 | `BPM_ALLOW_EXEC` | L+A | `false` | Read but currently without effect: the generic exec command is always refused. |
 
 **Retention**
@@ -372,7 +373,7 @@ counted, not logged; the count is returned by `GET /api/analytics/hosts`.
 |---|---|
 | Requests | every routed request, including assets and bots |
 | Page views | `GET`/`HEAD` (only `GET` with the browser-header rule), status 200-399, a path without a file extension (or `.html`), not under `/_next`, `/api`, `/static`, `/assets`, `/favicon`, `/robots.txt`, `/sitemap`, `/.well-known`, `/icon`, `/apple-icon`, `/opengraph-image` |
-| Bot hits | an empty User-Agent or one naming a crawler, monitor, preview fetcher or HTTP library, or (browser-header rule on) a page request that is not a browser navigation; never in page views or visitors |
+| Bot hits | an empty User-Agent or one naming a crawler, scanner, monitor, preview fetcher or HTTP library, (browser-header rule on) a page request that is not a browser navigation, or every page view of a bot visitor (below); never in page views or visitors |
 | Visitors | distinct visitors per UTC day; over several days the sum of the daily counts |
 
 Breakdowns per host and day: top pages, referrer domains (external only,
@@ -386,6 +387,27 @@ hashes are deleted and only the count stays, so a person cannot be recognised
 across days, not even with the database. `Accept-Language` is only checked for
 presence; its value is never stored.
 
+**Bot visitors.** Some bots send real browser headers. A visitor (the same
+hash, so the same address and User-Agent on one host) is a bot for the rest of
+the UTC day as soon as one of these holds:
+
+| Rule | Catches |
+|---|---|
+| more than `BPM_ANALYTICS_MAX_PAGEVIEWS_PER_VISITOR_DAY` (100) page views that day | anything that keeps going all day |
+| more than 40 page views within 60 minutes | scrapers walking a site |
+| one visit (no pause over 15 minutes) lasting 90 minutes with 12 or more page loads more than 60 s apart | schedulers loading pages every few minutes, also several interleaved |
+| visits (after a pause over 15 minutes) starting in 6 different hours of the day | slower schedulers |
+
+People on these sites load 1 to 15 pages a day (client-side navigation is no
+page view), in one or two short visits, so 20 pages in one sitting or three
+visits a day stay well below every rule. Once a visitor is a bot, everything it
+was already counted for that day (page views, the visitor, the hourly curve,
+pages, referrers, browsers, operating systems) moves to bot hits, also when it
+was written earlier, and its later requests are bot hits only. The verdict is
+kept with the visitor hash, so a leader restart does not count it again; it is
+deleted with the hash when the day is over. At most 5000 visitors per day are
+checked; further visitors are counted without these rules.
+
 **Storage.** Counts are aggregated in memory and written every 30 seconds.
 Daily data is kept `BPM_ANALYTICS_RETENTION_DAYS` days, hourly totals 48 hours.
 
@@ -393,7 +415,10 @@ Daily data is kept `BPM_ANALYTICS_RETENTION_DAYS` days, hourly totals 48 hours.
 busier Traefik is undercounted. `ClientHost` is the address Traefik sees;
 behind a CDN or another proxy, set Traefik's `forwardedHeaders.trustedIPs` or
 visitors are undercounted. When `ClientHost` is a comma-separated
-`X-Forwarded-For` list, the first entry is used if it is a valid IP.
+`X-Forwarded-For` list, the first entry is used if it is a valid IP. After a
+leader restart the bot rules start over for visitors not yet found to be bots,
+and page views counted before the restart cannot be taken back. Page views of
+a past UTC day that arrive late are never checked.
 
 ## Security notes
 
